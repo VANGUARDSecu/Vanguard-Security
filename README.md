@@ -134,6 +134,13 @@ To ensure complete functionality (including live email dispatch, Supabase authen
    ```
 3. Ensure the backend is listening on `http://localhost:3000`.
 
+> **Company app launchpad (SCRUM-94/95):** In a **Company** workspace the "My Apps"
+> launchpad is sourced from the backend `GET /apps/my` endpoint (tenant-scoped,
+> per-employee assignments), not from local storage. Company admins assign apps
+> via `POST /apps/assign`. The backend must be running with
+> `SUPABASE_SERVICE_ROLE_KEY` configured for assignments to persist. **Individual**
+> accounts keep a purely client-side personal launchpad and make no `/apps` calls.
+
 ---
 
 ## Testing & Quality Assurance

@@ -99,9 +99,8 @@ export class DashboardComponent implements OnInit {
 
   ngOnInit(): void {
     this.dashboardService.initDashboardForCurrentUser();
-    if (!this.dashboardService.firstTimerCompleted() && this.dashboardService.viewMode() === 'user') {
-      this.dashboardService.openFirstTimerGuide();
-    }
+    // SCRUM-94: source company apps from the backend for company accounts.
+    this.dashboardService.loadCompanyApps();
   }
 
   // Authentication & Session

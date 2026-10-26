@@ -57,12 +57,14 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     expect(component.activeTotpAccounts().length).toBe(0);
   });
 
-  it('should generate valid 6-digit rolling codes when 2FA account is added', () => {
+  it('should generate valid 6-digit rolling codes when 2FA account is added', async () => {
     dashboardService.addTotpAccount({
       issuer: 'Google Cloud Platform',
       accountName: 'admin@vanguard.dev',
       secret: 'JBSWY3DPEHPK3PXP',
     });
+    // SCRUM-116: real RFC 6238 codes are computed asynchronously (HMAC-SHA1).
+    await dashboardService.refreshTotpCodes();
     fixture.detectChanges();
 
     const active = component.activeTotpAccounts();

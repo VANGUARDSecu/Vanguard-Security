@@ -40,6 +40,26 @@
     </div>
   </div>
 
+  <!-- SCRUM-114: Zero-knowledge unlock gate -->
+  @if (!isUnlocked()) {
+    <div class="vault-unlock-panel" style="max-width:480px;margin:24px auto;padding:20px;border:1px solid var(--line,#1b2733);border-radius:12px;background:var(--panel,#0f1821)">
+      <h2 style="margin:0 0 6px">🔒 Vault locked</h2>
+      <p style="font-size:13px;color:#9fb3c8;margin:0 0 12px">
+        Enter your Vanguard password to decrypt your credentials. The key is derived
+        on your device and never sent to the server (zero-knowledge).
+      </p>
+      <input type="password" [(ngModel)]="unlockPassword" (keydown.enter)="unlock()"
+             placeholder="Your Vanguard password"
+             style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line,#1b2733);background:#0b0f14;color:#e6f1ff" />
+      @if (unlockError()) { <p style="color:#ff6b6b;font-size:12px;margin:8px 0 0">{{ unlockError() }}</p> }
+      <button type="button" class="btn-cyber-primary" (click)="unlock()" [disabled]="isUnlocking()" style="margin-top:12px">
+        <span>{{ isUnlocking() ? 'Unlocking…' : 'Unlock vault' }}</span>
+      </button>
+    </div>
+  }
+
+  @if (isUnlocked()) {
+
   <!-- Metric Badges Row -->
   <div class="vault-metrics-grid">
     <div class="metric-card">
@@ -510,4 +530,5 @@
       </div>
     </div>
   </div>
+  }
 </div>

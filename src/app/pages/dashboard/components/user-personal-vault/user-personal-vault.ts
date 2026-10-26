@@ -19,6 +19,13 @@ export class UserPersonalVault {
   readonly vaultCategoryFilter = this.dashboardService.vaultCategoryFilter;
   readonly vaultSearchQuery = this.dashboardService.vaultSearchQuery;
 
+  // SCRUM-114: zero-knowledge unlock gate. The vault must be unlocked with the
+  // Vanguard login password before credentials can be viewed/added/synced.
+  readonly isUnlocked = this.dashboardService.isVaultUnlocked;
+  unlockPassword = '';
+  readonly unlockError = signal<string | null>(null);
+  readonly isUnlocking = signal<boolean>(false);
+
   // Modals & UI States
   readonly showAddModal = signal<boolean>(false);
   readonly showGeneratorModal = signal<boolean>(false);
@@ -66,6 +73,33 @@ export class UserPersonalVault {
 
   constructor() {
     this.regeneratePassword();
+  }
+
+  /** SCRUM-114: unlock the vault with the Vanguard login password. */
+  async unlock(): Promise<void> {
+    this.unlockError.set(null);
+    if (!this.unlockPassword) {
+      this.unlockError.set('Enter your Vanguard password to unlock the vault.');
+      return;
+    }
+    this.isUnlocking.set(true);
+    try {
+      await this.dashboardService.unlockVault(this.unlockPassword);
+      this.unlockPassword = '';
+    } catch (e: any) {
+      this.unlockError.set(
+        /VAULT_DECRYPT_FAILED/.test(e?.message || '')
+          ? 'Wrong password — could not decrypt your vault.'
+          : 'Could not unlock the vault.',
+      );
+    } finally {
+      this.isUnlocking.set(false);
+    }
+  }
+
+  /** SCRUM-114: lock the vault (clears decrypted items + key from memory). */
+  lock(): void {
+    this.dashboardService.lockVault();
   }
 
   setCategory(category: string): void {

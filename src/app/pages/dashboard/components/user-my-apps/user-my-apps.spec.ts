@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { UserMyApps } from './user-my-apps';
 import { DashboardService } from '../../services/dashboard.service';
@@ -334,6 +334,73 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
 
       expect(component.activeConnectedApps().length).toBe(1);
       expect(component.activeConnectedApps()[0].clientName).toBe('Acme Dummy Web');
+    });
+  });
+
+  describe('SCRUM-94 Backend-sourced company apps & account_type gating', () => {
+    it('resolves to empty company apps for an individual account (no backend call)', () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      // Current auth user is individual (set in outer beforeEach).
+      dashboardService.loadCompanyApps();
+      httpMock.expectNone('http://localhost:3000/apps/my');
+      expect(dashboardService.apps().length).toBe(0);
+    });
+
+    it('loads and maps company apps from GET /apps/my for a company account', () => {
+      authService.currentUser.set({
+        id: 'owner-9',
+        email: 'owner@acme.com',
+        firstName: 'Owner',
+        lastName: 'Admin',
+        role: 'admin',
+        accountType: 'company',
+        companyName: 'Acme',
+        user_metadata: { account_type: 'company', tenant_id: 'tenant-xyz' },
+      } as any);
+
+      const httpMock = TestBed.inject(HttpTestingController);
+      dashboardService.loadCompanyApps();
+
+      const req = httpMock.expectOne(
+        (r) => r.url === 'http://localhost:3000/apps/my' && r.params.get('userId') === 'owner-9',
+      );
+      req.flush([
+        {
+          app_id: 'github',
+          name: 'GitHub',
+          category: 'developer',
+          protocol: 'OIDC',
+          launch_url: 'https://github.com',
+          icon: '🐙',
+          assigned: true,
+        },
+      ]);
+
+      const apps = dashboardService.apps();
+      expect(apps.length).toBe(1);
+      expect(apps[0].id).toBe('github');
+      expect(apps[0].launchUrl).toBe('https://github.com');
+      expect(apps[0].protocol).toBe('OIDC');
+    });
+
+    it('assignCompanyApp posts to /apps/assign with the admin userId', () => {
+      authService.currentUser.set({
+        id: 'owner-9', email: 'owner@acme.com', role: 'admin',
+        accountType: 'company', companyName: 'Acme',
+        user_metadata: { account_type: 'company', tenant_id: 'tenant-xyz' },
+      } as any);
+
+      const httpMock = TestBed.inject(HttpTestingController);
+      dashboardService
+        .assignCompanyApp({ appId: 'slack', name: 'Slack' }, { all: true })
+        .subscribe();
+
+      const req = httpMock.expectOne(
+        (r) => r.url === 'http://localhost:3000/apps/assign' && r.params.get('userId') === 'owner-9',
+      );
+      expect(req.request.body.target).toBe('all');
+      expect(req.request.body.appId).toBe('slack');
+      req.flush({ assigned: 3 });
     });
   });
 });

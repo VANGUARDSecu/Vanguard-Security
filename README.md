@@ -140,6 +140,14 @@ To ensure complete functionality (including live email dispatch, Supabase authen
 > `SUPABASE_SERVICE_ROLE_KEY` configured for assignments to persist. **Individual**
 > accounts keep a purely client-side personal launchpad and make no `/apps` calls.
 
+> **Authenticated backend calls (SCRUM-123/131):** The backend derives the caller
+> identity from the Supabase access token, not a `userId` parameter. A global HTTP
+> interceptor (`authTokenInterceptor`) automatically attaches
+> `Authorization: Bearer <token>` to requests sent to `http://localhost:3000`.
+> The admin "Global Killswitch" now calls `POST /apps/killswitch` and reports the
+> **confirmed** per-tenant revocation result (revoked/failed counts and the
+> residual access-token window) rather than a simulated success.
+
 ---
 
 ## Testing & Quality Assurance

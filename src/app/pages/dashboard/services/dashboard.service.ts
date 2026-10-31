@@ -585,6 +585,15 @@ export class DashboardService {
   readonly sessionTimeoutMinutes = signal<number>(60);
   readonly showGlobalKillswitchModal = signal<boolean>(false);
   readonly globalKillswitchSuccess = signal<boolean>(false);
+  readonly globalKillswitchPending = signal<boolean>(false);
+  readonly globalKillswitchResult = signal<{
+    totalMembers: number;
+    revoked: number;
+    failed: number;
+    maxResidualAccessSeconds: number;
+    notCovered: string[];
+  } | null>(null);
+  readonly globalKillswitchError = signal<string | null>(null);
 
   // ==========================================
   // PHASE 4: SAML 2.0 & OIDC Web Federation State (Dynamic) & SCRUM-42 Approval Queue
@@ -1327,8 +1336,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.apps.set([]);
       return;
     }
+    // SCRUM-131: identity comes from the bearer token (auth interceptor); the
+    // backend ignores any userId param (SCRUM-123).
     this.http
-      .get<any[]>(`${this.apiBase}/apps/my`, { params: { userId } })
+      .get<any[]>(`${this.apiBase}/apps/my`)
       .subscribe({
         next: (rows) => {
           const mapped: SaaSApp[] = (rows || []).map((r) => ({
@@ -1360,8 +1371,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     app: Partial<SaaSApp> & { appId: string; name: string },
     target: { userId?: string; all?: boolean },
   ): Observable<{ assigned: number }> {
-    const u = this.authService.currentUser();
-    const userId = u?.id || (u?.user_metadata as any)?.['sub'];
+    // SCRUM-131: admin identity is derived from the bearer token server-side.
     return this.http.post<{ assigned: number }>(
       `${this.apiBase}/apps/assign`,
       {
@@ -1374,7 +1384,6 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         target: target.all ? 'all' : 'user',
         userId: target.all ? undefined : target.userId,
       },
-      { params: { userId: userId || '' } },
     );
   }
 
@@ -2839,15 +2848,52 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   executeGlobalKillswitch(): void {
-    this.globalKillswitchSuccess.set(true);
-    this.logAuditEvent('GLOBAL EMERGENCY KILLSWITCH EXECUTED', 'Directory Vault', 'Emergency Revocation', 'blocked', 'High');
-    setTimeout(() => {
-      this.showGlobalKillswitchModal.set(false);
-      this.globalKillswitchSuccess.set(false);
-      this.showAdminNotice(
-        'GLOBAL EMERGENCY KILLSWITCH EXECUTED: All active sessions, Web/LDAP/RADIUS tokens terminated across the entire directory.'
-      );
-    }, 1800);
+    // SCRUM-131: real tenant-wide revocation via the backend. Reports the
+    // CONFIRMED per-tenant outcome and residual-access bound — no fabricated
+    // "all tokens terminated everywhere" claim.
+    this.globalKillswitchPending.set(true);
+    this.globalKillswitchError.set(null);
+    this.globalKillswitchResult.set(null);
+    this.http
+      .post<{
+        tenantId: string;
+        totalMembers: number;
+        revoked: number;
+        failed: number;
+        maxResidualAccessSeconds: number;
+        notCovered: string[];
+      }>(`${this.apiBase}/apps/killswitch`, {})
+      .subscribe({
+        next: (res) => {
+          this.globalKillswitchPending.set(false);
+          this.globalKillswitchSuccess.set(res.failed === 0);
+          this.globalKillswitchResult.set(res);
+          this.logAuditEvent(
+            'GLOBAL EMERGENCY KILLSWITCH EXECUTED',
+            'Directory Vault',
+            'Emergency Revocation',
+            'blocked',
+            'High',
+          );
+          const residualMin = Math.ceil((res.maxResidualAccessSeconds || 0) / 60);
+          this.showAdminNotice(
+            `Killswitch complete: revoked ${res.revoked}/${res.totalMembers} member sessions` +
+              (res.failed ? `, ${res.failed} failed` : '') +
+              `. Existing access tokens expire within ~${residualMin} min. ` +
+              `Not covered: ${res.notCovered.join('; ') || 'none reported'}.`,
+          );
+        },
+        error: (err) => {
+          this.globalKillswitchPending.set(false);
+          this.globalKillswitchSuccess.set(false);
+          this.globalKillswitchError.set(
+            err?.error?.message || err?.message || 'Killswitch failed.',
+          );
+          this.showAdminNotice(
+            `Killswitch FAILED: ${err?.error?.message || 'Unable to reach the revocation service.'}`,
+          );
+        },
+      });
   }
 
   // ==========================================

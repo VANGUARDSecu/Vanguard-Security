@@ -364,20 +364,9 @@ export class AuthService {
         }
       }),
       catchError((error: HttpErrorResponse) => {
-        try {
-          const localAuth = this.attemptLocalDirectoryAuth(credentials.email, credentials.password);
-          if (localAuth) {
-            this.pendingEmail.set(credentials.email);
-            this.pendingMode.set('signin');
-            if (localAuth.user && localAuth.session) {
-              this.setSession(localAuth.user, localAuth.session);
-            }
-            return of(localAuth);
-          }
-        } catch (localErr: any) {
-          return throwError(() => new Error(localErr.message));
-        }
-
+        // SCRUM-129: removed attemptLocalDirectoryAuth — a failed server login
+        // must not be rescued by locally cached directory credentials. A network
+        // or credential failure is surfaced as a real error.
         let errorMessage = 'An unexpected error occurred. Please try again.';
         if (error.error && error.error.message) {
           errorMessage = Array.isArray(error.error.message)
@@ -391,95 +380,6 @@ export class AuthService {
     );
   }
 
-  private attemptLocalDirectoryAuth(email: string, password: string): AuthResponse | null {
-    if (!this.isBrowser) return null;
-    try {
-      const stored = localStorage.getItem('vanguard_directory_users');
-      if (!stored) return null;
-      const users: any[] = JSON.parse(stored);
-      const cleanEmail = email.trim().toLowerCase();
-      const user = users.find((u) => u.email?.trim().toLowerCase() === cleanEmail);
-      if (!user) return null;
-
-      const expectedPassword = user.temporaryPassword || user.password;
-      if (expectedPassword && expectedPassword !== password.trim()) {
-        throw new Error('Invalid password for this directory employee account.');
-      }
-
-      let role: 'admin' | 'security_officer' | 'user' = 'user';
-      if (user.role === 'Security Officer') {
-        role = 'security_officer';
-      }
-
-      const names = (user.name || '').trim().split(' ');
-      const firstName = names[0] || user.firstName || 'Employee';
-      const lastName = names.slice(1).join(' ') || user.lastName || '';
-
-      const userProfile: UserProfile = {
-        id: user.id || 'usr_' + Date.now(),
-        email: user.email,
-        firstName,
-        lastName,
-        companyName: 'Vanguard Security Inc.',
-        role,
-        user_metadata: {
-          role,
-          department: user.department || 'Engineering',
-          first_name: firstName,
-          last_name: lastName,
-          is_temporary_password: !!user.temporaryPassword,
-        },
-      };
-
-      // Mark user as Active and update lastLogin
-      user.accountStatus = 'Active';
-      user.lastLogin = 'Just now';
-      localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
-
-      // Ensure password reset flag is cleared on normal employee directory sign-in
-      this.isPasswordResetRequired.set(false);
-      if (this.isBrowser) {
-        localStorage.removeItem('vanguard_reset_required');
-      }
-
-      const session: AuthSession = {
-        access_token: 'vanguard_dir_session_' + Date.now(),
-        expires_at: Math.floor(Date.now() / 1000) + 86400,
-      };
-
-      const hasTotp = user.mfaStatus === 'Enrolled (TOTP)';
-
-      // Trigger OTP dispatch via backend so real email accounts receive the Supabase email code!
-      if (!hasTotp) {
-        this.http.post(`${this.API_URL}/resend-otp`, { email: user.email, type: 'signin' }).subscribe({
-          error: () => {}, // Safe silent fallback if offline/mock
-        });
-      }
-
-      // Store pending directory auth so verifyOtp can activate the session
-      if (this.isBrowser) {
-        localStorage.setItem('vanguard_pending_dir_user', JSON.stringify({ user: userProfile, session }));
-      }
-
-      this.pendingEmail.set(user.email);
-      this.pendingMode.set('signin');
-
-      return {
-        success: true,
-        requireMfa: true,
-        hasTotp,
-        enrolledMethods: hasTotp ? ['totp'] : ['email_otp'],
-        user: userProfile,
-        session,
-        message: 'Credentials verified. Please complete 2-Step Verification.',
-      };
-    } catch (e: any) {
-      if (e.message && e.message.includes('Invalid password')) {
-        throw e;
-      }
-      return null;
-    }
-  }
 
   signup(payload: RegisterPayload): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.API_URL}/signup`, payload).pipe(
@@ -510,25 +410,17 @@ export class AuthService {
   verifyOtp(email: string, token: string, type: 'signup' | 'email' | 'recovery' = 'signup'): Observable<AuthResponse> {
     const cleanedToken = token.trim();
 
-    // Check if we have a pending directory employee verification
+    // Check if we have a pending directory employee verification (used only to
+    // enrich the verified response with display metadata — never to authenticate).
     const pendingDir = this.isBrowser ? localStorage.getItem('vanguard_pending_dir_user') : null;
     let pendingData: any = null;
     try {
       if (pendingDir) pendingData = JSON.parse(pendingDir);
     } catch {}
 
-    // Allow test bypass code 123456 for fast developer verification
-    if (pendingData && (cleanedToken === '123456' || cleanedToken === '12345678')) {
-      if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-      this.setSession(pendingData.user, pendingData.session);
-      return of({
-        success: true,
-        message: 'Verification successful!',
-        user: pendingData.user,
-        session: pendingData.session,
-      });
-    }
-
+    // SCRUM-129: the developer bypass codes (123456 / 12345678) that created a
+    // session from cached localStorage data have been removed. Only a
+    // server-verified OTP response can establish a session.
     return this.http
       .post<AuthResponse>(`${this.API_URL}/verify-otp`, { email, token: cleanedToken, type })
       .pipe(
@@ -548,18 +440,8 @@ export class AuthService {
           }
         }),
         catchError((error: HttpErrorResponse) => {
-          // Fallback for directory employee with test bypass code
-          if (pendingData && (cleanedToken === '123456' || cleanedToken === '12345678')) {
-            if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-            this.setSession(pendingData.user, pendingData.session);
-            return of({
-              success: true,
-              message: 'Verification successful!',
-              user: pendingData.user,
-              session: pendingData.session,
-            });
-          }
-
+          // SCRUM-129: no developer-code fallback. A failed server verification
+          // is a real failure; it never establishes a session from cached data.
           let errorMessage = 'Invalid or expired verification code.';
           if (error.error && error.error.message) {
             errorMessage = Array.isArray(error.error.message)
@@ -579,19 +461,10 @@ export class AuthService {
       if (pendingDir) pendingData = JSON.parse(pendingDir);
     } catch {}
 
-    if (pendingData && (cleanedCode === '123456' || cleanedCode.length === 6)) {
-      if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-      this.setSession(pendingData.user, pendingData.session);
-      return of({
-        success: true,
-        message: 'Authenticator verified!',
-        user: pendingData.user,
-        session: pendingData.session,
-      });
-    }
-
+    // SCRUM-129/126: removed the client-side bypass that accepted 123456 or ANY
+    // 6-digit code and fabricated a session. Real TOTP is verified server-side.
     return this.http
-      .post<AuthResponse>(`${this.API_URL}/verify-totp`, { email, code: cleanedCode })
+      .post<AuthResponse>(`${this.API_URL}/mfa/verify`, { code: cleanedCode })
       .pipe(
         tap((response) => {
           if (response.success && response.user && response.session) {
@@ -605,17 +478,8 @@ export class AuthService {
           }
         }),
         catchError((error: HttpErrorResponse) => {
-          if (pendingData && (cleanedCode === '123456' || cleanedCode.length === 6)) {
-            if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-            this.setSession(pendingData.user, pendingData.session);
-            return of({
-              success: true,
-              message: 'Authenticator verified!',
-              user: pendingData.user,
-              session: pendingData.session,
-            });
-          }
-
+          // SCRUM-129: no developer-code fallback; a failed verification is a
+          // real failure and never fabricates a session.
           let errorMessage = 'Invalid Authenticator code.';
           if (error.error && error.error.message) {
             errorMessage = Array.isArray(error.error.message)

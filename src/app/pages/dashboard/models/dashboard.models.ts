@@ -163,6 +163,14 @@ export interface TenantAuditEvent {
   threatIndicator?: AuditThreatIndicator;
   isoTimestamp?: string;
   rawPayload?: Record<string, any>;
+  /**
+   * SCRUM-133: provenance of this record. 'client-ui' events are generated in
+   * the browser for immediate UX feedback and are NOT authoritative evidence;
+   * authoritative records come from the server ('server'). The UI must label
+   * client-ui events as local/unconfirmed.
+   */
+  source?: 'client-ui' | 'server';
+  authoritative?: boolean;
 }
 
 

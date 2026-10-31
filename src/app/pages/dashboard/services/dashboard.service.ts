@@ -512,6 +512,10 @@ export class DashboardService {
       timestamp: timeStr,
       isoTimestamp: isoStr,
       actor,
+      // SCRUM-133: this is a client-generated UI event for immediate feedback;
+      // it is NOT authoritative. The authoritative trail is the server audit log.
+      source: 'client-ui',
+      authoritative: false,
       target,
       protocol,
       clientIp: options?.clientIp || '127.0.0.1 (Local)',
@@ -571,6 +575,48 @@ export class DashboardService {
         })
         .catch((err) => console.warn('Supabase audit log insert notice:', err));
     }
+  }
+
+  /** Authoritative server-generated audit events for the signed-in principal. */
+  readonly serverAuditEvents = signal<TenantAuditEvent[]>([]);
+
+  /**
+   * SCRUM-133: load the authoritative audit trail from the backend
+   * (`GET /auth/audit-logs`, scoped server-side to the principal). These are
+   * tagged source:'server' / authoritative:true to distinguish them from the
+   * local client-ui feedback events.
+   */
+  loadServerAuditLogs(): void {
+    if (!this.isBrowser) return;
+    this.http
+      .get<any[]>(`${this.apiBase}/auth/audit-logs`)
+      .subscribe({
+        next: (rows) => {
+          const mapped: TenantAuditEvent[] = (rows || []).map((r) => ({
+            id: r.id || 'srv-' + Math.random().toString(36).slice(2),
+            action: r.metadata?.action || r.status,
+            timestamp: r.timestamp,
+            isoTimestamp: r.timestamp,
+            actor: r.actorEmail,
+            source: 'server',
+            authoritative: true,
+            target: r.applicationName || r.clientId || '—',
+            protocol: r.protocol || 'Web Portal',
+            clientIp: r.ipAddress || '—',
+            location: r.location || '—',
+            device: r.device || '—',
+            status: r.status === 'SUCCESS' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
+            riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
+            eventType: 'SSO_LOGIN',
+            severity: r.severity || 'INFO',
+            requestId: r.id || '',
+          }));
+          this.serverAuditEvents.set(mapped);
+        },
+        error: () => {
+          // Leave prior authoritative events; do not fabricate on failure.
+        },
+      });
   }
 
   // ==========================================

@@ -138,7 +138,42 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.pushRetryCount.set(0);
         this.pushRetriesRemaining.set(3);
         this.startPushPolling(this.challengeId()!);
+      } else if (!this.isSsoVerification()) {
+        // For non-SSO flows, send initial OTP email on page load
+        this.isLoading.set(true);
+        
+        if (modeParam === 'recovery') {
+          // Recovery mode uses forgotPassword
+          this.authService.forgotPassword(emailParam).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(60);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send recovery code.');
+              this.startResendTimer(30);
+            },
+          });
+        } else {
+          // Signup/signin modes use resendOtp
+          const otpType = modeParam === 'signup' ? 'signup' : 'signin';
+          this.authService.resendOtp(emailParam, otpType).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(45);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send verification code.');
+              this.startResendTimer(30);
+            },
+          });
+        }
       } else {
+        // SSO flows already handled above in initiateSsoMfa call
         this.clearOtpInputs();
         this.startResendTimer(this.isSsoVerification() ? 60 : 30);
       }

@@ -543,8 +543,13 @@ export class AuthService {
   }
 
   unenrollTotp(factorId: string): Observable<{ success: boolean; message: string }> {
+    const token = this.token() || '';
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     return this.http
-      .delete<{ success: boolean; message: string }>(`${this.API_URL}/mfa/${encodeURIComponent(factorId)}`)
+      .delete<{ success: boolean; message: string }>(`${this.API_URL}/mfa/${encodeURIComponent(factorId)}`, { headers })
       .pipe(
         catchError((error: HttpErrorResponse) => {
           return throwError(() => new Error(error.error?.message || 'Failed to remove Authenticator.'));
@@ -553,9 +558,14 @@ export class AuthService {
   }
 
   listMfaFactors(type?: string): Observable<{ success: boolean; factors: any[] }> {
+    const token = this.token() || '';
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const url = type ? `${this.API_URL}/mfa/factors?type=${encodeURIComponent(type)}` : `${this.API_URL}/mfa/factors`;
     return this.http
-      .get<{ success: boolean; factors: any[] }>(url)
+      .get<{ success: boolean; factors: any[] }>(url, { headers })
       .pipe(
         catchError((error: HttpErrorResponse) => {
           return throwError(() => new Error(error.error?.message || 'Failed to list MFA factors.'));

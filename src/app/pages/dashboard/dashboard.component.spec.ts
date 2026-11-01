@@ -608,6 +608,9 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     component.openGlobalKillswitchModal();
     expect(component.showGlobalKillswitchModal()).toBe(true);
 
+    vi.spyOn(component.dashboardService, 'executeGlobalKillswitch').mockImplementation(() => {
+      component.dashboardService.globalKillswitchSuccess.set(true);
+    });
     component.executeGlobalKillswitch();
     expect(component.globalKillswitchSuccess()).toBe(true);
 

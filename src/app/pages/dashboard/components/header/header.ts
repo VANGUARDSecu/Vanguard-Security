@@ -44,7 +44,8 @@ export class DashboardHeader {
   // SCRUM-28 & SCRUM-52: Multi-tenant organization & workspace switcher
   readonly organizations = this.dashboardService.organizations;
   readonly activeOrganization = this.dashboardService.activeOrganization;
-  readonly activeWorkspaceId = this.dashboardService.activeWorkspaceId;
+  readonly activeWorkspaceId = this.dashboardService.activeWorkspaceId;
+  readonly activeOrganizationId = this.dashboardService.activeOrganizationId;
   readonly isPersonalWorkspace = this.dashboardService.isPersonalWorkspace;
   readonly allWorkspaces = this.dashboardService.allWorkspaces;
   readonly personalWorkspace = this.dashboardService.personalWorkspace;

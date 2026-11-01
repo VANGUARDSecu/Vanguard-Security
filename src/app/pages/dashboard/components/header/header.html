@@ -23,6 +23,22 @@
         <span class="brand-subtitle" *ngIf="isIndividual()">Personal Security Vault</span>
       </div>
 
+      <!-- Individual Account Vault Indicator (SCRUM-50) -->
+      <div class="individual-vault-indicator" *ngIf="isIndividual()">
+        <div class="indiv-icon-circle">👤</div>
+        <div class="indiv-info">
+          <span class="indiv-name-text">Personal Vault</span>
+          <span class="indiv-pill">Personal</span>
+        </div>
+        <button type="button" class="btn-upgrade-org" (click)="openUpgradeModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="upgrade-icon">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>Upgrade to Organization</span>
+        </button>
+      </div>
+
       <!-- Universal Workspace Switcher (Only visible to Company / Organization Accounts) -->
       <div class="org-switcher-container" *ngIf="!isIndividual()">
         <button
@@ -136,12 +152,12 @@
 
     <!-- Right: Role Switcher & Profile Badge -->
     <div class="header-right">
-      <!-- Admin / User Mode Toggle Switcher (Visible to Company Admins when in Company Org) -->
-      <div class="mode-toggle-pill" *ngIf="!isPersonalWorkspace() && isAdmin()">
+      <!-- Admin / User / Personal Vault Mode Switcher (Visible to Company Admins) -->
+      <div class="mode-toggle-pill" *ngIf="!isIndividual() && isAdmin()">
         <button
           type="button"
           class="mode-btn"
-          [class.active]="viewMode() === 'admin'"
+          [class.active]="viewMode() === 'admin' && !isPersonalWorkspace()"
           (click)="toggleViewMode('admin')"
         >
           <span class="mode-icon">👑</span>
@@ -150,11 +166,42 @@
         <button
           type="button"
           class="mode-btn"
-          [class.active]="viewMode() === 'user'"
+          [class.active]="viewMode() === 'user' && !isPersonalWorkspace()"
           (click)="toggleViewMode('user')"
         >
-          <span class="mode-icon">👤</span>
+          <span class="mode-icon">🏢</span>
           <span>User Portal</span>
+        </button>
+        <button
+          type="button"
+          class="mode-btn"
+          [class.active]="isPersonalWorkspace()"
+          (click)="switchOrg('personal')"
+        >
+          <span class="mode-icon">🔒</span>
+          <span>Personal Vault</span>
+        </button>
+      </div>
+
+      <!-- Company Employee Portal / Personal Vault Switcher (Visible to Non-Admin Company Users) -->
+      <div class="mode-toggle-pill" *ngIf="!isIndividual() && !isAdmin()">
+        <button
+          type="button"
+          class="mode-btn"
+          [class.active]="!isPersonalWorkspace()"
+          (click)="switchOrg(activeOrganizationId())"
+        >
+          <span class="mode-icon">🏢</span>
+          <span>Company Portal</span>
+        </button>
+        <button
+          type="button"
+          class="mode-btn"
+          [class.active]="isPersonalWorkspace()"
+          (click)="switchOrg('personal')"
+        >
+          <span class="mode-icon">🔒</span>
+          <span>Personal Vault</span>
         </button>
       </div>
 

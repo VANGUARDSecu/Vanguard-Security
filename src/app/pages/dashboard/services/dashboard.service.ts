@@ -2103,6 +2103,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   setActiveTab(tab: string): void {
+    const userTabs = [
+      'personal-vault', 'my-apps', 'authenticator', 'user-security',
+      'user-network', 'user-ssh', 'user-activity', 'user-devices'
+    ];
+    if (userTabs.includes(tab) && this.viewMode() === 'admin' && !this.isAdmin()) {
+      this.viewMode.set('user');
+    }
     this.activeTab.set(tab);
   }
 

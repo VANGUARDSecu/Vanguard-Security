@@ -4901,12 +4901,24 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
             this.showAdminNotice('Authenticator App removed from account.');
           },
           error: (err: Error) => {
-            this.showAdminNotice(`Failed to remove Authenticator: ${err.message}`);
+            const message = err.message || 'Failed to remove Authenticator';
+            // Check if it's a token expiration issue
+            if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+              this.showAdminNotice('Your session has expired. Please sign out and sign in again to de-enroll the authenticator.');
+            } else {
+              this.showAdminNotice(`Failed to remove Authenticator: ${message}`);
+            }
           },
         });
       },
       error: (err: Error) => {
-        this.showAdminNotice(`Failed to retrieve Authenticator status: ${err.message}`);
+        const message = err.message || 'Failed to retrieve Authenticator status';
+        // Check if it's a token expiration issue
+        if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+          this.showAdminNotice('Your session has expired. Please sign out and sign in again.');
+        } else {
+          this.showAdminNotice(`Failed to retrieve Authenticator status: ${message}`);
+        }
       },
     });
   }

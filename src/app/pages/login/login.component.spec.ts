@@ -74,13 +74,22 @@ describe('LoginComponent', () => {
     expect(component.notification()).toBeNull();
   });
 
-  it('should parse SSO query params and set clientDisplayName', () => {
+  it('should show the client name from the server registry, falling back to the client id', () => {
     component.ssoParams.set({
       client_id: 'vanguard-dummy-portal',
       redirect_uri: 'http://localhost:4201/auth/callback',
       state: 'test_state_123',
     });
-    expect(component.clientDisplayName()).toBe('Acme Enterprise Portal');
+    // No name from the server yet: show the client id, never a hard-coded alias.
+    expect(component.clientDisplayName()).toBe('vanguard-dummy-portal');
+
+    component.ssoParams.set({
+      client_id: 'vanguard-dummy-portal',
+      client_name: 'Acme Dummy Portal (Angular SPA)',
+      redirect_uri: 'http://localhost:4201/auth/callback',
+      state: 'test_state_123',
+    });
+    expect(component.clientDisplayName()).toBe('Acme Dummy Portal (Angular SPA)');
 
     component.ssoParams.set({
       client_id: 'custom-partner-app',

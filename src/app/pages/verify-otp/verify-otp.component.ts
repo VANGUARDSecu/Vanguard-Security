@@ -91,9 +91,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.challengeId.set(params['challengeId']);
       }
 
-      if (params['clientName']) {
-        // Display only: the server's client registry name, passed by the login page.
-        this.serverClientName.set(params['clientName']);
+      if (params['clientName'] || params['client_name']) {
+        // Display only: the server's client registry name, passed by the login page or backend.
+        this.serverClientName.set(params['clientName'] || params['client_name']);
       }
       if (params['client_id'] && params['redirect_uri']) {
         this.ssoParams.set({

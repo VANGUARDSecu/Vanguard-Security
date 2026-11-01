@@ -45,7 +45,7 @@
           type="button"
           class="org-switcher-btn"
           [class.active]="showOrgDropdown()"
-          (click)="toggleOrgDropdown()"
+          (click)="toggleOrgDropdown($event)"
           title="Switch Workspace / Organization"
         >
           <div class="org-badge-icon" [class.personal-badge]="isPersonalWorkspace()">

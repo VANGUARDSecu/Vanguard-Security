@@ -331,7 +331,7 @@
             <span class="trail-badge" [class.badge-success]="evt.status === 'success'" [class.badge-orange]="evt.status === 'mfa_required'" [class.badge-danger]="evt.status === 'blocked'">
               {{ evt.status === 'success' ? 'Authenticated' : evt.status === 'mfa_required' ? 'MFA Challenged' : 'Blocked' }}
             </span>
-            <span class="trail-time">{{ evt.timestamp | date:'short' }}</span>
+            <span class="trail-time">{{ evt.timestamp }}</span>
           </div>
         </div>
       </div>

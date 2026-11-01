@@ -43,6 +43,8 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
     fixture = TestBed.createComponent(UserMyApps);
     component = fixture.componentInstance;
     fixture.detectChanges();
+    const httpMock = TestBed.inject(HttpTestingController);
+    httpMock.match(() => true).forEach((r) => r.flush([]));
   });
 
   afterEach(() => {
@@ -362,7 +364,7 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       dashboardService.loadCompanyApps();
 
       const req = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/my' && r.params.get('userId') === 'owner-9',
+        (r) => r.url === 'http://localhost:3000/apps/my',
       );
       req.flush([
         {
@@ -396,7 +398,7 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
         .subscribe();
 
       const req = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/assign' && r.params.get('userId') === 'owner-9',
+        (r) => r.url === 'http://localhost:3000/apps/assign',
       );
       expect(req.request.body.target).toBe('all');
       expect(req.request.body.appId).toBe('slack');

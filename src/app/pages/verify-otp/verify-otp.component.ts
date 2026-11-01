@@ -38,14 +38,14 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   // SSO state signals (SCRUM-61)
   readonly challengeId = signal<string | null>(null);
   readonly ssoParams = signal<Record<string, string> | null>(null);
+  // Client name as stored in the backend client registry (clientName in the SSO challenge response).
+  readonly serverClientName = signal<string | null>(null);
   readonly isSsoVerification = computed<boolean>(() => !!this.challengeId() || !!this.ssoParams());
   readonly clientDisplayName = computed<string>(() => {
     const sso = this.ssoParams();
     if (!sso) return '';
-    if (sso['client_id'] === 'vanguard-dummy-portal') return 'Acme Enterprise Portal';
-    if (sso['client_id'] === 'vg_client_b3121c514e83037d') return 'Acme Dummy Web';
-    if (sso['client_id'] === 'vanguard-dummy-mobile') return 'Dummy Mobile App';
-    return sso['client_id'] || 'Client Application';
+    // The name comes from the server, so this page and the mobile approval prompt show the same name.
+    return this.serverClientName() || sso['client_id'] || 'Client Application';
   });
   
   // Dynamic code length: SSO MFA and TOTP are strictly 6 digits; Email OTP for direct portal signup is 8 digits
@@ -91,6 +91,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.challengeId.set(params['challengeId']);
       }
 
+      if (params['clientName']) {
+        // Display only: the server's client registry name, passed by the login page.
+        this.serverClientName.set(params['clientName']);
+      }
       if (params['client_id'] && params['redirect_uri']) {
         this.ssoParams.set({
           client_id: params['client_id'],
@@ -118,6 +122,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           }).subscribe({
             next: (res) => {
               this.challengeId.set(res.challengeId);
+              this.serverClientName.set(res.clientName || null);
               this.startResendTimer(res.resendCooldownSeconds || 60);
             },
             error: (err: Error) => {
@@ -222,6 +227,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.isLoading.set(false);
         this.challengeId.set(res.challengeId);
+        this.serverClientName.set(res.clientName || null);
         this.method.set('email_otp');
         this.clearOtpInputs();
         this.startResendTimer(res.resendCooldownSeconds || 60);
@@ -512,7 +518,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       if (sso) {
         const originUrl = new URL(sso['redirect_uri']).origin;
         const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
-        const appName = sso['client_id']?.includes('dummy') ? 'Acme Dummy Web' : 'External Application';
+        const appName = this.clientDisplayName();
         const newConn = {
           id: `conn_${sso['client_id']}`,
           clientId: sso['client_id'],

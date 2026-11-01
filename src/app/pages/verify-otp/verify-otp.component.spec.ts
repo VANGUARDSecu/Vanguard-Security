@@ -39,13 +39,17 @@ describe('VerifyOtpComponent', () => {
     expect(component.method()).toBe('email_otp');
   });
 
-  it('should parse SSO parameters and resolve client display name', () => {
+  it('should show the client name from the server registry, falling back to the client id', () => {
     component.ssoParams.set({
       client_id: 'vanguard-dummy-portal',
       redirect_uri: 'http://localhost:4201/auth/callback',
       state: 'state_123',
     });
-    expect(component.clientDisplayName()).toBe('Acme Enterprise Portal');
+    // No name from the server yet: show the client id, never a hard-coded alias.
+    expect(component.clientDisplayName()).toBe('vanguard-dummy-portal');
+
+    component.serverClientName.set('Acme Dummy Portal (Angular SPA)');
+    expect(component.clientDisplayName()).toBe('Acme Dummy Portal (Angular SPA)');
   });
 
   it('should redirect back to client when user cancels SSO on verify OTP page', () => {

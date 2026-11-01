@@ -317,6 +317,7 @@ export class LoginComponent implements OnInit {
         const queryParams: any = {
           challengeId: res.challengeId,
           email: res.email,
+          clientName: res.clientName,
           mode: 'signin',
           method: 'email_otp',
           hasTotp: hasTotp ? 'true' : 'false',

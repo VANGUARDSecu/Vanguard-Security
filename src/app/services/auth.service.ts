@@ -2,7 +2,8 @@ import { Injectable, inject, signal, computed, PLATFORM_ID } from '@angular/core
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Observable, catchError, map, of, tap, throwError } from 'rxjs';
+import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay } from 'rxjs';
+import { SupabaseService } from './supabase.service';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
 
 export interface UserProfile {
@@ -159,10 +160,17 @@ export class AuthService {
 
   private readonly API_URL = 'http://localhost:3000/auth';
   private readonly isBrowser = isPlatformBrowser(this.platformId);
+  private readonly supabaseService = inject(SupabaseService);
 
   // Signals for state management
   readonly currentUser = signal<UserProfile | null>(this.loadStoredUser());
   readonly token = signal<string | null>(this.loadStoredToken());
+  readonly refreshToken = signal<string | null>(this.loadStoredRefreshToken());
+  readonly tokenExpiresAt = signal<number | null>(this.loadStoredExpiresAt());
+
+  // Proactive token auto-renewal (SCRUM-142 / NFR-02 300s TTL)
+  private refreshInFlight$: Observable<AuthResponse> | null = null;
+  private autoRefreshTimer: any = null;
   readonly isAuthenticated = computed(() => !!this.currentUser());
   readonly isPasswordResetRequired = signal<boolean>(this.loadStoredResetRequired());
 
@@ -185,6 +193,7 @@ export class AuthService {
 
   constructor() {
     this.checkForOAuthCallback();
+    this.initSessionAutoRefresh();
   }
 
   private loadStoredUser(): UserProfile | null {
@@ -218,6 +227,25 @@ export class AuthService {
     if (!this.isBrowser) return null;
     try {
       return localStorage.getItem('vanguard_token');
+    } catch {
+      return null;
+    }
+  }
+
+  private loadStoredRefreshToken(): string | null {
+    if (!this.isBrowser) return null;
+    try {
+      return localStorage.getItem('vanguard_refresh_token');
+    } catch {
+      return null;
+    }
+  }
+
+  private loadStoredExpiresAt(): number | null {
+    if (!this.isBrowser) return null;
+    try {
+      const val = localStorage.getItem('vanguard_token_expires_at');
+      return val ? parseInt(val, 10) : null;
     } catch {
       return null;
     }
@@ -631,11 +659,35 @@ export class AuthService {
 
     this.currentUser.set(normalizedUser);
     this.token.set(session.access_token);
+    if (session.refresh_token) {
+      this.refreshToken.set(session.refresh_token);
+    }
+    if (session.expires_at) {
+      this.tokenExpiresAt.set(session.expires_at);
+    }
 
     if (this.isBrowser) {
       localStorage.setItem('vanguard_user', JSON.stringify(normalizedUser));
       localStorage.setItem('vanguard_token', session.access_token);
+      if (session.refresh_token) {
+        localStorage.setItem('vanguard_refresh_token', session.refresh_token);
+      }
+      if (session.expires_at) {
+        localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+      }
+
+      if (session.access_token && session.refresh_token) {
+        try {
+          this.supabaseService.client.auth.setSession({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+          }).catch(() => {});
+        } catch {}
+      }
     }
+
+    // Schedule proactive auto-renewal 60s before token expiration (SCRUM-142)
+    this.scheduleAutoRefresh(session.expires_at);
   }
 
   forgotPassword(email: string): Observable<{ success: boolean; message: string; email?: string }> {
@@ -975,17 +1027,169 @@ export class AuthService {
     );
   }
 
+
+  hasRefreshToken(): boolean {
+    return !!this.refreshToken();
+  }
+
+  /**
+   * Proactive token auto-renewal timer (SCRUM-142, PRD NFR-02 / P1-01).
+   * Refreshes 60s prior to token expiry so active users never experience token expiration errors.
+   */
+  scheduleAutoRefresh(expiresAt?: number): void {
+    if (!this.isBrowser) return;
+    if (this.autoRefreshTimer) {
+      clearTimeout(this.autoRefreshTimer);
+      this.autoRefreshTimer = null;
+    }
+
+    let exp = expiresAt || this.tokenExpiresAt();
+    if (!exp) {
+      const tok = this.token();
+      if (tok && tok.includes('.')) {
+        try {
+          const payload = JSON.parse(atob(tok.split('.')[1]));
+          if (payload.exp) {
+            exp = payload.exp;
+            this.tokenExpiresAt.set(exp);
+            localStorage.setItem('vanguard_token_expires_at', String(exp));
+          }
+        } catch {}
+      }
+    }
+
+    if (!exp) {
+      exp = Math.floor(Date.now() / 1000) + 300;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Renew 60s before expiration, bounded to minimum 5s
+    const delaySec = Math.max(5, Math.min(exp - nowSec - 60, 86400));
+
+    this.autoRefreshTimer = setTimeout(() => {
+      if (this.isLoggedIn() && this.hasRefreshToken()) {
+        this.refreshSession().subscribe({
+          error: () => {},
+        });
+      }
+    }, delaySec * 1000);
+  }
+
+  /**
+   * Refreshes the session via POST /auth/refresh with mutex queueing (SCRUM-142).
+   */
+  refreshSession(): Observable<AuthResponse> {
+    const refreshToken = this.refreshToken();
+    if (!refreshToken) {
+      this.logout();
+      return throwError(() => new Error('No refresh token available.'));
+    }
+
+    if (this.refreshInFlight$) {
+      return this.refreshInFlight$;
+    }
+
+    this.refreshInFlight$ = this.http
+      .post<AuthResponse>(`${this.API_URL}/refresh`, { refreshToken })
+      .pipe(
+        tap((res) => {
+          if (res.success && res.session) {
+            this.token.set(res.session.access_token);
+            if (res.session.refresh_token) {
+              this.refreshToken.set(res.session.refresh_token);
+            }
+            if (res.session.expires_at) {
+              this.tokenExpiresAt.set(res.session.expires_at);
+            }
+            if (this.isBrowser) {
+              localStorage.setItem('vanguard_token', res.session.access_token);
+              if (res.session.refresh_token) {
+                localStorage.setItem('vanguard_refresh_token', res.session.refresh_token);
+              }
+              if (res.session.expires_at) {
+                localStorage.setItem('vanguard_token_expires_at', String(res.session.expires_at));
+              }
+              if (res.session.access_token && res.session.refresh_token) {
+                try {
+                  this.supabaseService.client.auth.setSession({
+                    access_token: res.session.access_token,
+                    refresh_token: res.session.refresh_token,
+                  }).catch(() => {});
+                } catch {}
+              }
+            }
+            this.scheduleAutoRefresh(res.session.expires_at);
+          }
+        }),
+        catchError((err: any) => {
+          this.logout();
+          return throwError(() => err);
+        }),
+        finalize(() => {
+          this.refreshInFlight$ = null;
+        }),
+        shareReplay(1),
+      );
+
+    return this.refreshInFlight$;
+  }
+
+  private initSessionAutoRefresh(): void {
+    if (!this.isBrowser) return;
+
+    try {
+      this.supabaseService.client.auth.onAuthStateChange((event, session) => {
+        if (event === 'TOKEN_REFRESHED' && session) {
+          this.token.set(session.access_token);
+          this.refreshToken.set(session.refresh_token || null);
+          this.tokenExpiresAt.set(session.expires_at || null);
+          localStorage.setItem('vanguard_token', session.access_token);
+          if (session.refresh_token) {
+            localStorage.setItem('vanguard_refresh_token', session.refresh_token);
+          }
+          if (session.expires_at) {
+            localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+            this.scheduleAutoRefresh(session.expires_at);
+          }
+        }
+      });
+    } catch {}
+
+    const tok = this.token();
+    const ref = this.refreshToken();
+    const exp = this.tokenExpiresAt();
+    if (tok && ref) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (exp && nowSec >= exp - 30) {
+        this.refreshSession().subscribe({ error: () => {} });
+      } else {
+        this.scheduleAutoRefresh(exp || undefined);
+      }
+    }
+  }
+
   logout(): void {
+    if (this.autoRefreshTimer) {
+      clearTimeout(this.autoRefreshTimer);
+      this.autoRefreshTimer = null;
+    }
     if (this.isBrowser) {
       this.http.post(`${this.API_URL}/logout`, {}).subscribe({
         error: () => {},
       });
       localStorage.removeItem('vanguard_user');
       localStorage.removeItem('vanguard_token');
+      localStorage.removeItem('vanguard_refresh_token');
+      localStorage.removeItem('vanguard_token_expires_at');
       localStorage.removeItem('vanguard_reset_required');
+      try {
+        this.supabaseService.client.auth.signOut().catch(() => {});
+      } catch {}
     }
     this.currentUser.set(null);
     this.token.set(null);
+    this.refreshToken.set(null);
+    this.tokenExpiresAt.set(null);
     this.isPasswordResetRequired.set(false);
     this.router.navigate(['/login']);
   }

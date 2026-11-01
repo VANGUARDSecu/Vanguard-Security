@@ -148,6 +148,20 @@ To ensure complete functionality (including live email dispatch, Supabase authen
 > **confirmed** per-tenant revocation result (revoked/failed counts and the
 > residual access-token window) rather than a simulated success.
 
+> **Supabase Access Token Auto-Renewal & 401 Retry (SCRUM-142):** In accordance with
+> the Vanguard Security Improvement Plan (PRD NFR-02 & P1-01), Supabase JWT access
+> tokens have a strict 300-second (5-minute) lifetime. The frontend implements a dual
+> renewal mechanism:
+> 1. **Proactive Auto-Renewal:** `AuthService` schedules an automated token refresh
+>    `60 seconds` before expiry (at second 240 of 300) via `POST /auth/refresh`,
+>    ensuring active sessions never suffer authentication interruptions.
+> 2. **Reactive 401 Retry Interceptor:** If a token expires while inactive or across sleep/wake,
+>    `authTokenInterceptor` intercepts HTTP 401 responses, executes a de-duplicated
+>    refresh via `authService.refreshSession()`, and automatically replays the pending request.
+> 3. **Suspension & Revocation Enforcement:** Token refresh calls invoke server-side checks.
+>    If a user is suspended or revoked by an administrator, the refresh is denied and the
+>    client is immediately logged out.
+
 ---
 
 ## Testing & Quality Assurance

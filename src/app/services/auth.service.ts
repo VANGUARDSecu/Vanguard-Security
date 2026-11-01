@@ -923,6 +923,13 @@ export class AuthService {
     );
   }
 
+  retryPushChallenge(challengeId: string): Observable<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/retry`;
+    return this.http.post<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }>(url, { challengeId }).pipe(
+      catchError((err) => throwError(() => new Error(err.error?.message || 'Failed to retry push challenge.')))
+    );
+  }
+
   getPushMfaPreference(email: string): Observable<{ success: boolean; email: string; enabled: boolean }> {
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/preference?email=${encodeURIComponent(email)}`;
     return this.http.get<{ success: boolean; email: string; enabled: boolean }>(url).pipe(

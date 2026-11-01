@@ -1,3 +1,8 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
 /* ==========================================================================
    USER TAB 2: SECURITY & MFA VAULT (SCRUM-32)
    ========================================================================== */
@@ -327,7 +332,7 @@
 }
 
 .connected-sec-item {
-  background: #090f33;
+  background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(16, 185, 129, 0.3);
   border-radius: 12px;
   padding: 16px 20px;
@@ -810,4 +815,49 @@
   background: rgba(15, 23, 42, 0.3);
   border-radius: 8px;
   border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* ==========================================================================
+   MODAL LAYER ELEVATION (SCRUM-143)
+   Ensure modal overlay and dialog appear above sticky header (z-index: 1000)
+   ========================================================================== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-card {
+  position: relative;
+  z-index: 1051;
+  background: #090f33;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(59, 130, 246, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.badge-accent {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }

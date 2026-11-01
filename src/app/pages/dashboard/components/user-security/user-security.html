@@ -31,21 +31,28 @@
       </div>
     </div>
 
-    <!-- CARD 2: Self-Service Password Management -->
+    <!-- CARD 2: Mobile Push & Biometric MFA (SCRUM-85 / SCRUM-143) -->
     <div class="security-card">
       <div class="sec-card-header">
-        <div class="sec-icon-box">🔑</div>
+        <div class="sec-icon-box">📲</div>
         <div class="sec-header-meta">
-          <h3 class="sec-title">Account Password</h3>
-          <span class="badge badge-success">Active & Protected</span>
+          <h3 class="sec-title">Mobile Push &amp; Biometrics</h3>
+          <span class="badge" [class.badge-success]="pushMfaEnabled()" [class.badge-orange]="!pushMfaEnabled()">
+            {{ pushMfaEnabled() ? 'Enabled & Ready' : 'Disabled' }}
+          </span>
         </div>
       </div>
       <p class="sec-desc">
-        Update your enterprise login password with real-time zero-trust complexity validation. Synchronizes immediately with directory and SSO.
+        Receive instant out-of-band push authentication challenges with 2-digit number matching and biometric verification on registered phones.
       </p>
       <div class="sec-btn-row">
-        <button type="button" class="btn-sec-action" (click)="openChangePasswordModal()">
-          Change Password
+        <button
+          type="button"
+          class="btn-sec-action"
+          (click)="togglePushMfa()"
+          [disabled]="pushMfaUpdating()"
+        >
+          {{ pushMfaEnabled() ? 'Disable Mobile Push' : 'Enable Mobile Push' }}
         </button>
       </div>
     </div>
@@ -68,7 +75,26 @@
       </div>
     </div>
 
-    <!-- CARD 4: Emergency Single-Use Recovery Codes (Full Span) -->
+    <!-- CARD 4: Self-Service Password Management (SCRUM-32) -->
+    <div class="security-card">
+      <div class="sec-card-header">
+        <div class="sec-icon-box">🔑</div>
+        <div class="sec-header-meta">
+          <h3 class="sec-title">Account Password</h3>
+          <span class="badge badge-success">Active &amp; Protected</span>
+        </div>
+      </div>
+      <p class="sec-desc">
+        Update your enterprise login password with real-time zero-trust complexity validation. Synchronizes immediately with directory and SSO.
+      </p>
+      <div class="sec-btn-row">
+        <button type="button" class="btn-sec-action" (click)="openChangePasswordModal()">
+          Change Password
+        </button>
+      </div>
+    </div>
+
+    <!-- CARD 5: Emergency Single-Use Recovery Codes (Full Span) -->
     <div class="security-card full-span">
       <div class="sec-card-header">
         <div class="sec-icon-box">🛡️</div>
@@ -272,30 +298,45 @@
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- User Recent Sign-in Activity Trail -->
-      <div class="sec-trail-section">
-        <h4 class="sec-trail-title">Recent Authentication Events &amp; Sign-in Trail</h4>
-        <div class="sec-trail-list" *ngIf="userSignInEvents().length > 0">
-          <div class="sec-trail-item" *ngFor="let evt of userSignInEvents()">
-            <div class="trail-item-left">
-              <span class="trail-status-dot" [class.success]="evt.status === 'success'" [class.challenge]="evt.status === 'mfa_required'" [class.blocked]="evt.status === 'blocked'"></span>
-              <div class="trail-info">
-                <span class="trail-app">{{ evt.application }}</span>
-                <span class="trail-meta">{{ evt.device }} • {{ evt.ip }} • {{ evt.location }}</span>
-              </div>
-            </div>
-            <div class="trail-item-right">
-              <span class="trail-badge" [class.badge-success]="evt.status === 'success'" [class.badge-orange]="evt.status === 'mfa_required'" [class.badge-danger]="evt.status === 'blocked'">
-                {{ evt.status === 'success' ? 'Authenticated' : evt.status === 'mfa_required' ? 'MFA Challenged' : 'Blocked' }}
-              </span>
-              <span class="trail-time">{{ evt.timestamp | date:'short' }}</span>
+    <!-- CARD 8: Recent Authentication Events & Sign-in Trail (Dedicated Layer) -->
+    <div class="security-card full-span">
+      <div class="sec-card-header">
+        <div class="sec-icon-box">📊</div>
+        <div class="sec-header-meta">
+          <h3 class="sec-title">Recent Authentication Events &amp; Sign-in Trail</h3>
+          <span class="badge badge-success" *ngIf="userSignInEvents().length > 0">
+            {{ userSignInEvents().length }} Event{{ userSignInEvents().length === 1 ? '' : 's' }} Recorded
+          </span>
+          <span class="badge badge-orange" *ngIf="userSignInEvents().length === 0">
+            No Events Yet
+          </span>
+        </div>
+      </div>
+      <p class="sec-desc">
+        Real-time telemetry and audit verification stream tracking recent sign-in attempts, MFA step-up challenges, and geographic authentication anomalies.
+      </p>
+
+      <div class="sec-trail-list" *ngIf="userSignInEvents().length > 0">
+        <div class="sec-trail-item" *ngFor="let evt of userSignInEvents()">
+          <div class="trail-item-left">
+            <span class="trail-status-dot" [class.success]="evt.status === 'success'" [class.challenge]="evt.status === 'mfa_required'" [class.blocked]="evt.status === 'blocked'"></span>
+            <div class="trail-info">
+              <span class="trail-app">{{ evt.application }}</span>
+              <span class="trail-meta">{{ evt.device }} • {{ evt.ip }} • {{ evt.location }}</span>
             </div>
           </div>
+          <div class="trail-item-right">
+            <span class="trail-badge" [class.badge-success]="evt.status === 'success'" [class.badge-orange]="evt.status === 'mfa_required'" [class.badge-danger]="evt.status === 'blocked'">
+              {{ evt.status === 'success' ? 'Authenticated' : evt.status === 'mfa_required' ? 'MFA Challenged' : 'Blocked' }}
+            </span>
+            <span class="trail-time">{{ evt.timestamp | date:'short' }}</span>
+          </div>
         </div>
-        <div class="empty-trail" *ngIf="userSignInEvents().length === 0">
-          <p>No recent sign-in events recorded for this user session.</p>
-        </div>
+      </div>
+      <div class="empty-trail" *ngIf="userSignInEvents().length === 0">
+        <p>No recent sign-in events recorded for this user session.</p>
       </div>
     </div>
   </div>

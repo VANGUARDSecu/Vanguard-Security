@@ -49,7 +49,7 @@ Designed for SecOps engineers and system administrators to configure enterprise 
 ### 2. Employee Personal Workspace (User View)
 Tailored for corporate employees to access organizational resources:
 - **My Apps Launchpad**: One-click single sign-on into authorized corporate SaaS applications.
-- **Security & Password Management (SCRUM-32 & SCRUM-60)**: Self-service permanent password updates, TOTP authenticator pairing, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), and personal authentication event audit trail.
+- **Security & Password Management (SCRUM-32, SCRUM-60 & SCRUM-143)**: Self-service permanent password updates, TOTP authenticator pairing, Out-of-Band Mobile Push & Biometric MFA factor preference toggle, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), elevated modal backdrop layering (z-index 1050), and dedicated personal authentication event audit trail.
 - **Device Trust & Hardware**: Inspect enrolled laptops, phones, and MDM compliance state.
 - **Corporate Wi-Fi Profile**: Download pre-configured 802.1X / EAP-TLS profiles and certificates for immediate enterprise network access.
 - **SSH Key Manager**: Upload and manage public SSH keys (`ssh-ed25519`, `ssh-rsa`) for infrastructure access.

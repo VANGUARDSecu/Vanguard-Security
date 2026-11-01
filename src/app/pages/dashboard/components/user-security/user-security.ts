@@ -2,6 +2,7 @@ import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
+import { AuthService } from '../../../../services/auth.service';
 
 @Component({
   selector: 'app-user-security',
@@ -12,6 +13,11 @@ import { DashboardService } from '../../services/dashboard.service';
 })
 export class UserSecurity {
   readonly dashboardService = inject(DashboardService);
+  readonly authService = inject(AuthService);
+
+  // SCRUM-85 / SCRUM-143: Mobile Push & Biometric MFA Preference
+  readonly pushMfaEnabled = signal<boolean>(true);
+  readonly pushMfaUpdating = signal<boolean>(false);
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly user = this.dashboardService.user;
@@ -189,5 +195,22 @@ export class UserSecurity {
   toggleEmailAlerts(): void {
     const current = this.securityAlertPreferences().emailAlertsEnabled;
     this.dashboardService.updateSecurityAlertPreferences({ emailAlertsEnabled: !current });
+  }
+
+  // SCRUM-85 / SCRUM-143: Mobile Push MFA Toggle
+  togglePushMfa(): void {
+    const email = this.user()?.email;
+    if (!email) return;
+    const nextVal = !this.pushMfaEnabled();
+    this.pushMfaUpdating.set(true);
+    this.authService.setPushMfaPreference(email, nextVal).subscribe({
+      next: (res) => {
+        this.pushMfaEnabled.set(res.enabled);
+        this.pushMfaUpdating.set(false);
+      },
+      error: () => {
+        this.pushMfaUpdating.set(false);
+      }
+    });
   }
 }

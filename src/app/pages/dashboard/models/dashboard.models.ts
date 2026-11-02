@@ -44,6 +44,7 @@ export type AccessRequestStatus = 'Pending Approval' | 'Approved' | 'Rejected';
 
 export interface AppAccessRequest {
   id: string;
+  tenantId?: string;
   userId: string;
   userName: string;
   userEmail: string;

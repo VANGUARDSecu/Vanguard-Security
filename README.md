@@ -29,6 +29,11 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Resilient Session Hydration & Guard Interception (SCRUM-157)
+- **Authentic Session Continuity**:
+  - Propagates authoritative Supabase sessions across 2-step OTP verification flows to guarantee dashboard initialization with signed JWT access and refresh tokens.
+  - Prevents premature 401 refresh failures and unwarranted redirects to `/login` during initial dashboard data hydration (`apps/my`, `directory-users`, `connected-apps`).
+
 ### Live Directory User Status Synchronization & Manual Refresh (SCRUM-156)
 - **Real-Time Directory Status Synchronization**:
   - `DashboardService.loadDirectoryUsers()` invokes `AuthService.getDirectoryUsers(tenantId)` to query real-time directory statuses and active memberships from the backend directory cache and Supabase Auth.

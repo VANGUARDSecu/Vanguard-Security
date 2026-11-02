@@ -55,7 +55,7 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     expect(names).toContain('Cloud RADIUS Gateway');
   });
 
-  it('should toggle view mode between admin and user for admin user', () => {
+  it('should restrict company account to admin console only (SCRUM-150)', () => {
     authService.currentUser.set({
       id: 'adm-1',
       email: 'admin@vanguard.io',
@@ -66,8 +66,8 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     });
 
     component.toggleViewMode('user');
-    expect(component.viewMode()).toBe('user');
-    expect(component.activeTab()).toBe('my-apps');
+    expect(component.viewMode()).toBe('admin');
+    expect(component.activeTab()).toBe('overview');
 
     component.toggleViewMode('admin');
     expect(component.viewMode()).toBe('admin');

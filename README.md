@@ -29,6 +29,21 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Role- & Account-Scoped Appbar & Workspace Access (SCRUM-150)
+The application enforces strict, account-type-based workspace boundaries and header appbar controls:
+- **Company Account (`accountType === 'company'`, `role === 'admin'`)**:
+  - Exclusively granted access to the **Admin Console**.
+  - Appbar prominently displays the **👑 Admin Console** scoped badge and the Enterprise Organization Switcher.
+  - Mode toggle pills and Personal Vault workspace entries are removed.
+- **Individual Account (`accountType === 'individual'`)**:
+  - Exclusively granted access to the **Personal Vault** security suite.
+  - Appbar displays the **🔒 Personal Vault** badge and Personal Vault indicator.
+  - Multi-tenant organization switcher, company upgrade buttons, and corporate directory options are removed.
+- **Tenant Directory Member (`accountType === 'company'`, `role === 'user'`)**:
+  - Exclusively granted access to the company-managed **User Portal** (My Applications, 2FA Authenticator, Security & MFA, Wi-Fi & VPN Profile, SSH & LDAP Keys, Sign-in Activity, Mobile Devices).
+  - Appbar displays the **🏢 User Portal** badge and the Corporate Directory indicator.
+  - Personal Vault navigation links and Admin Console switchers are removed.
+
 ### 1. Admin Console (Admin View)
 Designed for SecOps engineers and system administrators to configure enterprise access:
 - **Gateway Telemetry & Health**: Live monitoring for SAML 2.0 Web SSO, OIDC Clients, Cloud LDAP (Port 636), and Cloud RADIUS (Port 1812).

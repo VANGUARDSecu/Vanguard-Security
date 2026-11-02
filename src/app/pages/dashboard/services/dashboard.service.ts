@@ -94,13 +94,13 @@ export class DashboardService {
   readonly isIndividual = computed<boolean>(() => this.accountType() === 'individual');
 
   // View mode switcher: 'admin' (Admin Console) vs 'user' (User Portal)
-  readonly viewMode = signal<'admin' | 'user'>('admin');
+  readonly viewMode = signal<'admin' | 'user'>(this.isIndividual() || !this.isAdmin() ? 'user' : 'admin');
 
   // Search input in top header
   searchQuery = '';
 
   // Active navigation tab
-  readonly activeTab = signal<string>('overview');
+  readonly activeTab = signal<string>(this.isIndividual() ? 'personal-vault' : (this.isAdmin() ? 'overview' : 'my-apps'));
 
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
@@ -2023,11 +2023,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   constructor() {
-    // Default view mode to the user's role and account type
+    // Default view mode to the user's role and account type (SCRUM-150)
     if (this.isIndividual()) {
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-    } else if (!this.isAdmin()) {
+    } else if (this.isAdmin()) {
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+    } else {
       this.viewMode.set('user');
       this.activeTab.set('my-apps');
     }
@@ -2042,9 +2045,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (!currentUser) return;
 
     if (this.isIndividual()) {
+      this.activeWorkspaceId.set('personal');
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-    } else if (!this.isAdmin()) {
+    } else if (this.isAdmin()) {
+      if (this.activeWorkspaceId() === 'personal') {
+        this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
+      }
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+    } else {
+      if (this.activeWorkspaceId() === 'personal') {
+        this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
+      }
       this.viewMode.set('user');
       this.activeTab.set('my-apps');
     }
@@ -2083,23 +2096,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   toggleViewMode(mode: 'admin' | 'user'): void {
-    if (this.isIndividual() && mode === 'admin') {
-      return; // Individual personal accounts do not have access to corporate governance console
+    if (this.isIndividual()) {
+      this.viewMode.set('user');
+      this.activeTab.set('personal-vault');
+      return;
     }
-    if (!this.isAdmin() && mode === 'admin') {
-      return; // Disallow non-admin directory members from entering admin console
-    }
-    this.viewMode.set(mode);
-    if (mode === 'admin') {
+    if (this.isAdmin()) {
+      this.viewMode.set('admin');
       this.activeTab.set('overview');
-    } else {
-      if (this.isIndividual()) {
-        this.activeTab.set('personal-vault');
-      } else {
-        this.activeTab.set('my-apps');
-        this.syncGroupInheritedApps();
-      }
+      return;
     }
+    this.viewMode.set('user');
+    this.activeTab.set('my-apps');
+    this.syncGroupInheritedApps();
   }
 
   setActiveTab(tab: string): void {
@@ -5950,24 +5959,35 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   // SCRUM-52: Multi-Workspace Switcher (Personal Vault <-> Company Organization)
   // ==========================================
   switchWorkspace(workspaceId: string): void {
-    this.activeWorkspaceId.set(workspaceId);
-    this.saveStored('vanguard_active_workspace', workspaceId);
-
-    if (workspaceId === 'personal') {
+    if (this.isIndividual()) {
+      this.activeWorkspaceId.set('personal');
+      this.saveStored('vanguard_active_workspace', 'personal');
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-      this.showAdminNotice('Switched to Personal Vault workspace.');
-      this.logAuditEvent('Switched context to Personal Vault workspace', 'Workspace Switcher', 'Context Switch', 'success', 'Low');
-    } else {
-      this.switchOrganization(workspaceId);
-      if (this.isAdmin()) {
-        this.viewMode.set('admin');
-        this.activeTab.set('overview');
-      } else {
-        this.viewMode.set('user');
-        this.activeTab.set('my-apps');
-      }
+      return;
     }
+
+    if (this.isAdmin()) {
+      if (workspaceId === 'personal') {
+        return; // Company accounts do not have access to personal vault
+      }
+      this.activeWorkspaceId.set(workspaceId);
+      this.saveStored('vanguard_active_workspace', workspaceId);
+      this.switchOrganization(workspaceId);
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+      return;
+    }
+
+    // Managed Tenant directory member
+    if (workspaceId === 'personal') {
+      return; // Tenants do not have access to personal vault
+    }
+    this.activeWorkspaceId.set(workspaceId);
+    this.saveStored('vanguard_active_workspace', workspaceId);
+    this.switchOrganization(workspaceId);
+    this.viewMode.set('user');
+    this.activeTab.set('my-apps');
   }
 
   // ==========================================

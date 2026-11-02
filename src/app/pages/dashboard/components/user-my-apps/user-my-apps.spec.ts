@@ -136,10 +136,10 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
     }
   });
 
-  it('should switch between personal workspace and organization context', () => {
+  it('should retain personal workspace for individual accounts and disallow enterprise context (SCRUM-150)', () => {
     dashboardService.switchWorkspace('org_root');
-    expect(dashboardService.isPersonalWorkspace()).toBe(false);
-    expect(dashboardService.activeOrganization().id).toBe('org_root');
+    expect(dashboardService.isPersonalWorkspace()).toBe(true);
+    expect(dashboardService.activeWorkspaceId()).toBe('personal');
 
     dashboardService.switchWorkspace('personal');
     expect(dashboardService.isPersonalWorkspace()).toBe(true);

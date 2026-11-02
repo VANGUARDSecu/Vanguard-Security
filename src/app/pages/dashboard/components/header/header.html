@@ -8,7 +8,7 @@
       <div class="cyber-glow-right"></div>
     </div>
 
-    <!-- Left: Logo & Title & Organization Switcher -->
+    <!-- Left: Logo & Title & Organization Scope -->
     <div class="header-left">
       <div class="logo-container">
         <img
@@ -23,38 +23,30 @@
         <span class="brand-subtitle" *ngIf="isIndividual()">Personal Security Vault</span>
       </div>
 
-      <!-- Individual Account Vault Indicator (SCRUM-50) -->
+      <!-- Individual Account Vault Indicator (SCRUM-50 & SCRUM-150) -->
       <div class="individual-vault-indicator" *ngIf="isIndividual()">
         <div class="indiv-icon-circle">👤</div>
         <div class="indiv-info">
           <span class="indiv-name-text">Personal Vault</span>
           <span class="indiv-pill">Personal</span>
         </div>
-        <button type="button" class="btn-upgrade-org" (click)="openUpgradeModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="upgrade-icon">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          <span>Upgrade to Organization</span>
-        </button>
       </div>
 
-      <!-- Universal Workspace Switcher (Only visible to Company / Organization Accounts) -->
-      <div class="org-switcher-container" *ngIf="!isIndividual()">
+      <!-- Multi-Tenant Organization Switcher (Only visible to Company Administrators managing multiple organizations) -->
+      <div class="org-switcher-container" *ngIf="!isIndividual() && isAdmin()">
         <button
           type="button"
           class="org-switcher-btn"
           [class.active]="showOrgDropdown()"
           (click)="toggleOrgDropdown($event)"
-          title="Switch Workspace / Organization"
+          title="Switch Organization"
         >
-          <div class="org-badge-icon" [class.personal-badge]="isPersonalWorkspace()">
-            <span *ngIf="isPersonalWorkspace()">👤</span>
-            <span *ngIf="!isPersonalWorkspace()">{{ activeOrganization().name.substring(0, 1).toUpperCase() }}</span>
+          <div class="org-badge-icon">
+            <span>{{ activeOrganization().name.substring(0, 1).toUpperCase() }}</span>
           </div>
           <div class="org-btn-info">
             <span class="org-name-text">{{ activeOrganization().name }}</span>
-            <span class="org-tier-pill" [class.pill-personal]="isPersonalWorkspace()">{{ activeOrganization().tier }}</span>
+            <span class="org-tier-pill">{{ activeOrganization().tier }}</span>
           </div>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron-icon" [class.rotated]="showOrgDropdown()">
             <polyline points="6 9 12 15 18 9"></polyline>
@@ -64,32 +56,11 @@
         <!-- Dropdown Menu -->
         <div class="org-dropdown-menu" *ngIf="showOrgDropdown()">
           <div class="dropdown-header">
-            <span class="dropdown-title">Workspaces & Organizations</span>
-            <span class="org-counter">{{ allWorkspaces().length }} total</span>
+            <span class="dropdown-title">Enterprise Organizations</span>
+            <span class="org-counter">{{ organizations().length }} total</span>
           </div>
 
-          <!-- Section 1: Personal Workspace -->
-          <div class="dropdown-sub-label">PERSONAL WORKSPACE</div>
-          <button
-            type="button"
-            class="org-item-btn"
-            [class.selected]="activeWorkspaceId() === 'personal'"
-            (click)="switchOrg('personal')"
-          >
-            <div class="org-item-avatar avatar-personal">
-              👤
-            </div>
-            <div class="org-item-meta">
-              <span class="org-item-name">Personal Vault</span>
-              <span class="org-item-sub">Private Credentials & Personal Apps</span>
-            </div>
-            <svg *ngIf="activeWorkspaceId() === 'personal'" class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-          </button>
-
-          <!-- Section 2: Enterprise Organizations -->
-          <div class="dropdown-sub-label" *ngIf="organizations().length > 0">ENTERPRISE ORGANIZATIONS</div>
+          <!-- Section: Enterprise Organizations (No Personal Vault) -->
           <div class="org-list">
             <button
               *ngFor="let org of organizations()"
@@ -121,7 +92,7 @@
               </svg>
               <span>Create New Organization</span>
             </button>
-            <button type="button" class="dropdown-action-link" (click)="goToBrandingStudio()" *ngIf="!isPersonalWorkspace() && isAdmin()">
+            <button type="button" class="dropdown-action-link" (click)="goToBrandingStudio()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-icon">
                 <circle cx="12" cy="12" r="3"></circle>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -129,6 +100,15 @@
               <span>Branding & Vanity Domain</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Tenant Account Organization Indicator (Corporate Directory Managed) -->
+      <div class="tenant-org-indicator" *ngIf="!isIndividual() && !isAdmin()">
+        <div class="tenant-badge-icon">🏢</div>
+        <div class="tenant-btn-info">
+          <span class="tenant-name-text">{{ activeOrganization().name }}</span>
+          <span class="tenant-tier-pill">Corporate Directory</span>
         </div>
       </div>
     </div>
@@ -150,59 +130,25 @@
       </div>
     </div>
 
-    <!-- Right: Role Switcher & Profile Badge -->
+    <!-- Right: Scoped Access Badge & Profile -->
     <div class="header-right">
-      <!-- Admin / User / Personal Vault Mode Switcher (Visible to Company Admins) -->
-      <div class="mode-toggle-pill" *ngIf="!isIndividual() && isAdmin()">
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="viewMode() === 'admin' && !isPersonalWorkspace()"
-          (click)="toggleViewMode('admin')"
-        >
-          <span class="mode-icon">👑</span>
-          <span>Admin Console</span>
-        </button>
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="viewMode() === 'user' && !isPersonalWorkspace()"
-          (click)="toggleViewMode('user')"
-        >
-          <span class="mode-icon">🏢</span>
-          <span>User Portal</span>
-        </button>
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="isPersonalWorkspace()"
-          (click)="switchOrg('personal')"
-        >
-          <span class="mode-icon">🔒</span>
-          <span>Personal Vault</span>
-        </button>
+      <!-- SCRUM-150: Scoped Access Badge (Strict role and account-scoped UI) -->
+      <!-- 1. Company Account: Admin Console Only -->
+      <div class="account-scope-badge badge-company" *ngIf="!isIndividual() && isAdmin()" title="Company Account: Admin Console Access Only">
+        <span class="scope-icon">👑</span>
+        <span class="scope-label">Admin Console</span>
       </div>
 
-      <!-- Company Employee Portal / Personal Vault Switcher (Visible to Non-Admin Company Users) -->
-      <div class="mode-toggle-pill" *ngIf="!isIndividual() && !isAdmin()">
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="!isPersonalWorkspace()"
-          (click)="switchOrg(activeOrganizationId())"
-        >
-          <span class="mode-icon">🏢</span>
-          <span>Company Portal</span>
-        </button>
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="isPersonalWorkspace()"
-          (click)="switchOrg('personal')"
-        >
-          <span class="mode-icon">🔒</span>
-          <span>Personal Vault</span>
-        </button>
+      <!-- 2. Individual Account: Personal Vault Only -->
+      <div class="account-scope-badge badge-individual" *ngIf="isIndividual()" title="Individual Account: Personal Vault Access Only">
+        <span class="scope-icon">🔒</span>
+        <span class="scope-label">Personal Vault</span>
+      </div>
+
+      <!-- 3. Tenant Directory Member: User Portal Only -->
+      <div class="account-scope-badge badge-tenant" *ngIf="!isIndividual() && !isAdmin()" title="Managed Tenant: User Portal Access Only">
+        <span class="scope-icon">🏢</span>
+        <span class="scope-label">User Portal</span>
       </div>
 
       <!-- User Profile Pill -->
@@ -227,44 +173,3 @@
       </button>
     </div>
   </header>
-
-  <!-- UPGRADE TO ORGANIZATION MODAL -->
-  <div class="modal-backdrop" *ngIf="showUpgradeModal()">
-    <div class="modal-box cyber-modal upgrade-modal">
-      <div class="modal-header">
-        <h2 class="modal-heading">Upgrade to Enterprise Organization</h2>
-        <button type="button" class="modal-close-btn" (click)="closeUpgradeModal()">✕</button>
-      </div>
-
-      <div class="modal-body">
-        <p class="upgrade-intro">
-          Upgrading transforms your account into an Enterprise Directory tenant. You'll gain access to Cloud LDAP, Cloud RADIUS, SAML 2.0 / OIDC SSO, SCIM Directory Sync, and MDM Fleet Management.
-        </p>
-
-        <div class="upgrade-feature-pills">
-          <span class="feat-pill">🛡️ Fleet MDM</span>
-          <span class="feat-pill">⚡ SAML 2.0 / OIDC</span>
-          <span class="feat-pill">📡 RADIUS 802.1X</span>
-          <span class="feat-pill">📁 Cloud LDAP</span>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Enterprise Organization Name *</label>
-          <input
-            type="text"
-            [(ngModel)]="upgradeCompanyName"
-            placeholder="e.g. Acme Cybersecurity Corp"
-            class="cyber-input"
-          />
-          <span class="form-hint">Your credentials and 2FA keys in your personal vault will remain strictly safe and private.</span>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn-cyber-secondary" (click)="closeUpgradeModal()">Cancel</button>
-        <button type="button" class="btn-cyber-primary" (click)="confirmUpgrade()">
-          Activate Organization Console
-        </button>
-      </div>
-    </div>
-  </div>

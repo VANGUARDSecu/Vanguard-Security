@@ -98,6 +98,8 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
     });
 
     it('should allow de-enrolling TOTP authenticator', () => {
+      vi.spyOn(authService, 'listMfaFactors').mockReturnValue(of({ success: true, factors: [{ id: 'factor-1', status: 'verified', type: 'totp' }] }));
+      vi.spyOn(authService, 'unenrollTotp').mockReturnValue(of({ success: true, message: 'Unenrolled' }));
       component.dashboardService.hasTotpEnrolled.set(true);
       expect(component.hasTotpEnrolled()).toBe(true);
 
@@ -360,5 +362,35 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       expect(firstEvent.ip).toBe('192.168.1.100');
     });
   });
-});
 
+  // ==========================================
+  // 6. Mobile Push & Biometric MFA (SCRUM-85 / SCRUM-143)
+  // ==========================================
+  describe('Mobile Push & Biometric MFA (SCRUM-143)', () => {
+    it('should toggle Mobile Push MFA preference via AuthService', () => {
+      vi.spyOn(authService, 'setPushMfaPreference').mockReturnValue(
+        of({ success: true, enabled: false })
+      );
+
+      expect(component.pushMfaEnabled()).toBe(true);
+      component.togglePushMfa();
+      expect(component.pushMfaEnabled()).toBe(false);
+
+      vi.spyOn(authService, 'setPushMfaPreference').mockReturnValue(
+        of({ success: true, enabled: true })
+      );
+      component.togglePushMfa();
+      expect(component.pushMfaEnabled()).toBe(true);
+    });
+
+    it('should handle toggle error gracefully', () => {
+      vi.spyOn(authService, 'setPushMfaPreference').mockReturnValue(
+        throwError(() => new Error('Network error'))
+      );
+
+      component.pushMfaEnabled.set(true);
+      component.togglePushMfa();
+      expect(component.pushMfaUpdating()).toBe(false);
+    });
+  });
+});

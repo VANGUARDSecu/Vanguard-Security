@@ -97,6 +97,8 @@ export class DashboardComponent implements OnInit {
 
   ngOnInit(): void {
     this.dashboardService.initDashboardForCurrentUser();
+    // SCRUM-94: source company apps from the backend for company accounts.
+    this.dashboardService.loadCompanyApps();
   }
 
   // Authentication & Session

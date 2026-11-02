@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { UserPersonalVault } from './user-personal-vault';
 import { DashboardService } from '../../services/dashboard.service';
@@ -179,5 +179,25 @@ describe('UserPersonalVault Component (SCRUM-50 Personal Credential Manager)', (
     expect(pw.length).toBe(24);
     const strength = component.generatedPasswordStrength();
     expect(strength.score).toBeGreaterThanOrEqual(70);
+  });
+
+  it('SCRUM-114: unlock with the login password unlocks the vault and loads items', async () => {
+    const httpMock = TestBed.inject(HttpTestingController);
+    expect(component.isUnlocked()).toBe(false);
+    component.unlockPassword = 'LoginPass#1';
+    const p = component.unlock();
+    // The unlock first pulls the latest envelope from the backend; respond with none.
+    const req = httpMock.expectOne((r) => r.url.endsWith('/vault'));
+    req.flush({ envelope: null });
+    await p;
+    expect(component.isUnlocked()).toBe(true);
+    expect(component.unlockError()).toBeNull();
+  });
+
+  it('SCRUM-114: unlock requires a password', async () => {
+    component.unlockPassword = '';
+    await component.unlock();
+    expect(component.isUnlocked()).toBe(false);
+    expect(component.unlockError()).toContain('Vanguard password');
   });
 });

@@ -36,8 +36,7 @@ export class LoginComponent implements OnInit {
   readonly clientDisplayName = computed<string>(() => {
     const sso = this.ssoParams();
     if (!sso) return '';
-    if (sso['client_id'] === 'vanguard-dummy-portal') return 'Acme Enterprise Portal';
-    return sso['client_id'] || 'Client Application';
+    return sso['client_name'] || sso['clientName'] || sso['client_id'] || 'Client Application';
   });
 
   readonly isAccountMismatch = computed<boolean>(() => {
@@ -58,6 +57,7 @@ export class LoginComponent implements OnInit {
       if (params['client_id'] && params['redirect_uri']) {
         const ssoData = {
           client_id: params['client_id'],
+          client_name: params['client_name'] || params['clientName'] || '',
           redirect_uri: params['redirect_uri'],
           response_type: params['response_type'] || 'code',
           scope: params['scope'] || 'openid profile email roles',
@@ -317,6 +317,7 @@ export class LoginComponent implements OnInit {
         const queryParams: any = {
           challengeId: res.challengeId,
           email: res.email,
+          clientName: res.clientName || this.clientDisplayName(),
           mode: 'signin',
           method: 'email_otp',
           hasTotp: hasTotp ? 'true' : 'false',
@@ -366,7 +367,7 @@ export class LoginComponent implements OnInit {
         try {
           const originUrl = new URL(sso['redirect_uri']).origin;
           const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
-          const appName = sso['client_id']?.includes('dummy') ? 'Acme Dummy Web' : 'External Application';
+          const appName = this.clientDisplayName();
           const newConn = {
             id: `conn_${sso['client_id']}`,
             clientId: sso['client_id'],

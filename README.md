@@ -49,7 +49,7 @@ Designed for SecOps engineers and system administrators to configure enterprise 
 ### 2. Employee Personal Workspace (User View)
 Tailored for corporate employees to access organizational resources:
 - **My Apps Launchpad**: One-click single sign-on into authorized corporate SaaS applications.
-- **Security & Password Management (SCRUM-32 & SCRUM-60)**: Self-service permanent password updates, TOTP authenticator pairing, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), and personal authentication event audit trail.
+- **Security & Password Management (SCRUM-32, SCRUM-60 & SCRUM-143)**: Self-service permanent password updates, TOTP authenticator pairing, Out-of-Band Mobile Push & Biometric MFA factor preference toggle, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), elevated modal backdrop layering (z-index 1050), high-visibility active sidebar navigation highlighting with MFA badges, universal appbar workspace mode switching (Admin Console / User Portal / Personal Vault), resilient authentication trail event rendering with raw and localized timestamp fallback (preventing DatePipe parsing failures), event-propagated organization switcher dropdowns, and dedicated personal authentication event audit trail.
 - **Device Trust & Hardware**: Inspect enrolled laptops, phones, and MDM compliance state.
 - **Corporate Wi-Fi Profile**: Download pre-configured 802.1X / EAP-TLS profiles and certificates for immediate enterprise network access.
 - **SSH Key Manager**: Upload and manage public SSH keys (`ssh-ed25519`, `ssh-rsa`) for infrastructure access.
@@ -132,6 +132,45 @@ To ensure complete functionality (including live email dispatch, Supabase authen
    npm run start:dev
    ```
 3. Ensure the backend is listening on `http://localhost:3000`.
+
+> **Company app launchpad (SCRUM-94/95):** In a **Company** workspace the "My Apps"
+> launchpad is sourced from the backend `GET /apps/my` endpoint (tenant-scoped,
+> per-employee assignments), not from local storage. Company admins assign apps
+> via `POST /apps/assign`. The backend must be running with
+> `SUPABASE_SERVICE_ROLE_KEY` configured for assignments to persist. **Individual**
+> accounts keep a purely client-side personal launchpad and make no `/apps` calls.
+
+> **Authenticated backend calls (SCRUM-123/131):** The backend derives the caller
+> identity from the Supabase access token, not a `userId` parameter. A global HTTP
+> interceptor (`authTokenInterceptor`) automatically attaches
+> `Authorization: Bearer <token>` to requests sent to `http://localhost:3000`.
+> The admin "Global Killswitch" now calls `POST /apps/killswitch` and reports the
+> **confirmed** per-tenant revocation result (revoked/failed counts and the
+> residual access-token window) rather than a simulated success.
+
+> **Supabase Access Token Auto-Renewal & 401 Retry (SCRUM-142):** In accordance with
+> the Vanguard Security Improvement Plan (PRD NFR-02 & P1-01), Supabase JWT access
+> tokens have a strict 300-second (5-minute) lifetime. The frontend implements a dual
+> renewal mechanism:
+> 1. **Proactive Auto-Renewal:** `AuthService` schedules an automated token refresh
+>    `60 seconds` before expiry (at second 240 of 300) via `POST /auth/refresh`,
+>    ensuring active sessions never suffer authentication interruptions.
+> 2. **Reactive 401 Retry Interceptor:** If a token expires while inactive or across sleep/wake,
+>    `authTokenInterceptor` intercepts HTTP 401 responses, executes a de-duplicated
+>    refresh via `authService.refreshSession()`, and automatically replays the pending request.
+> 3. **Suspension & Revocation Enforcement:** Token refresh calls invoke server-side checks.
+>    If a user is suspended or revoked by an administrator, the refresh is denied and the
+>    client is immediately logged out.
+
+---
+
+## Continuous Integration (GitHub Actions)
+
+The repository includes an automated CI workflow in `.github/workflows/ci.yml` (SCRUM-145):
+- **Node Setup & Cache**: `actions/setup-node@v4` with root `package-lock.json` dependency caching.
+- **Unit Tests**: `npm test -- --watch=false` running the complete Vitest test matrix (260 tests passed).
+- **Production Build**: `npm run build` compiling client and server bundles.
+- **Security Audit**: `npm audit --audit-level=high` (informational report).
 
 ---
 

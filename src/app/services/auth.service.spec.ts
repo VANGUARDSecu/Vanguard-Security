@@ -196,4 +196,42 @@ describe('AuthService', () => {
       expect(localStorage.getItem('vanguard_refresh_token')).toBeNull();
     });
   });
+
+  describe('Cross-account storage isolation & purge (SCRUM-153)', () => {
+    it('logout() thoroughly purges all vanguard_* and sb-* keys while preserving remembered email', () => {
+      localStorage.setItem('vanguard_directory_users', JSON.stringify([{ id: 'u1', email: 'old@company.com' }]));
+      localStorage.setItem('vanguard_organizations', JSON.stringify([{ id: 'org-old', name: 'Old Company' }]));
+      localStorage.setItem('vanguard_active_org_id', 'org-old');
+      localStorage.setItem('sb-test-token', 'supabase-auth-token');
+      localStorage.setItem('vanguard_remembered_email', 'remember@user.com');
+
+      service.logout();
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/logout'));
+      req.flush({ success: true });
+
+      expect(localStorage.getItem('vanguard_directory_users')).toBeNull();
+      expect(localStorage.getItem('vanguard_organizations')).toBeNull();
+      expect(localStorage.getItem('vanguard_active_org_id')).toBeNull();
+      expect(localStorage.getItem('sb-test-token')).toBeNull();
+      expect(localStorage.getItem('vanguard_remembered_email')).toBe('remember@user.com');
+    });
+
+    it('setSession() purges stale cross-account state when a different user signs in', () => {
+      localStorage.setItem('vanguard_user', JSON.stringify({ id: 'user-old', email: 'old@company.com' }));
+      localStorage.setItem('vanguard_directory_users', JSON.stringify([{ id: 'user-old', email: 'old@company.com' }]));
+      localStorage.setItem('vanguard_organizations', JSON.stringify([{ id: 'org-old', name: 'Old Corp' }]));
+      localStorage.setItem('vanguard_remembered_email', 'remember@user.com');
+
+      service.setSession(
+        { id: 'user-new', email: 'new@company.com', role: 'admin' },
+        { access_token: 'new-token', refresh_token: 'new-refresh', expires_at: 1800000000 }
+      );
+
+      expect(localStorage.getItem('vanguard_directory_users')).toBeNull();
+      expect(localStorage.getItem('vanguard_organizations')).toBeNull();
+      expect(localStorage.getItem('vanguard_user')).toContain('user-new');
+      expect(localStorage.getItem('vanguard_remembered_email')).toBe('remember@user.com');
+    });
+  });
 });

@@ -29,6 +29,18 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Cross-Account Storage Isolation & Tenant Boundary Enforcement (SCRUM-153)
+The frontend enforces total isolation across user account sessions on the same browser client to eliminate cross-tenant data leakage:
+- **Comprehensive Logout Purge**:
+  - AuthService.logout() wipes all session tokens (anguard_user, anguard_token, anguard_refresh_token), tenant/directory caches (anguard_directory_users, anguard_organizations, anguard_directory_groups, anguard_access_requests, anguard_fleet_devices, anguard_connected_apps), and Supabase client tokens (sb-*) from localStorage and sessionStorage. User-consented preferences (anguard_remembered_email) are retained.
+- **Dynamic Account Switch Detection**:
+  - AuthService.setSession() compares the newly authenticated user profile against the cached session. If the user ID differs, all prior cross-account local storage keys are automatically purged before mounting the new identity.
+- **Tenant & User-Scoped Directory & Organizations**:
+  - DashboardService.initOrganizations() validates all cached organizations against the authenticated user's company (user.companyName), tenant ID (user.tenant_id), or primary contact email. Newly registered company accounts initialize with exclusively their own company tenant.
+  - DashboardService.initDirectoryUsers() validates that the active session user exists within the cached directory members before loading. Stale directory members from past sessions are discarded, ensuring newly registered accounts show only their own root Super Administrator.
+  - DashboardService.initSupabaseSync() filters cloud tenants strictly by the authenticated user's company and memberships, preventing unauthorized tenant visibility in the organization switcher or admin settings.
+  - Purged all hardcoded legacy test emails and member injections (johnroben.manayon31@gmail.com) from directory group initializers.
+
 ### Role- & Account-Scoped Appbar & Workspace Access (SCRUM-150)
 The application enforces strict, account-type-based workspace boundaries and header appbar controls:
 - **Company Account (`accountType === 'company'`, `role === 'admin'`)**:

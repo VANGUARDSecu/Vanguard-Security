@@ -115,30 +115,35 @@ export class DashboardService {
   readonly directorySearch = signal<string>('');
 
   private initDirectoryUsers(): DirectoryUser[] {
-    const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (stored && stored.length > 0) {
-      const seen = new Set<string>();
-      const now = Date.now();
-      const updated = stored
-        .filter((u) => {
-          const email = u.email?.toLowerCase().trim();
-          if (!email || seen.has(email)) return false;
-          seen.add(email);
-          return true;
-        })
-        .map((u) => {
-          if (u.accountStatus === 'Pending' && u.expiresAt) {
-            const exp = new Date(u.expiresAt).getTime();
-            if (exp < now) {
-              return { ...u, accountStatus: 'Expired' as const };
-            }
-          }
-          return u;
-        });
-      return updated;
-    }
-
     const u = this.authService.currentUser();
+    const userEmail = u?.email?.toLowerCase().trim();
+
+    const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
+    if (stored && stored.length > 0 && userEmail) {
+      // SCRUM-153: Verify that stored users belong to the current authenticated account
+      const currentUserInStore = stored.some((usr) => usr.email?.toLowerCase().trim() === userEmail);
+      if (currentUserInStore) {
+        const seen = new Set<string>();
+        const now = Date.now();
+        const updated = stored
+          .filter((usr) => {
+            const email = usr.email?.toLowerCase().trim();
+            if (!email || seen.has(email)) return false;
+            seen.add(email);
+            return true;
+          })
+          .map((usr) => {
+            if (usr.accountStatus === 'Pending' && usr.expiresAt) {
+              const exp = new Date(usr.expiresAt).getTime();
+              if (exp < now) {
+                return { ...usr, accountStatus: 'Expired' as const };
+              }
+            }
+            return usr;
+          });
+        return updated;
+      }
+    }
     if (u && u.email) {
       const name = u.firstName && u.lastName
         ? `${u.firstName} ${u.lastName}`
@@ -1474,11 +1479,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // SCRUM-28: Multi-Tenant Organizations & White-Label Branding State
   // ==========================================
   private initOrganizations(): TenantOrganization[] {
-    const stored = this.loadStored<TenantOrganization[]>('vanguard_organizations', []);
-    if (stored && stored.length > 0) {
-      return stored;
-    }
-    const company = this.user()?.companyName || 'Vanguard Security Systems';
+    const u = this.user();
+    const company = u?.companyName || 'Vanguard Security Systems';
     const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'vanguard-corp';
     const initialOrg: TenantOrganization = {
       id: 'org_root',
@@ -1486,11 +1488,30 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       slug: slug,
       tier: 'Enterprise',
       domain: `${slug}.security`,
-      primaryContactEmail: this.user()?.email || 'admin@vanguard.security',
+      primaryContactEmail: u?.email || 'admin@vanguard.security',
       createdAt: new Date().toISOString(),
       memberCount: 1,
       isCustomDomainVerified: true,
     };
+
+    const stored = this.loadStored<TenantOrganization[]>('vanguard_organizations', []);
+    if (stored && stored.length > 0) {
+      // SCRUM-153: Only retain organizations matching the current authenticated user/company
+      const userEmail = u?.email?.toLowerCase().trim();
+      const userCompany = company.toLowerCase().trim();
+      const userTenantId = (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId)?.toLowerCase();
+
+      const scoped = stored.filter((org) => {
+        if (userTenantId && org.id.toLowerCase() === userTenantId) return true;
+        if (org.name?.toLowerCase().trim() === userCompany) return true;
+        if (userEmail && org.primaryContactEmail?.toLowerCase().trim() === userEmail) return true;
+        return false;
+      });
+
+      if (scoped.length > 0) {
+        return scoped;
+      }
+    }
     return [initialOrg];
   }
 
@@ -1618,23 +1639,40 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       // 1. Synchronize Tenant Organizations from Supabase
       const cloudTenants = await this.supabaseService.getTenants();
       if (cloudTenants && cloudTenants.length > 0) {
-        const mappedTenants: TenantOrganization[] = cloudTenants.map((t) => ({
-          id: t.id,
-          name: t.name,
-          slug: t.slug,
-          tier: (t.subscription_tier as any) || 'Enterprise',
-          domain: t.domain || undefined,
-          logoUrl: t.branding?.logoUrl || undefined,
-          primaryContactEmail: t.branding?.supportEmail || undefined,
-          createdAt: t.created_at,
-          memberCount: 1,
-          isCustomDomainVerified: t.branding?.ssoDomainVerified || false,
-        }));
-        this.organizations.set(mappedTenants);
-        this.saveStored('vanguard_organizations', mappedTenants);
+        const u = this.user();
+        const userTenantId = (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId)?.toLowerCase();
+        const userCompany = u?.companyName?.toLowerCase().trim();
+        const userEmail = u?.email?.toLowerCase().trim();
 
-        const currentActiveId = this.activeOrganizationId();
-        const activeCloud = cloudTenants.find((c) => c.id === currentActiveId) || cloudTenants[0];
+        // SCRUM-153: Strictly scope cloud tenants to current user/membership to prevent cross-tenant leaks
+        const relevantTenants = cloudTenants.filter((t) => {
+          if (userTenantId && t.id.toLowerCase() === userTenantId) return true;
+          if (userCompany && t.name?.toLowerCase().trim() === userCompany) return true;
+          if (userEmail && (
+            t.branding?.supportEmail?.toLowerCase().trim() === userEmail ||
+            t.primaryContactEmail?.toLowerCase().trim() === userEmail
+          )) return true;
+          return false;
+        });
+
+        if (relevantTenants.length > 0) {
+          const mappedTenants: TenantOrganization[] = relevantTenants.map((t) => ({
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            tier: (t.subscription_tier as any) || 'Enterprise',
+            domain: t.domain || undefined,
+            logoUrl: t.branding?.logoUrl || undefined,
+            primaryContactEmail: t.branding?.supportEmail || undefined,
+            createdAt: t.created_at,
+            memberCount: 1,
+            isCustomDomainVerified: t.branding?.ssoDomainVerified || false,
+          }));
+          this.organizations.set(mappedTenants);
+          this.saveStored('vanguard_organizations', mappedTenants);
+
+          const currentActiveId = this.activeOrganizationId();
+          const activeCloud = relevantTenants.find((c) => c.id === currentActiveId) || relevantTenants[0];
         if (activeCloud) {
           if (activeCloud.id !== currentActiveId) {
             this.activeOrganizationId.set(activeCloud.id);
@@ -1657,6 +1695,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.saveStored('vanguard_tenant_branding', mergedBranding);
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
+        }
         }
       }
 
@@ -1831,8 +1870,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.fetchConnectedApps();
 
     const storedUsers = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (storedUsers && storedUsers.length > 0) {
+    const u = this.user();
+    const userEmail = u?.email?.toLowerCase().trim();
+    if (storedUsers && storedUsers.length > 0 && userEmail && storedUsers.some((usr) => usr.email?.toLowerCase().trim() === userEmail)) {
       this.directoryUsers.set(storedUsers);
+    } else {
+      const freshUsers = this.initDirectoryUsers();
+      this.directoryUsers.set(freshUsers);
+      this.saveStored('vanguard_directory_users', freshUsers);
     }
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
@@ -1840,20 +1885,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.directoryGroups.set(storedGroups);
     }
 
-    // Ensure SecOps includes employee member johnroben.manayon31@gmail.com
-    this.directoryGroups.update((groups) =>
-      groups.map((g) => {
-        if (g.id === 'grp-secops' || g.name.toLowerCase().includes('secops')) {
-          const members = new Set(g.memberIds);
-          members.add('johnroben.manayon31@gmail.com');
-          return {
-            ...g,
-            memberIds: Array.from(members),
-          };
-        }
-        return g;
-      })
-    );
+    // SCRUM-153: Purged hardcoded injection of legacy emails
     this.saveStored('vanguard_directory_groups', this.directoryGroups());
 
     this.syncGroupMembershipsToUsers();

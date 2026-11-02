@@ -688,6 +688,24 @@ export class AuthService {
     }
 
     if (this.isBrowser) {
+      // SCRUM-153: If the active user has changed, wipe previous user's cached directory & tenant state
+      const prevUserRaw = localStorage.getItem('vanguard_user');
+      if (prevUserRaw) {
+        try {
+          const prev = JSON.parse(prevUserRaw);
+          if (prev?.id && prev.id !== user.id) {
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && (k.startsWith('vanguard_') || k.startsWith('sb-')) && k !== 'vanguard_remembered_email') {
+                keysToRemove.push(k);
+              }
+            }
+            keysToRemove.forEach((k) => localStorage.removeItem(k));
+          }
+        } catch {}
+      }
+
       localStorage.setItem('vanguard_user', JSON.stringify(normalizedUser));
       localStorage.setItem('vanguard_token', session.access_token);
       if (session.refresh_token) {
@@ -1205,11 +1223,19 @@ export class AuthService {
       this.http.post(`${this.API_URL}/logout`, {}).subscribe({
         error: () => {},
       });
-      localStorage.removeItem('vanguard_user');
-      localStorage.removeItem('vanguard_token');
-      localStorage.removeItem('vanguard_refresh_token');
-      localStorage.removeItem('vanguard_token_expires_at');
-      localStorage.removeItem('vanguard_reset_required');
+      // SCRUM-153: Thoroughly purge all session, directory, tenant, devices, apps, and workspace state from storage
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('vanguard_') || key.startsWith('sb-'))) {
+          if (key !== 'vanguard_remembered_email') {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+      sessionStorage.clear();
+
       try {
         this.supabaseService.client.auth.signOut().catch(() => {});
       } catch {}

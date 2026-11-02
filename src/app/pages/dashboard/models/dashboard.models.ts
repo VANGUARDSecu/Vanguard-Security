@@ -2,7 +2,7 @@ export interface ProtocolStatus {
   name: string;
   type: string;
   port: string;
-  status: 'online' | 'standby' | 'healthy';
+  status: 'online' | 'standby' | 'healthy' | 'offline';
   description: string;
   badge: string;
   certExpiry?: string;
@@ -44,6 +44,7 @@ export type AccessRequestStatus = 'Pending Approval' | 'Approved' | 'Rejected';
 
 export interface AppAccessRequest {
   id: string;
+  tenantId?: string;
   userId: string;
   userName: string;
   userEmail: string;

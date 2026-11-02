@@ -12,5 +12,11 @@ export const authGuard: CanActivateFn = () => {
     return false;
   }
 
+  // SCRUM-155: If password reset is required (e.g. temporary password login or recovery), force reset-password
+  if (authService.isPasswordResetRequired()) {
+    router.navigate(['/reset-password']);
+    return false;
+  }
+
   return true;
 };

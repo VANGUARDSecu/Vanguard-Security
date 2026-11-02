@@ -38,15 +38,10 @@
       <div *ngIf="viewMode() === 'admin'">
         <app-admin-overview *ngIf="activeTab() === 'overview'"></app-admin-overview>
         <app-admin-directory *ngIf="activeTab() === 'directory'"></app-admin-directory>
-        <app-admin-saml-oidc *ngIf="activeTab() === 'saml-oidc' || activeTab() === 'access-requests'"></app-admin-saml-oidc>
-        <app-admin-cloud-ldap *ngIf="activeTab() === 'cloud-ldap'"></app-admin-cloud-ldap>
-        <app-admin-cloud-radius *ngIf="activeTab() === 'cloud-radius'"></app-admin-cloud-radius>
+        <app-admin-saml-oidc *ngIf="activeTab() === 'saml-oidc'"></app-admin-saml-oidc>
+        <app-admin-access-requests *ngIf="activeTab() === 'access-requests'"></app-admin-access-requests>
         <app-admin-audit-logs *ngIf="activeTab() === 'audit-logs'"></app-admin-audit-logs>
-        <app-admin-webhooks *ngIf="activeTab() === 'webhooks'"></app-admin-webhooks>
-        <app-admin-device-fleet *ngIf="activeTab() === 'device-fleet'"></app-admin-device-fleet>
         <app-admin-settings *ngIf="activeTab() === 'settings'"></app-admin-settings>
-        <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
-        <app-user-personal-vault *ngIf="activeTab() === 'personal-vault'"></app-user-personal-vault>
       </div>
 
       <!-- ====================================================================

@@ -47,6 +47,29 @@ export class LoginComponent implements OnInit {
     return user.email.toLowerCase().trim() !== hint.toLowerCase().trim();
   });
 
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160)
+  readonly ssoApprovalRequired = signal<boolean>(false);
+  readonly ssoApprovalMessage = signal<string>('');
+
+  private isApprovalRequiredError(err: any): boolean {
+    const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
+    return (
+      msg.includes('administrative approval is required') ||
+      msg.includes('zero-trust access governance') ||
+      (msg.includes('approval') && msg.includes('corporate'))
+    );
+  }
+
+  private handleApprovalRequired(err: any): void {
+    this.isLoading.set(false);
+    this.ssoApprovalRequired.set(true);
+    const msg =
+      err?.message ||
+      'Zero-Trust Access Governance: Administrative approval is required before corporate account can access this application.';
+    this.ssoApprovalMessage.set(msg);
+    this.showNotification('error', msg, 8000);
+  }
+
   // Single timed notification state with auto-dismiss
   readonly notification = signal<{ type: 'success' | 'error'; message: string } | null>(null);
   private notificationTimer: any = null;
@@ -80,14 +103,9 @@ export class LoginComponent implements OnInit {
       // If NOT SSO, redirect straight to dashboard
       // If SSO, stay on login page to prompt one-click approval or switch account
       if (this.authService.isLoggedIn() && !this.ssoParams()) {
-        const user = this.authService.currentUser();
-        const meta = user?.user_metadata || {};
-        const isTemp = meta['is_temporary_password'] === true || meta['isTemporaryPassword'] === true;
-        if (!isTemp) {
-          this.authService.isPasswordResetRequired.set(false);
-          if (typeof localStorage !== 'undefined') {
-            localStorage.removeItem('vanguard_reset_required');
-          }
+        if (this.authService.isPasswordResetRequired()) {
+          this.router.navigate(['/reset-password']);
+          return;
         }
         this.router.navigate(['/dashboard']);
         return;
@@ -178,6 +196,13 @@ export class LoginComponent implements OnInit {
             });
           }, 600);
         } else {
+          if (this.authService.isPasswordResetRequired()) {
+            this.showNotification('success', 'Temporary credentials verified. Please set your new password.', 3000);
+            setTimeout(() => {
+              this.router.navigate(['/reset-password']);
+            }, 600);
+            return;
+          }
           this.showNotification('success', 'Login successful! Redirecting...', 3000);
           setTimeout(() => {
             this.router.navigate(['/dashboard']);
@@ -273,7 +298,11 @@ export class LoginComponent implements OnInit {
               Object.assign(queryParams, sso);
               this.router.navigate(['/verify-otp'], { queryParams });
             },
-            error: () => {
+            error: (pushErr: any) => {
+              if (this.isApprovalRequiredError(pushErr)) {
+                this.handleApprovalRequired(pushErr);
+                return;
+              }
               // Fallback to standard email OTP if push challenge initiation errors
               this.fallbackToEmailOtp(sso, email, currentUser, fullName, role, dept, hasTotp);
             },
@@ -282,7 +311,11 @@ export class LoginComponent implements OnInit {
           this.fallbackToEmailOtp(sso, email, currentUser, fullName, role, dept, hasTotp);
         }
       },
-      error: () => {
+      error: (prefErr: any) => {
+        if (this.isApprovalRequiredError(prefErr)) {
+          this.handleApprovalRequired(prefErr);
+          return;
+        }
         this.fallbackToEmailOtp(sso, email, currentUser, fullName, role, dept, hasTotp);
       },
     });
@@ -327,6 +360,10 @@ export class LoginComponent implements OnInit {
       },
       error: (err: Error) => {
         this.isLoading.set(false);
+        if (this.isApprovalRequiredError(err)) {
+          this.handleApprovalRequired(err);
+          return;
+        }
         this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
       },
     });
@@ -398,6 +435,10 @@ export class LoginComponent implements OnInit {
       },
       error: (err: Error) => {
         this.isLoading.set(false);
+        if (this.isApprovalRequiredError(err)) {
+          this.handleApprovalRequired(err);
+          return;
+        }
         this.showNotification('error', err.message || 'Failed to authorize SSO session.');
       },
     });
@@ -421,16 +462,21 @@ export class LoginComponent implements OnInit {
     const sso = this.ssoParams();
     if (!sso) return;
 
+    const errorDescription = this.ssoApprovalRequired()
+      ? 'Access approval pending administrator review'
+      : 'User cancelled Vanguard SSO authentication';
+
     try {
       const redirectUri = new URL(sso['redirect_uri']);
       redirectUri.searchParams.set('error', 'access_denied');
-      redirectUri.searchParams.set('error_description', 'User cancelled Vanguard SSO authentication');
+      redirectUri.searchParams.set('error_description', errorDescription);
       if (sso['state']) {
         redirectUri.searchParams.set('state', sso['state']);
       }
       window.location.href = redirectUri.toString();
     } catch {
-      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=User+cancelled+Vanguard+SSO+authentication${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
+      const encodedDesc = encodeURIComponent(errorDescription);
+      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=${encodedDesc}${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
     }
   }
 

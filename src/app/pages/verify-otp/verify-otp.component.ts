@@ -26,6 +26,29 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly method = signal<VerificationMethod>('email_otp');
   readonly hasTotp = signal<boolean>(false);
 
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160)
+  readonly ssoApprovalRequired = signal<boolean>(false);
+  readonly ssoApprovalMessage = signal<string>('');
+
+  private isApprovalRequiredError(err: any): boolean {
+    const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
+    return (
+      msg.includes('administrative approval is required') ||
+      msg.includes('zero-trust access governance') ||
+      (msg.includes('approval') && msg.includes('corporate'))
+    );
+  }
+
+  private handleApprovalRequired(err: any): void {
+    this.isLoading.set(false);
+    this.ssoApprovalRequired.set(true);
+    const msg =
+      err?.message ||
+      'Zero-Trust Access Governance: Administrative approval is required before corporate account can access this application.';
+    this.ssoApprovalMessage.set(msg);
+    this.showNotification('error', msg, 8000);
+  }
+
   // Push MFA state signals (SCRUM-85)
   readonly numberCode = signal<string>('');
   readonly clientAppIcon = signal<string>('🛡️');
@@ -527,6 +550,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         },
         error: (err: Error) => {
           this.isLoading.set(false);
+          if (this.isApprovalRequiredError(err)) {
+            this.handleApprovalRequired(err);
+            return;
+          }
           this.showNotification('error', err.message || 'Invalid or expired SSO verification code.');
         },
       });
@@ -673,6 +700,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         },
         error: (err: Error) => {
           this.isLoading.set(false);
+          if (this.isApprovalRequiredError(err)) {
+            this.handleApprovalRequired(err);
+            return;
+          }
           this.showNotification('error', err.message || 'SSO authorization failed.');
         },
       });
@@ -680,7 +711,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
 
     this.isLoading.set(false);
-    this.showNotification('success', 'Verification successful! Redirecting to secure vault...', 3000);
+    if (this.authService.isPasswordResetRequired()) {
+      this.showNotification('success', 'Temporary credentials verified. Please set your new password.', 3000);
+      setTimeout(() => {
+        this.router.navigate(['/reset-password']);
+      }, 800);
+      return;
+    }
+
+    this.showNotification('success', 'Verification successful! Redirecting...', 3000);
     setTimeout(() => {
       this.router.navigate(['/dashboard']);
     }, 800);
@@ -690,16 +729,21 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     const sso = this.ssoParams();
     if (!sso) return;
 
+    const errorDescription = this.ssoApprovalRequired()
+      ? 'Access approval pending administrator review'
+      : 'User cancelled MFA verification for Vanguard SSO';
+
     try {
       const redirectUri = new URL(sso['redirect_uri']);
       redirectUri.searchParams.set('error', 'access_denied');
-      redirectUri.searchParams.set('error_description', 'User cancelled MFA verification for Vanguard SSO');
+      redirectUri.searchParams.set('error_description', errorDescription);
       if (sso['state']) {
         redirectUri.searchParams.set('state', sso['state']);
       }
       window.location.href = redirectUri.toString();
     } catch {
-      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=User+cancelled+MFA+verification+for+Vanguard+SSO${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
+      const encodedDesc = encodeURIComponent(errorDescription);
+      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=${encodedDesc}${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
     }
   }
 }

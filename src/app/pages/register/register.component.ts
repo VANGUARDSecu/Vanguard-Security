@@ -220,7 +220,7 @@ export class RegisterComponent {
         this.isLoading.set(false);
         this.showNotification(
           'success',
-          response.message || 'Account registered! Please enter your 6-digit email verification code.',
+          response.message || 'Account registered! Please enter your 8-digit email verification code.',
           4000
         );
 

@@ -282,6 +282,24 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
   // SCRUM-57: Connected External Applications Display in Security Hub
   // ==========================================================================
   describe('Connected External Applications (SCRUM-57)', () => {
+    beforeEach(() => {
+      component.dashboardService.connectedApps.set([
+        {
+          id: 'conn-dummy-portal',
+          clientId: 'vanguard-dummy-portal',
+          clientName: 'Acme Dummy Web',
+          protocol: 'OpenID Connect 1.0 (PKCE)',
+          scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
+          redirectUri: 'http://localhost:4201/auth/callback',
+          originUrl: 'http://localhost:4201',
+          status: 'Connected',
+          connectedAt: 'Oct 23, 2026',
+          lastActiveAt: 'Active Session',
+          icon: '🌐',
+          description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
+        },
+      ]);
+    });
     it('should display active connected applications in security hub', () => {
       expect(component.activeConnectedApps().length).toBeGreaterThanOrEqual(1);
       const dummyApp = component.activeConnectedApps().find((a) => a.clientId === 'vanguard-dummy-portal');

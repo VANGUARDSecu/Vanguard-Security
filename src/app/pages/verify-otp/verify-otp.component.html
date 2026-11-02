@@ -106,8 +106,48 @@
         </div>
       }
 
-      <!-- PUSH APPROVAL FLOW (SCRUM-85) -->
-      @if (method() === 'push_approval') {
+      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160) -->
+      @if (ssoApprovalRequired()) {
+        <div class="sso-approval-notice">
+          <div class="sso-approval-badge">
+            <span class="pulse-dot-amber"></span>
+            <span>Zero-Trust Access Governance</span>
+          </div>
+          
+          <div class="sso-approval-icon-box">
+            <span class="governance-icon">🛡️</span>
+          </div>
+
+          <h3 class="sso-approval-title">Administrative Approval Required</h3>
+          
+          <p class="sso-approval-text">
+            {{ ssoApprovalMessage() || 'Your corporate organization requires administrative approval before this application can access your account.' }}
+          </p>
+
+          <div class="sso-approval-status-card">
+            <div class="status-row">
+              <span class="status-label">Application:</span>
+              <span class="status-val">{{ clientDisplayName() }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Access Status:</span>
+              <span class="sso-approval-pill">Pending Approval</span>
+            </div>
+            <div class="status-desc">
+              An access request has been automatically submitted to your tenant administrator. You will be able to sign in once reviewed and approved.
+            </div>
+          </div>
+
+          <div class="sso-approval-actions">
+            <button type="button" class="sso-return-btn" (click)="onCancelSso()">
+              Return to {{ clientDisplayName() }}
+            </button>
+            <a routerLink="/dashboard" class="sso-dashboard-link">
+              Go to Vanguard Dashboard
+            </a>
+          </div>
+        </div>
+      } @else if (method() === 'push_approval') {
         <div class="push-approval-container">
           <!-- Client Target Banner -->
           <div class="push-client-card">

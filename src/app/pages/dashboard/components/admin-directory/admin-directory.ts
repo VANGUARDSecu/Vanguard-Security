@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, HostListener } from '@angular/core';
+import { Component, inject, signal, computed, HostListener, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -27,8 +27,18 @@ import {
   templateUrl: './admin-directory.html',
   styleUrl: './admin-directory.css'
 })
-export class AdminDirectory {
+export class AdminDirectory implements OnInit {
   readonly dashboardService = inject(DashboardService);
+
+  readonly isDirectoryLoading = this.dashboardService.isDirectoryLoading;
+
+  ngOnInit(): void {
+    this.dashboardService.loadDirectoryUsers();
+  }
+
+  refreshDirectoryUsers(): void {
+    this.dashboardService.loadDirectoryUsers();
+  }
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly directoryDepartmentFilter = this.dashboardService.directoryDepartmentFilter;
@@ -196,6 +206,7 @@ export class AdminDirectory {
   submitInviteUser() { this.dashboardService.submitInviteUser(); }
   generateRandomPassword() { return this.dashboardService.generateRandomPassword(); }
   copyTemporaryPassword() { this.dashboardService.copyTemporaryPassword(); }
+  retryInviteEmail() { this.dashboardService.retryInviteEmail(); }
   resendInvitation(user: DirectoryUser) { this.dashboardService.resendInvitation(user); }
   renewExistingPendingUser() { this.dashboardService.renewExistingPendingUser(); }
   getInviteExpiryText(user: DirectoryUser) { return this.dashboardService.getInviteExpiryText(user); }

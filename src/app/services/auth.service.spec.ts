@@ -196,4 +196,147 @@ describe('AuthService', () => {
       expect(localStorage.getItem('vanguard_refresh_token')).toBeNull();
     });
   });
+
+  describe('Cross-account storage isolation & purge (SCRUM-153)', () => {
+    it('logout() thoroughly purges all vanguard_* and sb-* keys while preserving remembered email', () => {
+      localStorage.setItem('vanguard_directory_users', JSON.stringify([{ id: 'u1', email: 'old@company.com' }]));
+      localStorage.setItem('vanguard_organizations', JSON.stringify([{ id: 'org-old', name: 'Old Company' }]));
+      localStorage.setItem('vanguard_active_org_id', 'org-old');
+      localStorage.setItem('sb-test-token', 'supabase-auth-token');
+      localStorage.setItem('vanguard_remembered_email', 'remember@user.com');
+
+      service.logout();
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/logout'));
+      req.flush({ success: true });
+
+      expect(localStorage.getItem('vanguard_directory_users')).toBeNull();
+      expect(localStorage.getItem('vanguard_organizations')).toBeNull();
+      expect(localStorage.getItem('vanguard_active_org_id')).toBeNull();
+      expect(localStorage.getItem('sb-test-token')).toBeNull();
+      expect(localStorage.getItem('vanguard_remembered_email')).toBe('remember@user.com');
+    });
+
+    it('setSession() purges stale cross-account state when a different user signs in', () => {
+      localStorage.setItem('vanguard_user', JSON.stringify({ id: 'user-old', email: 'old@company.com' }));
+      localStorage.setItem('vanguard_directory_users', JSON.stringify([{ id: 'user-old', email: 'old@company.com' }]));
+      localStorage.setItem('vanguard_organizations', JSON.stringify([{ id: 'org-old', name: 'Old Corp' }]));
+      localStorage.setItem('vanguard_remembered_email', 'remember@user.com');
+
+      service.setSession(
+        { id: 'user-new', email: 'new@company.com', role: 'admin' },
+        { access_token: 'new-token', refresh_token: 'new-refresh', expires_at: 1800000000 }
+      );
+
+      expect(localStorage.getItem('vanguard_directory_users')).toBeNull();
+      expect(localStorage.getItem('vanguard_organizations')).toBeNull();
+      expect(localStorage.getItem('vanguard_user')).toContain('user-new');
+      expect(localStorage.getItem('vanguard_remembered_email')).toBe('remember@user.com');
+    });
+  });
+
+  describe('Employee invitation & network error handling (SCRUM-154)', () => {
+    it('sendInviteEmail() passes tenantId and payload to /send-invite-email', () => {
+      let result: any = null;
+      service.sendInviteEmail({
+        email: 'employee@test.com',
+        name: 'Employee Test',
+        role: 'user',
+        department: 'Engineering',
+        temporaryPassword: 'TempPassword#1',
+        tenantId: 'tenant-123'
+      }).subscribe((res) => { result = res; });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/send-invite-email'));
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body.tenantId).toBe('tenant-123');
+      expect(req.request.body.email).toBe('employee@test.com');
+
+      req.flush({ success: true, message: 'Invitation dispatched' });
+      expect(result.success).toBe(true);
+    });
+
+    it('sendInviteEmail() normalizes status 0 / connection refused errors to actionable message', () => {
+      let errorMsg = '';
+      service.sendInviteEmail({
+        email: 'employee@test.com',
+        name: 'Employee Test',
+        role: 'user',
+        department: 'Engineering',
+        temporaryPassword: 'TempPassword#1'
+      }).subscribe({
+        next: () => {},
+        error: (err) => { errorMsg = err.message; }
+      });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/send-invite-email'));
+      req.error(new ProgressEvent('error'), { status: 0, statusText: 'Unknown Error' });
+
+      expect(errorMsg).toContain('Unable to connect to backend');
+      expect(errorMsg).toContain('http://localhost:3000');
+    });
+  });
+
+  describe('Temporary password detection and tenant account resolution (SCRUM-155)', () => {
+    it('setSession() activates isPasswordResetRequired when user has is_temporary_password: true', () => {
+      service.setSession(
+        {
+          id: 'user-temp',
+          email: 'employee@company.com',
+          role: 'user',
+          user_metadata: {
+            role: 'user',
+            is_temporary_password: true,
+            account_type: 'company',
+            tenant_id: 'org-tenant-1',
+          },
+        },
+        { access_token: 'temp-jwt', refresh_token: 'temp-ref', expires_at: 1800000000 }
+      );
+
+      expect(service.isPasswordResetRequired()).toBe(true);
+      expect(localStorage.getItem('vanguard_reset_required')).toBe('true');
+      expect(service.currentUser()?.accountType).toBe('company');
+      expect(service.currentUser()?.isTemporaryPassword).toBe(true);
+    });
+
+    it('setSession() does NOT require password reset when logging in with standard permanent credentials', () => {
+      service.setSession(
+        {
+          id: 'user-perm',
+          email: 'employee@company.com',
+          role: 'user',
+          user_metadata: {
+            role: 'user',
+            is_temporary_password: false,
+            account_type: 'company',
+          },
+        },
+        { access_token: 'perm-jwt', refresh_token: 'perm-ref', expires_at: 1800000000 }
+      );
+
+      expect(service.isPasswordResetRequired()).toBe(false);
+      expect(localStorage.getItem('vanguard_reset_required')).toBeNull();
+      expect(service.currentUser()?.accountType).toBe('company');
+    });
+
+    it('normalizes invited users with tenant_id or company metadata as accountType: company', () => {
+      service.setSession(
+        {
+          id: 'tenant-user',
+          email: 'tenant.emp@company.com',
+          role: 'user',
+          user_metadata: {
+            tenant_id: 'org-enterprise-42',
+            role: 'user',
+          },
+        },
+        { access_token: 'tok-1', expires_at: 1800000000 }
+      );
+
+      expect(service.currentUser()?.accountType).toBe('company');
+      expect(service.userRole()).toBe('user');
+      expect(service.isAdmin()).toBe(false);
+    });
+  });
 });

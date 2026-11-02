@@ -142,4 +142,32 @@ describe('LoginComponent', () => {
 
     expect(component.isAccountMismatch()).toBe(false);
   });
+
+  it('should include pending administrator review error description on cancel when ssoApprovalRequired is true', () => {
+    component.ssoParams.set({
+      client_id: 'vanguard-dummy-portal',
+      redirect_uri: 'http://localhost:4201/auth/callback',
+      state: 'state_xyz',
+    });
+    component.ssoApprovalRequired.set(true);
+
+    const originalLocation = window.location;
+    delete (window as any).location;
+    (window as any).location = { href: '' };
+
+    component.onCancelSso();
+    expect(window.location.href).toContain('http://localhost:4201/auth/callback');
+    expect(window.location.href).toContain('error=access_denied');
+    expect(window.location.href).toContain('Access+approval+pending+administrator+review');
+    expect(window.location.href).toContain('state=state_xyz');
+
+    (window as any).location = originalLocation;
+  });
+
+  it('should activate ssoApprovalRequired signal when handling zero-trust approval error', () => {
+    expect(component.ssoApprovalRequired()).toBe(false);
+    (component as any).handleApprovalRequired(new Error('Zero-Trust Access Governance: Administrative approval is required before corporate account can access'));
+    expect(component.ssoApprovalRequired()).toBe(true);
+    expect(component.ssoApprovalMessage()).toContain('Zero-Trust Access Governance');
+  });
 });

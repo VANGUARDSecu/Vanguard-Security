@@ -136,10 +136,10 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
     }
   });
 
-  it('should switch between personal workspace and organization context', () => {
+  it('should retain personal workspace for individual accounts and disallow enterprise context (SCRUM-150)', () => {
     dashboardService.switchWorkspace('org_root');
-    expect(dashboardService.isPersonalWorkspace()).toBe(false);
-    expect(dashboardService.activeOrganization().id).toBe('org_root');
+    expect(dashboardService.isPersonalWorkspace()).toBe(true);
+    expect(dashboardService.activeWorkspaceId()).toBe('personal');
 
     dashboardService.switchWorkspace('personal');
     expect(dashboardService.isPersonalWorkspace()).toBe(true);
@@ -169,6 +169,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
 
   describe('SCRUM-42 Admin Approval Workflow & Access Request Queue', () => {
     beforeEach(() => {
+      authService.currentUser.set({
+        id: 'usr-employee-1',
+        email: 'employee@vanguard.security',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
       // Switch to organization workspace
       dashboardService.switchWorkspace('org_root');
       fixture.detectChanges();
@@ -260,12 +269,53 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       const assignedApp = component.apps().find((a) => a.name === 'Unauthorized Cloud DB');
       expect(assignedApp).toBeUndefined();
     });
+
+    it('SCRUM-159: should move approved requests to active applications and exclude from requested list', () => {
+      // 1. Submit request
+      component.requestedAppName = 'Datadog APM';
+      component.requestAppJustification = 'Application performance monitoring';
+      component.submitAppRequest();
+
+      // Before approval: in requested apps queue, not in active apps
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(true);
+
+      const req = dashboardService.appAccessRequests().find((r) => r.appName === 'Datadog APM');
+      expect(req).toBeDefined();
+
+      // 2. Admin approves request
+      dashboardService.approveAccessRequest(req!.id, 'Approved by SecOps Admin');
+
+      // 3. After approval: excluded from myAccessRequests (requested applications queue)
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(false);
+
+      // 4. Present in activeAppsList (applications launchpad)
+      const inActiveApps = component.activeAppsList().some((a) => a.name === 'Datadog APM');
+      expect(inActiveApps).toBe(true);
+    });
   });
 
   // ==========================================================================
   // SCRUM-57: Active SSO Integrations & Connected Applications Display
   // ==========================================================================
   describe('SCRUM-57 Connected Client Applications & Live Status', () => {
+    beforeEach(() => {
+      component.dashboardService.connectedApps.set([
+        {
+          id: 'conn-dummy-portal',
+          clientId: 'vanguard-dummy-portal',
+          clientName: 'Acme Dummy Web',
+          protocol: 'OpenID Connect 1.0 (PKCE)',
+          scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
+          redirectUri: 'http://localhost:4201/auth/callback',
+          originUrl: 'http://localhost:4201',
+          status: 'Connected',
+          connectedAt: 'Oct 23, 2026',
+          lastActiveAt: 'Active Session',
+          icon: '🌐',
+          description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
+        },
+      ]);
+    });
     it('should display Acme Dummy Web as an active connected integration with live status', () => {
       expect(component.activeConnectedApps().length).toBeGreaterThanOrEqual(1);
 

@@ -29,22 +29,120 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
-### 1. Admin Console (Admin View)
-Designed for SecOps engineers and system administrators to configure enterprise access:
-- **Gateway Telemetry & Health**: Live monitoring for SAML 2.0 Web SSO, OIDC Clients, Cloud LDAP (Port 636), and Cloud RADIUS (Port 1812).
-- **Directory Vault & Provisioning**:
-  - Provision employees with auto-generated secure temporary passwords (`Vanguard#XXXX!`).
-  - One-click copy credentials confirmation card.
-  - Automated onboarding email dispatch with live delivery status pills (`sending`, `sent`, `failed`).
-  - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
-- **Protocol Management**:
-  - **SAML 2.0 SSO**: Manage SP connectors, download IdP metadata XML, and export X.509 certificates.
-  - **OIDC Clients**: Register client IDs, callbacks, and test via the interactive SSO Assertion Sandbox.
-  - **Cloud LDAP & RADIUS**: Manage host connections, access points, and VLAN mappings with interactive diagnostics.
-- **Enterprise Security Policies**:
-  - Enforce tenant-wide MFA, block high-risk IP ranges, and configure session timeouts.
-  - **Global Emergency Killswitch**: One-click revocation of all active sessions and gateway tokens.
-- **Tenant Audit Log Stream**: Real-time event auditing with multi-field search, protocol filtering, and CSV export.
+### Zero-Trust Tenant SSO Access Governance & Approval Notice (SCRUM-160)
+- **Zero-Trust Administrative Approval Interception**:
+  - Intercepts external OIDC Single Sign-On attempts for corporate tenant accounts where the client application has not yet been assigned or approved by an administrator.
+  - Displays a dedicated **Zero-Trust Access Governance** notification card on the login and MFA verification pages detailing the application name, access status (Pending Approval), and automatic request submission.
+  - Prevents premature MFA prompts or invalid token issuance for non-approved corporate integrations.
+- **Graceful Error Callback Propagation**:
+  - The 'Return to Client' action safely returns to the client application callback URL (redirect_uri) with standard OIDC error parameters: error=access_denied&error_description=Access+approval+pending+administrator+review and state preservation.
+  - Enables client applications (e.g., dummy-web) to render informative, non-crashing governance messages to users.
+- **Strict Account Exemption**:
+  - Individual users (accountType === 'individual') and tenant Super Administrators (role === 'admin') are unhindered and bypass the approval gate seamlessly.
+
+### Approved Application Auto-Provisioning to User Launchpad (SCRUM-159)
+- **Automatic Transfer from Request Queue to Applications Launchpad**:
+  - When an administrator approves an employee's application access request, the application is automatically transitioned to the user's active applications catalog (`apps` / `activeAppsList` / `filteredApps`) with an approved status badge (`✓ Approved`).
+  - The approved application is removed from the "Requested Applications & Access Status" queue (`myAccessRequests`), ensuring only pending review and non-approved requests are displayed in the request status section.
+- **Live Reactive Synchronization & Backend Integration**:
+  - Listens to Supabase real-time updates on `access_requests` (`UPDATE` event with `status: 'Approved'`) to dynamically add the approved application to the user's launchpad and invoke `loadCompanyApps()` from `/api/apps/my` without needing a page refresh.
+  - Dedupes application catalog entries across direct assigned apps (`user_assigned_apps`), group-inherited apps, and approved access requests.
+
+### Real-Time Application Access Request Synchronization (SCRUM-158)
+- **Shared Persistence to Live Database**:
+  - Employee application access requests submitted via the User Portal modal (`submitRequestApp()`) are persisted directly to the Supabase PostgreSQL `access_requests` store scoped by `tenant_id` and `user_id`.
+  - Obsoleted isolated browser-local storage queues, ensuring requests are visible across different browser sessions and administrative accounts.
+- **Instantaneous Real-Time Broadcast via Supabase Realtime Channels**:
+  - The Admin Console establishes a WebSocket subscription to `realtime:access_requests` on the `access_requests` table (`postgres_changes` on `INSERT`, `UPDATE`, and `DELETE`).
+  - When an employee requests access to an application, the request instantly appears in the Admin Console queue without requiring page reloads.
+  - When an administrator approves or rejects a request, status updates propagate in real time across active sessions.
+- **On-Demand Manual Refresh**:
+  - Added an interactive "Refresh" button with a spinning sync indicator to the Access Requests queue toolbar (`AdminAccessRequests.refreshAccessRequests()`), enabling instant forced synchronization from the database.
+
+### Resilient Session Hydration & Guard Interception (SCRUM-157)
+- **Authentic Session Continuity**:
+  - Propagates authoritative Supabase sessions across 2-step OTP verification flows to guarantee dashboard initialization with signed JWT access and refresh tokens.
+  - Prevents premature 401 refresh failures and unwarranted redirects to `/login` during initial dashboard data hydration (`apps/my`, `directory-users`, `connected-apps`).
+
+### Live Directory User Status Synchronization & Manual Refresh (SCRUM-156)
+- **Real-Time Directory Status Synchronization**:
+  - `DashboardService.loadDirectoryUsers()` invokes `AuthService.getDirectoryUsers(tenantId)` to query real-time directory statuses and active memberships from the backend directory cache and Supabase Auth.
+  - Automatically loads on `AdminDirectory.ngOnInit()`, during `initDashboardForCurrentUser()`, and on tab changes to the `directory` tab, ensuring newly activated tenant accounts immediately transition from `Pending` to `Active`.
+- **Manual Status Refresh Button**:
+  - The Admin Directory toolbar includes an interactive "Refresh Status" button with a reactive spinning icon (`isDirectoryLoading` signal) allowing administrators to force-synchronize user activation records on demand.
+- **Client Cache Synchronization on Credential Activation**:
+  - Upon completing a password change via temporary credentials (`AuthService.changePassword()`), the user's directory entry in `vanguard_directory_users` is directly marked as `accountStatus: 'Active'` with `lastLogin: 'Just now'`, discarding temporary credential flags immediately.
+
+### Mandatory Password Reset on Temporary Credentials & Tenant Portal Routing (SCRUM-155)
+- **Immediate Password Reset Enforcement**:
+  - When an invited directory employee signs in with their temporary credentials, `is_temporary_password: true` is detected by `AuthService.setSession()`, setting `isPasswordResetRequired` to `true` and saving `vanguard_reset_required: true`.
+  - `authGuard` intercepts all navigation attempts to `/dashboard` while `isPasswordResetRequired` is active, instantly redirecting the user to `/reset-password`.
+  - Both direct sign-in and 2-step OTP verification flows detect the temporary flag and route immediately to `/reset-password` before granting dashboard access.
+- **Accurate Tenant Classification & User Portal Access**:
+  - Invited directory employees are normalized as `accountType: 'company'` with `role: 'user'`, mapping them directly to the corporate **User Portal** (`viewMode: 'user'`, `activeTab: 'my-apps'`) bound to their corporate organization workspace.
+  - Personal Vault workspace fallback is prevented (`isIndividual()` resolves to `false`), ensuring enterprise employees only access company-administered apps and services.
+- **Clean SSO Integrations for Brand-New Accounts**:
+  - Connected client applications are strictly scoped per user email in persistent storage (`vanguard_connected_apps_<email>`).
+  - Purged legacy global mock apps (`userEmail: 'all'`). New employee accounts launch with an accurate, empty Active SSO Integrations list until real applications are connected via single sign-on.
+
+### Cross-Account Storage Isolation & Tenant Boundary Enforcement (SCRUM-153)
+The frontend enforces total isolation across user account sessions on the same browser client to eliminate cross-tenant data leakage:
+- **Comprehensive Logout Purge**:
+  - AuthService.logout() wipes all session tokens (anguard_user, anguard_token, anguard_refresh_token), tenant/directory caches (anguard_directory_users, anguard_organizations, anguard_directory_groups, anguard_access_requests, anguard_fleet_devices, anguard_connected_apps), and Supabase client tokens (sb-*) from localStorage and sessionStorage. User-consented preferences (anguard_remembered_email) are retained.
+- **Dynamic Account Switch Detection**:
+  - AuthService.setSession() compares the newly authenticated user profile against the cached session. If the user ID differs, all prior cross-account local storage keys are automatically purged before mounting the new identity.
+- **Tenant & User-Scoped Directory & Organizations**:
+  - DashboardService.initOrganizations() validates all cached organizations against the authenticated user's company (user.companyName), tenant ID (user.tenant_id), or primary contact email. Newly registered company accounts initialize with exclusively their own company tenant.
+  - DashboardService.initDirectoryUsers() validates that the active session user exists within the cached directory members before loading. Stale directory members from past sessions are discarded, ensuring newly registered accounts show only their own root Super Administrator.
+  - DashboardService.initSupabaseSync() filters cloud tenants strictly by the authenticated user's company and memberships, preventing unauthorized tenant visibility in the organization switcher or admin settings.
+  - Purged all hardcoded legacy test emails and member injections (johnroben.manayon31@gmail.com) from directory group initializers.
+
+### Role- & Account-Scoped Appbar & Workspace Access (SCRUM-150)
+The application enforces strict, account-type-based workspace boundaries and header appbar controls:
+- **Company Account (`accountType === 'company'`, `role === 'admin'`)**:
+  - Exclusively granted access to the **Admin Console**.
+  - Appbar prominently displays the **👑 Admin Console** scoped badge and the Enterprise Organization Switcher.
+  - Mode toggle pills and Personal Vault workspace entries are removed.
+- **Individual Account (`accountType === 'individual'`)**:
+  - Exclusively granted access to the **Personal Vault** security suite.
+  - Appbar displays the **🔒 Personal Vault** badge and Personal Vault indicator.
+  - Multi-tenant organization switcher, company upgrade buttons, and corporate directory options are removed.
+- **Tenant Directory Member (`accountType === 'company'`, `role === 'user'`)**:
+  - Exclusively granted access to the company-managed **User Portal** (My Applications, 2FA Authenticator, Security & MFA, Wi-Fi & VPN Profile, SSH & LDAP Keys, Sign-in Activity, Mobile Devices).
+  - Appbar displays the **🏢 User Portal** badge and the Corporate Directory indicator.
+  - Personal Vault navigation links and Admin Console switchers are removed.
+
+### 1. Admin Console (Admin View - Production Core & SCRUM-151 Pruning)
+Streamlined, high-assurance administrative portal for SecOps engineers and organizational administrators, pruned in accordance with the Security Improvement Plan (PRD §3, §4 FR-09, §9, §12) and backend protocol pruning (SCRUM-122):
+- **Core Production Tabs**:
+  1. **Overview**: Live directory metrics, admin identity UUID with one-click copy, active session diagnostics, and genuine OpenID Connect (OIDC) gateway health telemetry.
+  2. **Directory Users & Provisioning**:
+     - Provision employees with auto-generated secure temporary passwords (`Vanguard#XXXX!`).
+     - One-click copy credentials confirmation card with live email dispatch status pills (`sending`, `sent`, `failed`) and 1-click **↻ Retry** button (SCRUM-154).
+     - Multi-tenant isolation: invitation dispatch automatically binds `tenantId` to link invited employees directly to the active organization (SCRUM-154).
+     - Resilient error handling: network timeouts and offline backend statuses are normalized into actionable administrator notices (SCRUM-154).
+     - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
+  3. **OIDC Applications & SSO (SCRUM-152)**:
+     - Independent, dedicated page for federated applications and client credentials.
+     - Subnav tabs: Federated Apps, IdP Metadata & X.509 Certificate Vault, OIDC OAuth 2.0 Clients, and SSO Sandbox Assertion Inspector.
+     - Separated cleanly from Access Requests to eliminate page collision and navigation confusion.
+  4. **Access Requests Queue (SCRUM-152)**:
+     - Dedicated, standalone administrative approval queue (`AdminAccessRequests` component).
+     - Live KPI metric cards: Total Requests, Pending Review, Approved & Assigned.
+     - Real-time filtering by status (`All`, `Pending Approval`, `Approved`, `Rejected`) and keyword search.
+     - 1-Click Approve (instantly provisions app) and contextual Reject modal with administrative audit reason capture.
+     - Truthful empty states with zero hardcoded mock/seed applicants.
+  5. **Security Audit Log Stream**: Real-time authoritative event auditing with multi-field search, event category filtering, and CSV export.
+  6. **Enterprise Settings & Branding**:
+     - Enforce tenant-wide mandatory Multi-Factor Authentication (MFA).
+     - Configure session timeouts and customize white-label branding (logo, colors, corporate name).
+     - **Global Emergency Session Killswitch**: One-click server-side termination of all active web sessions and revocation of JWT refresh tokens.
+- **Pruned Obsolete & Simulated Features (SCRUM-151 & SCRUM-152)**:
+  - **Separation of OIDC Apps and Access Requests (SCRUM-152)**: Segregated Access Requests into its own dedicated page component, removing the embedded subtab from the OIDC/SAML console.
+  - **Zero-Mock Data Policy (SCRUM-152)**: Purged all hardcoded mock applicants (e.g. Elena Rostova, Marcus Vance, Sarah Jenkins), fake groups (DevOps, SecOps), fake devices, fake connected apps (Acme Dummy Web), and simulated RADIUS activity. All collections default strictly to genuine data (from session/backend/Supabase/storage) or clean, truthful empty states.
+  - Removed deferred protocol tabs from the sidebar and viewport: **Cloud LDAP (Port 636)** and **Cloud RADIUS (Port 1812)** (listeners unbonded on backend).
+  - Removed client-side mock tabs: **Webhooks & Event API** (deferred pending backend worker/SSRF protection) and **Device Fleet & MDM** (deferred remote device wipe).
+  - Re-scoped federation to focus strictly on genuine **OIDC Applications & SSO**, eliminating misleading claims of active SAML production endpoints.
 
 ### 2. Employee Personal Workspace (User View)
 Tailored for corporate employees to access organizational resources:
@@ -56,6 +154,11 @@ Tailored for corporate employees to access organizational resources:
 - **Personal Activity History**: Review personal sign-in history, device locations, and security challenges.
 
 ### 3. Authentication & Identity Verification
+- **Registration Portal (`/register` - SCRUM-147, SCRUM-148 & SCRUM-149)**:
+  - Dual account types: Individual / Personal Vault (password vault, 2FA authenticator & credentials) and Company / Organization (enterprise directory, Single Sign-On via OIDC/OAuth 2.0, team applications & zero-trust access control).
+  - Enforced strong password policy: minimum 8 characters with lowercase, uppercase, and special character validation.
+  - Automatic dispatch of an 8-digit email OTP verification code upon registration with 10-minute validity.
+  - Strict 1-account-per-email enforcement: rejects duplicate registration attempts across Individual, Company, and Directory Tenant account types with clear user feedback.
 - **Login Portal (`/login`)**: Email/password entry with "Remember Me" caching and seamless employee directory session recognition.
 - **2-Step Verification (`/verify-otp`)**:
   - 8-digit Email OTP codes with 60-second cooldown resend countdown for direct portal logins.

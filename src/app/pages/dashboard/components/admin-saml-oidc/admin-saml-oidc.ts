@@ -95,44 +95,8 @@ export class AdminSamlOidc {
   get newAppDepartment() { return this.dashboardService.newAppDepartment; }
   set newAppDepartment(v: string) { this.dashboardService.newAppDepartment = v; }
 
-  // SCRUM-42: Access Requests Signals & Actions
-  readonly appAccessRequests = this.dashboardService.appAccessRequests;
-  readonly filteredAccessRequests = this.dashboardService.filteredAccessRequests;
-  readonly pendingAccessRequests = this.dashboardService.pendingAccessRequests;
-  readonly pendingAccessRequestsCount = this.dashboardService.pendingAccessRequestsCount;
-  readonly accessRequestStatusFilter = this.dashboardService.accessRequestStatusFilter;
-  readonly showRejectModal = this.dashboardService.showRejectModal;
-  readonly selectedAccessRequestForReject = this.dashboardService.selectedAccessRequestForReject;
-
-  get accessRequestSearch() { return this.dashboardService.accessRequestSearch(); }
-  set accessRequestSearch(v: string) { this.dashboardService.accessRequestSearch.set(v); }
-
-  get rejectAdminNoteInput() { return this.dashboardService.rejectAdminNoteInput; }
-  set rejectAdminNoteInput(v: string) { this.dashboardService.rejectAdminNoteInput = v; }
-
-  setSamlSubTab(tab: 'apps' | 'idp-metadata' | 'oidc-clients' | 'sso-sandbox' | 'access-requests') {
+  setSamlSubTab(tab: 'apps' | 'idp-metadata' | 'oidc-clients' | 'sso-sandbox') {
     this.dashboardService.setSamlSubTab(tab);
-  }
-  setAccessRequestStatusFilter(f: 'all' | 'Pending Approval' | 'Approved' | 'Rejected') {
-    this.dashboardService.setAccessRequestStatusFilter(f);
-  }
-  approveAccessRequest(id: string, notes?: string) {
-    this.dashboardService.approveAccessRequest(id, notes);
-  }
-  openRejectModal(req: AppAccessRequest) {
-    this.dashboardService.openRejectModal(req);
-  }
-  closeRejectModal() {
-    this.dashboardService.closeRejectModal();
-  }
-  confirmRejectAccessRequest() {
-    const sel = this.selectedAccessRequestForReject();
-    if (sel) {
-      this.dashboardService.rejectAccessRequest(sel.id, this.rejectAdminNoteInput);
-    }
-  }
-  rejectAccessRequest(id: string, notes?: string) {
-    this.dashboardService.rejectAccessRequest(id, notes);
   }
 
   downloadIdpMetadataXml() { this.dashboardService.downloadIdpMetadataXml(); }

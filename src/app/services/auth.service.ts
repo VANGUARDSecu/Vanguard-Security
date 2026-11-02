@@ -16,6 +16,7 @@ export interface UserProfile {
   phone?: string;
   role?: 'admin' | 'security_officer' | 'user';
   accountType?: 'individual' | 'company';
+  isTemporaryPassword?: boolean;
   avatarUrl?: string;
   user_metadata?: Record<string, any>;
 }
@@ -209,6 +210,18 @@ export class AuthService {
       } else if (parsed.role === 'security_officer' || meta['role'] === 'security_officer') {
         role = 'security_officer';
       }
+      const rawAccountType = parsed.accountType || meta['account_type'];
+      const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || parsed.accountType === 'company');
+      const accountType: 'individual' | 'company' =
+        rawAccountType === 'individual'
+          ? 'individual'
+          : (isTenant || role === 'admin' ? 'company' : 'individual');
+      const isTemporaryPassword = Boolean(
+        parsed.isTemporaryPassword ||
+        meta['is_temporary_password'] === true ||
+        meta['isTemporaryPassword'] === true
+      );
+
       return {
         ...parsed,
         firstName: parsed.firstName || meta['first_name'] || meta['firstName'] || meta['given_name'] || meta['name']?.split(' ')[0] || '',
@@ -216,6 +229,8 @@ export class AuthService {
         companyName: parsed.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
         phone: parsed.phone || meta['phone'] || '',
         role,
+        accountType,
+        isTemporaryPassword,
         avatarUrl: parsed.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       };
     } catch {
@@ -536,6 +551,7 @@ export class AuthService {
     department: string;
     temporaryPassword: string;
     loginUrl?: string;
+    tenantId?: string;
   }): Observable<{ success: boolean; message: string; emailResult?: any }> {
     return this.http
       .post<{ success: boolean; message: string; emailResult?: any }>(
@@ -544,7 +560,16 @@ export class AuthService {
       )
       .pipe(
         catchError((error: HttpErrorResponse) => {
-          const msg = error.error?.message || 'Could not dispatch credentials email to employee.';
+          let msg = error.error?.message;
+          if (!msg) {
+            if (error.status === 0 || error.message?.includes('Failed to fetch')) {
+              msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+            } else {
+              msg = 'Could not dispatch credentials email to employee.';
+            }
+          } else if (typeof msg === 'string' && msg.includes('Failed to fetch')) {
+            msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+          }
           return throwError(() => new Error(msg));
         })
       );
@@ -647,6 +672,19 @@ export class AuthService {
 
     const resolvedFullName = (user as any).name || (firstName || lastName ? `${firstName} ${lastName}`.trim() : meta['name'] || '');
 
+    const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || user.accountType === 'company');
+    const resolvedAccountType: 'individual' | 'company' =
+      user.accountType === 'individual' || meta['account_type'] === 'individual'
+        ? 'individual'
+        : (isTenant || resolvedRole === 'admin' ? 'company' : 'individual');
+
+    const isTemp = Boolean(
+      meta['is_temporary_password'] === true ||
+      meta['isTemporaryPassword'] === true ||
+      user.isTemporaryPassword === true ||
+      (user as any).is_temporary_password === true
+    );
+
     const normalizedUser: UserProfile = {
       ...user,
       firstName,
@@ -655,6 +693,8 @@ export class AuthService {
       companyName: user.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
       phone: user.phone || meta['phone'] || '',
       role: resolvedRole,
+      accountType: resolvedAccountType,
+      isTemporaryPassword: isTemp,
       avatarUrl: user.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       user_metadata: {
         ...meta,
@@ -662,11 +702,13 @@ export class AuthService {
         last_name: lastName,
         name: resolvedFullName || undefined,
         role: resolvedRole,
+        account_type: resolvedAccountType,
+        is_temporary_password: isTemp,
       },
     };
 
-    // Only flag password reset required if explicitly undergoing a recovery flow
-    if (this.pendingMode() === 'recovery') {
+    // SCRUM-155: Flag password reset required if explicitly undergoing a recovery flow OR authenticated with temporary password
+    if (this.pendingMode() === 'recovery' || isTemp) {
       this.isPasswordResetRequired.set(true);
       if (this.isBrowser) {
         localStorage.setItem('vanguard_reset_required', 'true');
@@ -688,6 +730,26 @@ export class AuthService {
     }
 
     if (this.isBrowser) {
+      // SCRUM-153 & SCRUM-155: If the active user has changed, wipe previous user's cached directory, apps, & tenant state
+      const prevUserRaw = localStorage.getItem('vanguard_user');
+      if (prevUserRaw) {
+        try {
+          const prev = JSON.parse(prevUserRaw);
+          const isDifferent = (prev?.id && user.id && prev.id !== user.id) ||
+                              (prev?.email && user.email && prev.email.toLowerCase().trim() !== user.email.toLowerCase().trim());
+          if (isDifferent) {
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && (k.startsWith('vanguard_') || k.startsWith('sb-')) && k !== 'vanguard_remembered_email') {
+                keysToRemove.push(k);
+              }
+            }
+            keysToRemove.forEach((k) => localStorage.removeItem(k));
+          }
+        } catch {}
+      }
+
       localStorage.setItem('vanguard_user', JSON.stringify(normalizedUser));
       localStorage.setItem('vanguard_token', session.access_token);
       if (session.refresh_token) {
@@ -752,7 +814,10 @@ export class AuthService {
 
           if (idx !== -1) {
             users[idx].password = password.trim();
+            users[idx].accountStatus = 'Active';
+            users[idx].lastLogin = 'Just now';
             delete users[idx].temporaryPassword;
+            delete users[idx].isTemporaryPassword;
             localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
           }
         }
@@ -1196,6 +1261,15 @@ export class AuthService {
     }
   }
 
+  /**
+   * SCRUM-156: Fetch authoritative directory users and activation statuses from backend
+   */
+  getDirectoryUsers(tenantId?: string): Observable<any[]> {
+    const params: Record<string, string> = {};
+    if (tenantId) params['tenantId'] = tenantId;
+    return this.http.get<any[]>(`${this.API_URL}/directory-users`, { params });
+  }
+
   logout(): void {
     if (this.autoRefreshTimer) {
       clearTimeout(this.autoRefreshTimer);
@@ -1205,11 +1279,19 @@ export class AuthService {
       this.http.post(`${this.API_URL}/logout`, {}).subscribe({
         error: () => {},
       });
-      localStorage.removeItem('vanguard_user');
-      localStorage.removeItem('vanguard_token');
-      localStorage.removeItem('vanguard_refresh_token');
-      localStorage.removeItem('vanguard_token_expires_at');
-      localStorage.removeItem('vanguard_reset_required');
+      // SCRUM-153: Thoroughly purge all session, directory, tenant, devices, apps, and workspace state from storage
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('vanguard_') || key.startsWith('sb-'))) {
+          if (key !== 'vanguard_remembered_email') {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+      sessionStorage.clear();
+
       try {
         this.supabaseService.client.auth.signOut().catch(() => {});
       } catch {}

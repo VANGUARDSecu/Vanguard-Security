@@ -169,6 +169,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
 
   describe('SCRUM-42 Admin Approval Workflow & Access Request Queue', () => {
     beforeEach(() => {
+      authService.currentUser.set({
+        id: 'usr-employee-1',
+        email: 'employee@vanguard.security',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
       // Switch to organization workspace
       dashboardService.switchWorkspace('org_root');
       fixture.detectChanges();
@@ -259,6 +268,29 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       // Verified: NOT in assigned apps
       const assignedApp = component.apps().find((a) => a.name === 'Unauthorized Cloud DB');
       expect(assignedApp).toBeUndefined();
+    });
+
+    it('SCRUM-159: should move approved requests to active applications and exclude from requested list', () => {
+      // 1. Submit request
+      component.requestedAppName = 'Datadog APM';
+      component.requestAppJustification = 'Application performance monitoring';
+      component.submitAppRequest();
+
+      // Before approval: in requested apps queue, not in active apps
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(true);
+
+      const req = dashboardService.appAccessRequests().find((r) => r.appName === 'Datadog APM');
+      expect(req).toBeDefined();
+
+      // 2. Admin approves request
+      dashboardService.approveAccessRequest(req!.id, 'Approved by SecOps Admin');
+
+      // 3. After approval: excluded from myAccessRequests (requested applications queue)
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(false);
+
+      // 4. Present in activeAppsList (applications launchpad)
+      const inActiveApps = component.activeAppsList().some((a) => a.name === 'Datadog APM');
+      expect(inActiveApps).toBe(true);
     });
   });
 

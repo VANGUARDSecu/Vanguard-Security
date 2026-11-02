@@ -147,6 +147,9 @@
                   <span class="group-inherited-tag" *ngIf="app.inheritedViaGroup" [title]="'Assigned via ' + app.inheritedViaGroup">
                     👥 {{ app.inheritedViaGroup }}
                   </span>
+                  <span class="app-approved-tag" *ngIf="app.status === 'Approved'" title="Access approved by administrator">
+                    ✓ Approved
+                  </span>
                   <span class="vault-matched-tag" *ngIf="isPersonalWorkspace() && getMatchingVaultCredentials(app).length > 0" title="Auto-fill credentials detected in personal vault">
                     ⚡ Auto-fill Ready
                   </span>

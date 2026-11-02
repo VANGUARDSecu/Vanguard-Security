@@ -637,11 +637,13 @@ export class DashboardService {
     const u = this.user();
     const email = u?.email?.toLowerCase();
     const uid = u?.id;
+    // SCRUM-159: Exclude approved requests so only pending review or non-approved requests appear in requested applications
     return this.appAccessRequests().filter(
       (r) =>
-        (email && r.userEmail.toLowerCase() === email) ||
-        (uid && r.userId === uid) ||
-        r.userEmail.includes('@vanguard.security')
+        r.status !== 'Approved' &&
+        ((email && r.userEmail.toLowerCase() === email) ||
+          (uid && r.userId === uid) ||
+          (!email && !uid && r.userEmail.includes('@vanguard.security')))
     );
   });
 
@@ -1220,12 +1222,41 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   // Active apps source: personal apps when in personal workspace, company apps when in organization
-  // SCRUM-58: Strict deduplication ensuring no application ever appears twice
+  // SCRUM-58 & SCRUM-159: Strict deduplication ensuring no application ever appears twice,
+  // and automatically including access requests that have been approved by administrators.
   readonly activeAppsList = computed<SaaSApp[]>(() => {
     const source = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
     const seen = new Set<string>();
     const deduped: SaaSApp[] = [];
-    for (const app of source) {
+
+    // SCRUM-159: Also include any approved access requests for the logged-in user in company workspace
+    const approvedRequests: SaaSApp[] = !this.isPersonalWorkspace()
+      ? this.appAccessRequests()
+          .filter((r) => {
+            if (r.status !== 'Approved') return false;
+            const u = this.user();
+            const email = u?.email?.toLowerCase();
+            const uid = u?.id;
+            return (
+              (email && r.userEmail?.toLowerCase() === email) ||
+              (uid && r.userId === uid) ||
+              (!email && !uid && r.userEmail?.includes('@vanguard.security'))
+            );
+          })
+          .map((r) => ({
+            id: r.id,
+            name: r.appName,
+            category: (r.category as SaaSApp['category']) || 'cloud',
+            description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved access)`,
+            icon: r.icon || '🚀',
+            protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
+            launchUrl: r.launchUrl || 'https://vanguard.security',
+            assigned: true,
+            status: 'Approved',
+          }))
+      : [];
+
+    for (const app of [...source, ...approvedRequests]) {
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
@@ -2027,6 +2058,37 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         }));
         this.appAccessRequests.set(mapped);
         this.saveStored('vanguard_access_requests', mapped);
+
+        // SCRUM-159: Sync approved requests into assigned apps list
+        const u = this.user();
+        const email = u?.email?.toLowerCase();
+        const uid = u?.id;
+        const approvedForMe = mapped.filter(
+          (r) =>
+            r.status === 'Approved' &&
+            ((email && r.userEmail.toLowerCase() === email) || (uid && r.userId === uid))
+        );
+        if (approvedForMe.length > 0) {
+          const currentApps = this.apps();
+          const missing = approvedForMe.filter(
+            (r) => !currentApps.some((a) => a.name.toLowerCase() === r.appName.toLowerCase())
+          );
+          if (missing.length > 0) {
+            const additions: SaaSApp[] = missing.map((r) => ({
+              id: r.id,
+              name: r.appName,
+              category: (r.category as SaaSApp['category']) || 'cloud',
+              description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved access)`,
+              icon: r.icon || '🚀',
+              protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
+              launchUrl: r.launchUrl || 'https://vanguard.security',
+              assigned: true,
+              status: 'Approved',
+            }));
+            this.apps.update((prev) => [...additions, ...prev]);
+            this.saveStored('vanguard_user_apps', this.apps());
+          }
+        }
       } else if (tenantId) {
         // Obey zero-mock data policy: if 0 requests exist in database for this tenant, empty list
         this.appAccessRequests.set([]);
@@ -2140,6 +2202,36 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         )
       );
       this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+      // SCRUM-159: If approved, ensure app is added to assigned apps and refresh company apps
+      if (r.status === 'Approved') {
+        const u = this.user();
+        const email = u?.email?.toLowerCase();
+        const uid = u?.id;
+        const matchesUser =
+          (email && r.user_email?.toLowerCase() === email) ||
+          (uid && r.user_id === uid);
+
+        if (matchesUser) {
+          const appToAssign: SaaSApp = {
+            id: r.id || ('app-' + Date.now()),
+            name: r.app_name,
+            category: r.category || 'cloud',
+            description: `${r.app_name} (Approved access: ${r.justification || ''})`,
+            icon: r.icon || '🚀',
+            protocol: r.protocol || 'SAML 2.0',
+            launchUrl: r.launch_url || 'https://vanguard.security',
+            assigned: true,
+            status: 'Approved',
+          };
+          if (!this.apps().some((a) => a.name.toLowerCase() === r.app_name.toLowerCase())) {
+            this.apps.update((prev) => [appToAssign, ...prev]);
+            this.saveStored('vanguard_user_apps', this.apps());
+          }
+          this.loadCompanyApps();
+          this.showAdminNotice(`Your request for ${r.app_name} has been approved!`);
+        }
+      }
     } else if (payload.eventType === 'DELETE') {
       const oldId = payload.old?.id;
       if (oldId) {

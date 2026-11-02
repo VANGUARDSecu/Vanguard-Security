@@ -29,6 +29,14 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Approved Application Auto-Provisioning to User Launchpad (SCRUM-159)
+- **Automatic Transfer from Request Queue to Applications Launchpad**:
+  - When an administrator approves an employee's application access request, the application is automatically transitioned to the user's active applications catalog (`apps` / `activeAppsList` / `filteredApps`) with an approved status badge (`✓ Approved`).
+  - The approved application is removed from the "Requested Applications & Access Status" queue (`myAccessRequests`), ensuring only pending review and non-approved requests are displayed in the request status section.
+- **Live Reactive Synchronization & Backend Integration**:
+  - Listens to Supabase real-time updates on `access_requests` (`UPDATE` event with `status: 'Approved'`) to dynamically add the approved application to the user's launchpad and invoke `loadCompanyApps()` from `/api/apps/my` without needing a page refresh.
+  - Dedupes application catalog entries across direct assigned apps (`user_assigned_apps`), group-inherited apps, and approved access requests.
+
 ### Real-Time Application Access Request Synchronization (SCRUM-158)
 - **Shared Persistence to Live Database**:
   - Employee application access requests submitted via the User Portal modal (`submitRequestApp()`) are persisted directly to the Supabase PostgreSQL `access_requests` store scoped by `tenant_id` and `user_id`.

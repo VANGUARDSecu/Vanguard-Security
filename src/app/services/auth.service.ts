@@ -814,7 +814,10 @@ export class AuthService {
 
           if (idx !== -1) {
             users[idx].password = password.trim();
+            users[idx].accountStatus = 'Active';
+            users[idx].lastLogin = 'Just now';
             delete users[idx].temporaryPassword;
+            delete users[idx].isTemporaryPassword;
             localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
           }
         }
@@ -1256,6 +1259,15 @@ export class AuthService {
         this.scheduleAutoRefresh(exp || undefined);
       }
     }
+  }
+
+  /**
+   * SCRUM-156: Fetch authoritative directory users and activation statuses from backend
+   */
+  getDirectoryUsers(tenantId?: string): Observable<any[]> {
+    const params: Record<string, string> = {};
+    if (tenantId) params['tenantId'] = tenantId;
+    return this.http.get<any[]>(`${this.API_URL}/directory-users`, { params });
   }
 
   logout(): void {

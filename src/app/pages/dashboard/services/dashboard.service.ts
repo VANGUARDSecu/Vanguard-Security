@@ -1868,6 +1868,60 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.fetchConnectedApps();
   }
 
+  readonly isDirectoryLoading = signal<boolean>(false);
+
+  /**
+   * SCRUM-156: Synchronize directory users and activation statuses with the backend.
+   */
+  loadDirectoryUsers(): void {
+    if (!this.isBrowser) return;
+    const tenantId = this.activeOrganizationId();
+    this.isDirectoryLoading.set(true);
+    this.authService.getDirectoryUsers(tenantId).subscribe({
+      next: (backendUsers) => {
+        this.isDirectoryLoading.set(false);
+        if (!backendUsers || backendUsers.length === 0) return;
+        this.directoryUsers.update((current) => {
+          const merged = [...current];
+          for (const b of backendUsers) {
+            const idx = merged.findIndex(
+              (u) => u.email?.toLowerCase().trim() === b.email?.toLowerCase().trim()
+            );
+            if (idx !== -1) {
+              merged[idx] = {
+                ...merged[idx],
+                accountStatus: b.accountStatus,
+                lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : merged[idx].lastLogin),
+                mfaStatus: b.mfaStatus || merged[idx].mfaStatus,
+                role: b.role || merged[idx].role,
+                department: b.department || merged[idx].department,
+              };
+            } else {
+              merged.push({
+                id: b.id,
+                name: b.name,
+                email: b.email,
+                department: b.department,
+                role: b.role,
+                mfaStatus: b.mfaStatus,
+                accountStatus: b.accountStatus,
+                lastLogin: b.lastLogin,
+                initials: b.initials,
+                invitedAt: b.invitedAt,
+                expiresAt: b.expiresAt,
+              });
+            }
+          }
+          return merged;
+        });
+        this.saveStored('vanguard_directory_users', this.directoryUsers());
+      },
+      error: () => {
+        this.isDirectoryLoading.set(false);
+      },
+    });
+  }
+
   initDashboardForCurrentUser(): void {
     const currentUser = this.authService.currentUser();
     if (!currentUser) return;
@@ -1891,6 +1945,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
 
     this.initSupabaseSync();
+    this.loadDirectoryUsers();
     this.fetchConnectedApps();
 
     const storedUsers = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
@@ -1939,6 +1994,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     ];
     if (userTabs.includes(tab) && this.viewMode() === 'admin' && !this.isAdmin()) {
       this.viewMode.set('user');
+    }
+    if (tab === 'directory') {
+      this.loadDirectoryUsers();
     }
     this.activeTab.set(tab);
   }

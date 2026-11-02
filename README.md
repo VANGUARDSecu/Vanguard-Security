@@ -29,6 +29,15 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Live Directory User Status Synchronization & Manual Refresh (SCRUM-156)
+- **Real-Time Directory Status Synchronization**:
+  - `DashboardService.loadDirectoryUsers()` invokes `AuthService.getDirectoryUsers(tenantId)` to query real-time directory statuses and active memberships from the backend directory cache and Supabase Auth.
+  - Automatically loads on `AdminDirectory.ngOnInit()`, during `initDashboardForCurrentUser()`, and on tab changes to the `directory` tab, ensuring newly activated tenant accounts immediately transition from `Pending` to `Active`.
+- **Manual Status Refresh Button**:
+  - The Admin Directory toolbar includes an interactive "Refresh Status" button with a reactive spinning icon (`isDirectoryLoading` signal) allowing administrators to force-synchronize user activation records on demand.
+- **Client Cache Synchronization on Credential Activation**:
+  - Upon completing a password change via temporary credentials (`AuthService.changePassword()`), the user's directory entry in `vanguard_directory_users` is directly marked as `accountStatus: 'Active'` with `lastLogin: 'Just now'`, discarding temporary credential flags immediately.
+
 ### Mandatory Password Reset on Temporary Credentials & Tenant Portal Routing (SCRUM-155)
 - **Immediate Password Reset Enforcement**:
   - When an invited directory employee signs in with their temporary credentials, `is_temporary_password: true` is detected by `AuthService.setSession()`, setting `isPasswordResetRequired` to `true` and saving `vanguard_reset_required: true`.

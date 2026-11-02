@@ -80,14 +80,9 @@ export class LoginComponent implements OnInit {
       // If NOT SSO, redirect straight to dashboard
       // If SSO, stay on login page to prompt one-click approval or switch account
       if (this.authService.isLoggedIn() && !this.ssoParams()) {
-        const user = this.authService.currentUser();
-        const meta = user?.user_metadata || {};
-        const isTemp = meta['is_temporary_password'] === true || meta['isTemporaryPassword'] === true;
-        if (!isTemp) {
-          this.authService.isPasswordResetRequired.set(false);
-          if (typeof localStorage !== 'undefined') {
-            localStorage.removeItem('vanguard_reset_required');
-          }
+        if (this.authService.isPasswordResetRequired()) {
+          this.router.navigate(['/reset-password']);
+          return;
         }
         this.router.navigate(['/dashboard']);
         return;
@@ -178,6 +173,13 @@ export class LoginComponent implements OnInit {
             });
           }, 600);
         } else {
+          if (this.authService.isPasswordResetRequired()) {
+            this.showNotification('success', 'Temporary credentials verified. Please set your new password.', 3000);
+            setTimeout(() => {
+              this.router.navigate(['/reset-password']);
+            }, 600);
+            return;
+          }
           this.showNotification('success', 'Login successful! Redirecting...', 3000);
           setTimeout(() => {
             this.router.navigate(['/dashboard']);

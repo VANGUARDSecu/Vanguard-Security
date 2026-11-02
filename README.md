@@ -29,6 +29,18 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Mandatory Password Reset on Temporary Credentials & Tenant Portal Routing (SCRUM-155)
+- **Immediate Password Reset Enforcement**:
+  - When an invited directory employee signs in with their temporary credentials, `is_temporary_password: true` is detected by `AuthService.setSession()`, setting `isPasswordResetRequired` to `true` and saving `vanguard_reset_required: true`.
+  - `authGuard` intercepts all navigation attempts to `/dashboard` while `isPasswordResetRequired` is active, instantly redirecting the user to `/reset-password`.
+  - Both direct sign-in and 2-step OTP verification flows detect the temporary flag and route immediately to `/reset-password` before granting dashboard access.
+- **Accurate Tenant Classification & User Portal Access**:
+  - Invited directory employees are normalized as `accountType: 'company'` with `role: 'user'`, mapping them directly to the corporate **User Portal** (`viewMode: 'user'`, `activeTab: 'my-apps'`) bound to their corporate organization workspace.
+  - Personal Vault workspace fallback is prevented (`isIndividual()` resolves to `false`), ensuring enterprise employees only access company-administered apps and services.
+- **Clean SSO Integrations for Brand-New Accounts**:
+  - Connected client applications are strictly scoped per user email in persistent storage (`vanguard_connected_apps_<email>`).
+  - Purged legacy global mock apps (`userEmail: 'all'`). New employee accounts launch with an accurate, empty Active SSO Integrations list until real applications are connected via single sign-on.
+
 ### Cross-Account Storage Isolation & Tenant Boundary Enforcement (SCRUM-153)
 The frontend enforces total isolation across user account sessions on the same browser client to eliminate cross-tenant data leakage:
 - **Comprehensive Logout Purge**:

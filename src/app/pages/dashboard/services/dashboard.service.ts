@@ -86,10 +86,14 @@ export class DashboardService {
   readonly userRole = this.authService.userRole;
   readonly isAdmin = this.authService.isAdmin;
 
-  // Account Type Detection (Individual vs Company)
+  // Account Type Detection (Individual vs Company / Tenant)
   readonly accountType = computed<'individual' | 'company'>(() => {
     const u = this.user();
-    return (u?.accountType || (u?.user_metadata as any)?.['account_type']) === 'individual' ? 'individual' : 'company';
+    const meta = (u?.user_metadata as any) || {};
+    const raw = u?.accountType || meta['account_type'];
+    if (raw === 'individual') return 'individual';
+    if (raw === 'company' || meta['tenant_id'] || u?.role === 'admin') return 'company';
+    return 'company';
   });
   readonly isIndividual = computed<boolean>(() => this.accountType() === 'individual');
 
@@ -1270,13 +1274,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   private initConnectedApps(): UserConnectedApp[] {
-    const stored = this.loadStored<UserConnectedApp[]>('vanguard_connected_apps', []);
+    const email = this.user()?.email?.toLowerCase().trim();
+    if (!email) return [];
+    const stored = this.loadStored<UserConnectedApp[]>(`vanguard_connected_apps_${email}`, []);
     if (stored && stored.length > 0) {
       const genuine = stored.filter(
-        (a) => a.id !== 'conn-dummy-portal' && a.clientId !== 'vanguard-dummy-portal'
+        (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
       );
       if (genuine.length !== stored.length) {
-        this.saveStored('vanguard_connected_apps', genuine);
+        this.saveStored(`vanguard_connected_apps_${email}`, genuine);
       }
       return this.deduplicateConnectedAppsList(genuine);
     }
@@ -1286,23 +1292,39 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly connectedApps = signal<UserConnectedApp[]>(this.initConnectedApps());
 
   readonly activeConnectedApps = computed<UserConnectedApp[]>(() => {
-    const active = this.connectedApps().filter(
-      (app) => app.status === 'Connected' || app.status === 'Active'
-    );
+    const currentEmail = this.user()?.email?.toLowerCase().trim();
+    const active = this.connectedApps().filter((app) => {
+      const isStatusActive = app.status === 'Connected' || app.status === 'Active';
+      if (!isStatusActive) return false;
+      // If userEmail is 'all', filter out global seed mocks
+      if (app.userEmail === 'all') return false;
+      // If userEmail is specified on the app, ensure it belongs to the current user
+      if (app.userEmail && currentEmail) {
+        return app.userEmail.toLowerCase().trim() === currentEmail;
+      }
+      return true;
+    });
     return this.deduplicateConnectedAppsList(active);
   });
 
   fetchConnectedApps(): void {
-    const email = this.user()?.email;
+    const email = this.user()?.email?.toLowerCase().trim();
+    if (!email) {
+      this.connectedApps.set([]);
+      return;
+    }
     this.authService.getConnectedApps(email).subscribe({
       next: (res) => {
-        if (res.success && res.connectedApps && res.connectedApps.length > 0) {
+        if (res.success && res.connectedApps) {
+          const userSpecific = (res.connectedApps || []).filter(
+            (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
+          );
           const merged = this.deduplicateConnectedAppsList([
-            ...res.connectedApps,
-            ...this.connectedApps(),
+            ...userSpecific,
+            ...this.connectedApps().filter((a) => !a.userEmail || a.userEmail.toLowerCase().trim() === email),
           ]);
           this.connectedApps.set(merged);
-          this.saveStored('vanguard_connected_apps', this.connectedApps());
+          this.saveStored(`vanguard_connected_apps_${email}`, merged);
         }
       },
       error: () => {},
@@ -1312,14 +1334,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   disconnectApp(clientId: string): void {
     const target = this.connectedApps().find((a) => a.clientId === clientId);
     const targetOrigin = target ? (target.originUrl || '').toLowerCase().trim().replace(/\/$/, '') : '';
-    const email = this.user()?.email;
+    const email = this.user()?.email?.toLowerCase().trim();
     this.connectedApps.update((apps) =>
       apps.filter((a) => {
         const origin = (a.originUrl || '').toLowerCase().trim().replace(/\/$/, '');
         return a.clientId !== clientId && (!targetOrigin || origin !== targetOrigin);
       })
     );
-    this.saveStored('vanguard_connected_apps', this.connectedApps());
+    if (email) {
+      this.saveStored(`vanguard_connected_apps_${email}`, this.connectedApps());
+    }
 
     this.authService.disconnectConnectedApp(clientId, email).subscribe({
       next: () => {},
@@ -1537,7 +1561,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   );
 
   readonly isPersonalWorkspace = computed<boolean>(() => {
-    return this.activeWorkspaceId() === 'personal';
+    return this.isIndividual() && this.activeWorkspaceId() === 'personal';
   });
 
   readonly allWorkspaces = computed<TenantOrganization[]>(() => {

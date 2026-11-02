@@ -276,4 +276,67 @@ describe('AuthService', () => {
       expect(errorMsg).toContain('http://localhost:3000');
     });
   });
+
+  describe('Temporary password detection and tenant account resolution (SCRUM-155)', () => {
+    it('setSession() activates isPasswordResetRequired when user has is_temporary_password: true', () => {
+      service.setSession(
+        {
+          id: 'user-temp',
+          email: 'employee@company.com',
+          role: 'user',
+          user_metadata: {
+            role: 'user',
+            is_temporary_password: true,
+            account_type: 'company',
+            tenant_id: 'org-tenant-1',
+          },
+        },
+        { access_token: 'temp-jwt', refresh_token: 'temp-ref', expires_at: 1800000000 }
+      );
+
+      expect(service.isPasswordResetRequired()).toBe(true);
+      expect(localStorage.getItem('vanguard_reset_required')).toBe('true');
+      expect(service.currentUser()?.accountType).toBe('company');
+      expect(service.currentUser()?.isTemporaryPassword).toBe(true);
+    });
+
+    it('setSession() does NOT require password reset when logging in with standard permanent credentials', () => {
+      service.setSession(
+        {
+          id: 'user-perm',
+          email: 'employee@company.com',
+          role: 'user',
+          user_metadata: {
+            role: 'user',
+            is_temporary_password: false,
+            account_type: 'company',
+          },
+        },
+        { access_token: 'perm-jwt', refresh_token: 'perm-ref', expires_at: 1800000000 }
+      );
+
+      expect(service.isPasswordResetRequired()).toBe(false);
+      expect(localStorage.getItem('vanguard_reset_required')).toBeNull();
+      expect(service.currentUser()?.accountType).toBe('company');
+    });
+
+    it('normalizes invited users with tenant_id or company metadata as accountType: company', () => {
+      service.setSession(
+        {
+          id: 'tenant-user',
+          email: 'tenant.emp@company.com',
+          role: 'user',
+          user_metadata: {
+            tenant_id: 'org-enterprise-42',
+            role: 'user',
+          },
+        },
+        { access_token: 'tok-1', expires_at: 1800000000 }
+      );
+
+      expect(service.currentUser()?.accountType).toBe('company');
+      expect(service.userRole()).toBe('user');
+      expect(service.isAdmin()).toBe(false);
+    });
+  });
 });

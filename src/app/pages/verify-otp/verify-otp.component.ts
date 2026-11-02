@@ -680,7 +680,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
 
     this.isLoading.set(false);
-    this.showNotification('success', 'Verification successful! Redirecting to secure vault...', 3000);
+    if (this.authService.isPasswordResetRequired()) {
+      this.showNotification('success', 'Temporary credentials verified. Please set your new password.', 3000);
+      setTimeout(() => {
+        this.router.navigate(['/reset-password']);
+      }, 800);
+      return;
+    }
+
+    this.showNotification('success', 'Verification successful! Redirecting...', 3000);
     setTimeout(() => {
       this.router.navigate(['/dashboard']);
     }, 800);

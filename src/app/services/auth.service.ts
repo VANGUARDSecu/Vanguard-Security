@@ -16,6 +16,7 @@ export interface UserProfile {
   phone?: string;
   role?: 'admin' | 'security_officer' | 'user';
   accountType?: 'individual' | 'company';
+  isTemporaryPassword?: boolean;
   avatarUrl?: string;
   user_metadata?: Record<string, any>;
 }
@@ -209,6 +210,18 @@ export class AuthService {
       } else if (parsed.role === 'security_officer' || meta['role'] === 'security_officer') {
         role = 'security_officer';
       }
+      const rawAccountType = parsed.accountType || meta['account_type'];
+      const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || parsed.accountType === 'company');
+      const accountType: 'individual' | 'company' =
+        rawAccountType === 'individual'
+          ? 'individual'
+          : (isTenant || role === 'admin' ? 'company' : 'individual');
+      const isTemporaryPassword = Boolean(
+        parsed.isTemporaryPassword ||
+        meta['is_temporary_password'] === true ||
+        meta['isTemporaryPassword'] === true
+      );
+
       return {
         ...parsed,
         firstName: parsed.firstName || meta['first_name'] || meta['firstName'] || meta['given_name'] || meta['name']?.split(' ')[0] || '',
@@ -216,6 +229,8 @@ export class AuthService {
         companyName: parsed.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
         phone: parsed.phone || meta['phone'] || '',
         role,
+        accountType,
+        isTemporaryPassword,
         avatarUrl: parsed.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       };
     } catch {
@@ -657,6 +672,19 @@ export class AuthService {
 
     const resolvedFullName = (user as any).name || (firstName || lastName ? `${firstName} ${lastName}`.trim() : meta['name'] || '');
 
+    const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || user.accountType === 'company');
+    const resolvedAccountType: 'individual' | 'company' =
+      user.accountType === 'individual' || meta['account_type'] === 'individual'
+        ? 'individual'
+        : (isTenant || resolvedRole === 'admin' ? 'company' : 'individual');
+
+    const isTemp = Boolean(
+      meta['is_temporary_password'] === true ||
+      meta['isTemporaryPassword'] === true ||
+      user.isTemporaryPassword === true ||
+      (user as any).is_temporary_password === true
+    );
+
     const normalizedUser: UserProfile = {
       ...user,
       firstName,
@@ -665,6 +693,8 @@ export class AuthService {
       companyName: user.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
       phone: user.phone || meta['phone'] || '',
       role: resolvedRole,
+      accountType: resolvedAccountType,
+      isTemporaryPassword: isTemp,
       avatarUrl: user.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       user_metadata: {
         ...meta,
@@ -672,11 +702,13 @@ export class AuthService {
         last_name: lastName,
         name: resolvedFullName || undefined,
         role: resolvedRole,
+        account_type: resolvedAccountType,
+        is_temporary_password: isTemp,
       },
     };
 
-    // Only flag password reset required if explicitly undergoing a recovery flow
-    if (this.pendingMode() === 'recovery') {
+    // SCRUM-155: Flag password reset required if explicitly undergoing a recovery flow OR authenticated with temporary password
+    if (this.pendingMode() === 'recovery' || isTemp) {
       this.isPasswordResetRequired.set(true);
       if (this.isBrowser) {
         localStorage.setItem('vanguard_reset_required', 'true');
@@ -698,12 +730,14 @@ export class AuthService {
     }
 
     if (this.isBrowser) {
-      // SCRUM-153: If the active user has changed, wipe previous user's cached directory & tenant state
+      // SCRUM-153 & SCRUM-155: If the active user has changed, wipe previous user's cached directory, apps, & tenant state
       const prevUserRaw = localStorage.getItem('vanguard_user');
       if (prevUserRaw) {
         try {
           const prev = JSON.parse(prevUserRaw);
-          if (prev?.id && prev.id !== user.id) {
+          const isDifferent = (prev?.id && user.id && prev.id !== user.id) ||
+                              (prev?.email && user.email && prev.email.toLowerCase().trim() !== user.email.toLowerCase().trim());
+          if (isDifferent) {
             const keysToRemove: string[] = [];
             for (let i = 0; i < localStorage.length; i++) {
               const k = localStorage.key(i);

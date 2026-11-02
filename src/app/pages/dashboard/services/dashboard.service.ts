@@ -4890,10 +4890,44 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   disableTotp(): void {
-    this.hasTotpEnrolled.set(false);
-    this.saveStored('vanguard_user_has_totp', false);
-    this.logAuditEvent('De-enrolled TOTP Authenticator App', 'MFA Vault', 'RFC 6238 TOTP', 'success', 'Low');
-    this.showAdminNotice('Authenticator App removed from account.');
+    // First fetch the TOTP factor ID from the backend
+    this.authService.listMfaFactors('totp').subscribe({
+      next: (res) => {
+        const totpFactor = res.factors?.find((f: any) => f.status === 'verified' && f.type === 'totp');
+        if (!totpFactor) {
+          this.showAdminNotice('No active TOTP authenticator found.');
+          return;
+        }
+
+        // Unenroll the factor from the backend
+        this.authService.unenrollTotp(totpFactor.id).subscribe({
+          next: () => {
+            this.hasTotpEnrolled.set(false);
+            this.saveStored('vanguard_user_has_totp', false);
+            this.logAuditEvent('De-enrolled TOTP Authenticator App', 'MFA Vault', 'RFC 6238 TOTP', 'success', 'Low');
+            this.showAdminNotice('Authenticator App removed from account.');
+          },
+          error: (err: Error) => {
+            const message = err.message || 'Failed to remove Authenticator';
+            // Check if it's a token expiration issue
+            if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+              this.showAdminNotice('Your session has expired. Please sign out and sign in again to de-enroll the authenticator.');
+            } else {
+              this.showAdminNotice(`Failed to remove Authenticator: ${message}`);
+            }
+          },
+        });
+      },
+      error: (err: Error) => {
+        const message = err.message || 'Failed to retrieve Authenticator status';
+        // Check if it's a token expiration issue
+        if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+          this.showAdminNotice('Your session has expired. Please sign out and sign in again.');
+        } else {
+          this.showAdminNotice(`Failed to retrieve Authenticator status: ${message}`);
+        }
+      },
+    });
   }
 
   // ==========================================

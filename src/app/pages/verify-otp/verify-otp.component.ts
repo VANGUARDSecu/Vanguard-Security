@@ -32,6 +32,8 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly clientType = signal<'web' | 'mobile'>('web');
   readonly pushSecondsRemaining = signal<number>(60);
   readonly pushStatusText = signal<string>('Waiting for mobile approval...');
+  readonly pushRetryCount = signal<number>(0);
+  readonly pushRetriesRemaining = signal<number>(3);
   private pushPollInterval: any = null;
   private pushCountdownInterval: any = null;
 
@@ -132,10 +134,46 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         }
       }
 
-      // If method is push_approval, initiate polling loop
       if (methodParam === 'push_approval' && this.challengeId()) {
+        this.pushRetryCount.set(0);
+        this.pushRetriesRemaining.set(3);
         this.startPushPolling(this.challengeId()!);
+      } else if (!this.isSsoVerification()) {
+        // For non-SSO flows, send initial OTP email on page load
+        this.isLoading.set(true);
+        
+        if (modeParam === 'recovery') {
+          // Recovery mode uses forgotPassword
+          this.authService.forgotPassword(emailParam).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(60);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send recovery code.');
+              this.startResendTimer(30);
+            },
+          });
+        } else {
+          // Signup/signin modes use resendOtp
+          const otpType = modeParam === 'signup' ? 'signup' : 'signin';
+          this.authService.resendOtp(emailParam, otpType).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(45);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send verification code.');
+              this.startResendTimer(30);
+            },
+          });
+        }
       } else {
+        // SSO flows already handled above in initiateSsoMfa call
         this.clearOtpInputs();
         this.startResendTimer(this.isSsoVerification() ? 60 : 30);
       }
@@ -260,6 +298,30 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         window.open(webAuthUrl, '_blank');
       }
     }
+  }
+
+  retryPushChallenge(): void {
+    const challengeId = this.challengeId();
+    if (!challengeId) return;
+
+    this.isLoading.set(true);
+    this.authService.retryPushChallenge(challengeId).subscribe({
+      next: (res) => {
+        this.isLoading.set(false);
+        this.numberCode.set(res.numberMatching.code.toString());
+        this.pushRetryCount.set(res.retryCount);
+        this.pushRetriesRemaining.set(res.retriesRemaining);
+        this.pushSecondsRemaining.set(res.expiresInSeconds);
+        this.pushStatusText.set('Waiting for mobile approval...');
+        this.showNotification('success', res.message, 4000);
+        // Restart polling with fresh 60-second window
+        this.startPushPolling(challengeId);
+      },
+      error: (err: Error) => {
+        this.isLoading.set(false);
+        this.showNotification('error', err.message || 'Failed to retry push challenge.');
+      },
+    });
   }
 
   setMethod(newMethod: VerificationMethod): void {

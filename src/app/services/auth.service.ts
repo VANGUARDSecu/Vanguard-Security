@@ -570,6 +570,27 @@ export class AuthService {
       );
   }
 
+  unenrollTotp(factorId: string): Observable<{ success: boolean; message: string }> {
+    return this.http
+      .delete<{ success: boolean; message: string }>(`${this.API_URL}/mfa/${encodeURIComponent(factorId)}`)
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          return throwError(() => new Error(error.error?.message || 'Failed to remove Authenticator.'));
+        })
+      );
+  }
+
+  listMfaFactors(type?: string): Observable<{ success: boolean; factors: any[] }> {
+    const url = type ? `${this.API_URL}/mfa/factors?type=${encodeURIComponent(type)}` : `${this.API_URL}/mfa/factors`;
+    return this.http
+      .get<{ success: boolean; factors: any[] }>(url)
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          return throwError(() => new Error(error.error?.message || 'Failed to list MFA factors.'));
+        })
+      );
+  }
+
   setSession(user: UserProfile, session: AuthSession): void {
     const meta = user.user_metadata || {};
     let resolvedRole: 'admin' | 'security_officer' | 'user' = 'user';
@@ -972,6 +993,13 @@ export class AuthService {
         challengeId,
         status: 'not_found' as const,
       }))
+    );
+  }
+
+  retryPushChallenge(challengeId: string): Observable<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/retry`;
+    return this.http.post<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }>(url, { challengeId }).pipe(
+      catchError((err) => throwError(() => new Error(err.error?.message || 'Failed to retry push challenge.')))
     );
   }
 

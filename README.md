@@ -29,6 +29,17 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Zero-Trust Tenant SSO Access Governance & Approval Notice (SCRUM-160)
+- **Zero-Trust Administrative Approval Interception**:
+  - Intercepts external OIDC Single Sign-On attempts for corporate tenant accounts where the client application has not yet been assigned or approved by an administrator.
+  - Displays a dedicated **Zero-Trust Access Governance** notification card on the login and MFA verification pages detailing the application name, access status (Pending Approval), and automatic request submission.
+  - Prevents premature MFA prompts or invalid token issuance for non-approved corporate integrations.
+- **Graceful Error Callback Propagation**:
+  - The 'Return to Client' action safely returns to the client application callback URL (redirect_uri) with standard OIDC error parameters: error=access_denied&error_description=Access+approval+pending+administrator+review and state preservation.
+  - Enables client applications (e.g., dummy-web) to render informative, non-crashing governance messages to users.
+- **Strict Account Exemption**:
+  - Individual users (accountType === 'individual') and tenant Super Administrators (role === 'admin') are unhindered and bypass the approval gate seamlessly.
+
 ### Approved Application Auto-Provisioning to User Launchpad (SCRUM-159)
 - **Automatic Transfer from Request Queue to Applications Launchpad**:
   - When an administrator approves an employee's application access request, the application is automatically transitioned to the user's active applications catalog (`apps` / `activeAppsList` / `filteredApps`) with an approved status badge (`✓ Approved`).

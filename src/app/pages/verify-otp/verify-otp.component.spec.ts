@@ -122,6 +122,7 @@ describe('VerifyOtpComponent', () => {
       );
 
       component.challengeId.set('sso_mfa_test_123');
+      component.isLoading.set(false);
       component.resendCountdown.set(0);
       component.onResendOtp();
 

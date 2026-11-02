@@ -98,6 +98,8 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
     });
 
     it('should allow de-enrolling TOTP authenticator', () => {
+      vi.spyOn(authService, 'listMfaFactors').mockReturnValue(of({ success: true, factors: [{ id: 'factor-1', status: 'verified', type: 'totp' }] }));
+      vi.spyOn(authService, 'unenrollTotp').mockReturnValue(of({ success: true, message: 'Unenrolled' }));
       component.dashboardService.hasTotpEnrolled.set(true);
       expect(component.hasTotpEnrolled()).toBe(true);
 

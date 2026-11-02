@@ -7,6 +7,7 @@ import { DashboardSidebar } from './components/sidebar/sidebar';
 import { AdminOverview } from './components/admin-overview/admin-overview';
 import { AdminDirectory } from './components/admin-directory/admin-directory';
 import { AdminSamlOidc } from './components/admin-saml-oidc/admin-saml-oidc';
+import { AdminAccessRequests } from './components/admin-access-requests/admin-access-requests';
 import { AdminAuditLogs } from './components/admin-audit-logs/admin-audit-logs';
 import { AdminSettings } from './components/admin-settings/admin-settings';
 import { UserMyApps } from './components/user-my-apps/user-my-apps';
@@ -70,6 +71,7 @@ export type {
     AdminOverview,
     AdminDirectory,
     AdminSamlOidc,
+    AdminAccessRequests,
     AdminAuditLogs,
     AdminSettings,
     UserMyApps,

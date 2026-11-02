@@ -266,6 +266,24 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
   // SCRUM-57: Active SSO Integrations & Connected Applications Display
   // ==========================================================================
   describe('SCRUM-57 Connected Client Applications & Live Status', () => {
+    beforeEach(() => {
+      component.dashboardService.connectedApps.set([
+        {
+          id: 'conn-dummy-portal',
+          clientId: 'vanguard-dummy-portal',
+          clientName: 'Acme Dummy Web',
+          protocol: 'OpenID Connect 1.0 (PKCE)',
+          scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
+          redirectUri: 'http://localhost:4201/auth/callback',
+          originUrl: 'http://localhost:4201',
+          status: 'Connected',
+          connectedAt: 'Oct 23, 2026',
+          lastActiveAt: 'Active Session',
+          icon: '🌐',
+          description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
+        },
+      ]);
+    });
     it('should display Acme Dummy Web as an active connected integration with live status', () => {
       expect(component.activeConnectedApps().length).toBeGreaterThanOrEqual(1);
 

@@ -210,73 +210,15 @@ export class DashboardService {
   private initDirectoryGroups(): DirectoryGroup[] {
     const stored = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter(
+        (g) => !['grp-devops', 'grp-secops', 'grp-design', 'grp-sales'].includes(g.id)
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_directory_groups', genuine);
+      }
+      return genuine;
     }
-    const users = this.directoryUsers();
-    const rootId = users[0]?.id || 'usr-root';
-
-    return [
-      {
-        id: 'grp-devops',
-        name: 'DevOps & Cloud Infrastructure',
-        description: 'Core engineering and infrastructure leads with production cloud access.',
-        department: 'Engineering',
-        email: 'devops-team@vanguard.security',
-        memberIds: [rootId],
-        appIds: ['aws-iam', 'github', 'datadog'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'hardware_totp',
-          sessionDurationHours: 4,
-        },
-        createdAt: '2026-09-01T00:00:00.000Z',
-      },
-      {
-        id: 'grp-secops',
-        name: 'Security Operations (SecOps)',
-        description: 'Cybersecurity threat responders, SOC analysts, and incident handlers.',
-        department: 'Security Ops',
-        email: 'secops@vanguard.security',
-        memberIds: [rootId, 'johnroben.manayon31@gmail.com'],
-        appIds: ['jira', 'github', 'slack'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'hardware_totp',
-          sessionDurationHours: 2,
-        },
-        createdAt: '2026-09-01T00:00:00.000Z',
-      },
-      {
-        id: 'grp-design',
-        name: 'Product & Design',
-        description: 'UI/UX product designers, design system engineers, and product managers.',
-        department: 'Engineering',
-        email: 'design-team@vanguard.security',
-        memberIds: [],
-        appIds: ['figma', 'slack', 'jira'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'any',
-          sessionDurationHours: 8,
-        },
-        createdAt: '2026-09-02T00:00:00.000Z',
-      },
-      {
-        id: 'grp-sales',
-        name: 'Sales & Marketing',
-        description: 'Enterprise account executives, marketing leads, and customer success specialists.',
-        department: 'Finance',
-        email: 'revenue-ops@vanguard.security',
-        memberIds: [],
-        appIds: ['salesforce', 'slack', 'google-workspace'],
-        policy: {
-          requireMfa: false,
-          mfaType: 'any',
-          sessionDurationHours: 12,
-        },
-        createdAt: '2026-09-03T00:00:00.000Z',
-      },
-    ];
+    return [];
   }
 
   readonly directoryGroups = signal<DirectoryGroup[]>(this.initDirectoryGroups());
@@ -652,62 +594,19 @@ export class DashboardService {
   private initAppAccessRequests(): AppAccessRequest[] {
     const stored = this.loadStored<AppAccessRequest[]>('vanguard_access_requests', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter(
+        (r) =>
+          !['req-101', 'req-102', 'req-103'].includes(r.id) &&
+          r.userEmail !== 'elena.rostova@vanguard.security' &&
+          r.userEmail !== 'marcus.vance@vanguard.security' &&
+          r.userEmail !== 'sarah.jenkins@vanguard.security'
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_access_requests', genuine);
+      }
+      return genuine;
     }
-    // Seed realistic initial enterprise access requests
-    return [
-      {
-        id: 'req-101',
-        userId: 'usr-analyst-1',
-        userName: 'Elena Rostova',
-        userEmail: 'elena.rostova@vanguard.security',
-        department: 'Security Ops',
-        role: 'SOC Analyst',
-        appName: 'Datadog Cloud SIEM',
-        protocol: 'SAML 2.0',
-        category: 'cloud',
-        icon: '📊',
-        launchUrl: 'https://app.datadoghq.com',
-        justification: 'Need access to inspect real-time firewall threat telemetry and incident event correlations.',
-        status: 'Pending Approval',
-        submittedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-      },
-      {
-        id: 'req-102',
-        userId: 'usr-dev-2',
-        userName: 'Marcus Vance',
-        userEmail: 'marcus.vance@vanguard.security',
-        department: 'Engineering',
-        role: 'Senior Backend Engineer',
-        appName: 'Figma Enterprise',
-        protocol: 'SAML 2.0',
-        category: 'collaboration',
-        icon: '🎨',
-        launchUrl: 'https://www.figma.com/login',
-        justification: 'Reviewing and implementing UX workflow specifications for zero-trust authorization gates.',
-        status: 'Pending Approval',
-        submittedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-      },
-      {
-        id: 'req-103',
-        userId: 'usr-sales-3',
-        userName: 'Sarah Jenkins',
-        userEmail: 'sarah.jenkins@vanguard.security',
-        department: 'Finance',
-        role: 'Enterprise Account Executive',
-        appName: 'Salesforce Enterprise SSO',
-        protocol: 'SAML 2.0',
-        category: 'cloud',
-        icon: '☁️',
-        launchUrl: 'https://login.salesforce.com',
-        justification: 'Customer relationship tracking and enterprise NDA renewal pipeline management.',
-        status: 'Approved',
-        submittedAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-        reviewedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-        reviewedBy: 'Vanguard Administrator',
-        adminNotes: 'Approved based on sales department license allocation.',
-      },
-    ];
+    return [];
   }
 
   readonly appAccessRequests = signal<AppAccessRequest[]>(this.initAppAccessRequests());
@@ -1132,55 +1031,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly rotateRadiusSecretSuccess = signal<boolean>(false);
 
   // Recent 802.1X Authentication Activity Stream (SCRUM-23)
-  readonly radiusAuthActivity = signal<RadiusAuthActivityEvent[]>([
-    {
-      id: 'rad-act-1',
-      timestamp: '2 mins ago',
-      clientMac: 'D4:61:9D:3A:8B:01',
-      username: 'alex.vanguard@vanguard.security',
-      nasClientName: 'Main HQ Wi-Fi - UniFi AP',
-      nasIp: '192.168.1.50',
-      protocol: 'PEAP-MSCHAPv2',
-      status: 'Access-Accept',
-      vlanId: 10,
-      reason: 'Credentials verified against Supabase Vault',
-    },
-    {
-      id: 'rad-act-2',
-      timestamp: '6 mins ago',
-      clientMac: 'BC:D0:74:11:F2:A9',
-      username: 'sarah.connor@vanguard.security',
-      nasClientName: 'Cisco Meraki MR Branch Gateway',
-      nasIp: '10.200.0.1',
-      protocol: 'EAP-TLS',
-      status: 'Access-Accept',
-      vlanId: 20,
-      reason: 'Valid X.509 client certificate presented',
-    },
-    {
-      id: 'rad-act-3',
-      timestamp: '14 mins ago',
-      clientMac: 'F0:18:98:C3:4D:7E',
-      username: 'unknown_contractor',
-      nasClientName: 'Main HQ Wi-Fi - UniFi AP',
-      nasIp: '192.168.1.50',
-      protocol: 'MS-CHAPv2',
-      status: 'Access-Reject',
-      reason: 'Authentication failed: Invalid credentials or expired account',
-    },
-    {
-      id: 'rad-act-4',
-      timestamp: '28 mins ago',
-      clientMac: '70:EF:00:81:4A:23',
-      username: 'dev-ops-service',
-      nasClientName: 'Aruba CX R&D Lab AP',
-      nasIp: '172.16.50.10',
-      protocol: 'PAP',
-      status: 'Access-Accept',
-      vlanId: 30,
-      reason: 'Service token authenticated',
-    },
-  ]);
+  readonly radiusAuthActivity = signal<RadiusAuthActivityEvent[]>([]);
 
   readonly radiusActivityFilter = signal<'all' | 'Access-Accept' | 'Access-Reject'>('all');
 
@@ -1211,89 +1062,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private initFleetDevices(): EnrolledDevice[] {
     const stored = this.loadStored<EnrolledDevice[]>('vanguard_fleet_devices', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter((d) => !d.id.startsWith('dev-fleet-'));
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_fleet_devices', genuine);
+      }
+      return genuine;
     }
-    const name = this.resolveDisplayName();
-    const email = this.user()?.email || 'admin@vanguard.security';
-    const dept = 'Engineering';
-
-    const baseDevices: EnrolledDevice[] = [
-      {
-        id: 'dev-fleet-1',
-        name: `${name}'s MacBook Pro 16"`,
-        model: 'Apple MacBook Pro (M3 Max)',
-        type: 'macOS Workstation',
-        osVersion: 'macOS Sequoia 15.1',
-        ownerName: name,
-        ownerEmail: email,
-        department: dept,
-        biometricType: 'Touch ID',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-01T09:00:00Z',
-        lastSync: '2 minutes ago',
-      },
-      {
-        id: 'dev-fleet-2',
-        name: `${name}'s iPhone 16 Pro`,
-        model: 'Apple iPhone 16 Pro (A3293)',
-        type: 'Mobile iOS',
-        osVersion: 'iOS 18.2',
-        ownerName: name,
-        ownerEmail: email,
-        department: dept,
-        biometricType: 'Face ID',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-02T11:15:00Z',
-        lastSync: '5 minutes ago',
-      },
-    ];
-
-    const users = this.directoryUsers();
-    const colleague = users.find((u) => u.email !== email);
-    if (colleague) {
-      baseDevices.push({
-        id: 'dev-fleet-3',
-        name: `${colleague.name}'s ThinkPad X1 Carbon`,
-        model: 'Lenovo ThinkPad X1 Gen 12',
-        type: 'Windows Workstation',
-        osVersion: 'Windows 11 Pro 24H2',
-        ownerName: colleague.name,
-        ownerEmail: colleague.email,
-        department: colleague.department || 'Security Ops',
-        biometricType: 'Windows Hello',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-05T08:30:00Z',
-        lastSync: '18 minutes ago',
-      });
-      baseDevices.push({
-        id: 'dev-fleet-4',
-        name: `${colleague.name}'s Pixel 9 Pro`,
-        model: 'Google Pixel 9 Pro',
-        type: 'Mobile Android',
-        osVersion: 'Android 15 (AP2A)',
-        ownerName: colleague.name,
-        ownerEmail: colleague.email,
-        department: colleague.department || 'Security Ops',
-        biometricType: 'Fingerprint',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: false,
-        complianceStatus: 'Warning',
-        enrolledAt: '2026-09-08T14:40:00Z',
-        lastSync: '1 hour ago',
-      });
-    }
-
-    return baseDevices;
+    return [];
   }
 
   readonly userDevices = signal<EnrolledDevice[]>(
@@ -1492,24 +1267,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private initConnectedApps(): UserConnectedApp[] {
     const stored = this.loadStored<UserConnectedApp[]>('vanguard_connected_apps', []);
     if (stored && stored.length > 0) {
-      return this.deduplicateConnectedAppsList(stored);
+      const genuine = stored.filter(
+        (a) => a.id !== 'conn-dummy-portal' && a.clientId !== 'vanguard-dummy-portal'
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_connected_apps', genuine);
+      }
+      return this.deduplicateConnectedAppsList(genuine);
     }
-    return [
-      {
-        id: 'conn-dummy-portal',
-        clientId: 'vanguard-dummy-portal',
-        clientName: 'Acme Dummy Web',
-        protocol: 'OpenID Connect 1.0 (PKCE)',
-        scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
-        redirectUri: 'http://localhost:4201/auth/callback',
-        originUrl: 'http://localhost:4201',
-        status: 'Connected',
-        connectedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        lastActiveAt: 'Active Session',
-        icon: '🌐',
-        description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
-      },
-    ];
+    return [];
   }
 
   readonly connectedApps = signal<UserConnectedApp[]>(this.initConnectedApps());
@@ -2966,8 +2732,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   openAccessRequestsQueue(): void {
     this.viewMode.set('admin');
-    this.activeTab.set('saml-oidc');
-    this.samlSubTab.set('access-requests');
+    this.activeTab.set('access-requests');
   }
 
   setAccessRequestStatusFilter(filter: 'all' | 'Pending Approval' | 'Approved' | 'Rejected'): void {

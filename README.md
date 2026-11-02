@@ -53,16 +53,24 @@ Streamlined, high-assurance administrative portal for SecOps engineers and organ
      - One-click copy credentials confirmation card.
      - Automated onboarding email dispatch with live delivery status pills (`sending`, `sent`, `failed`).
      - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
-  3. **OIDC Applications & SSO**:
-     - Register and configure OpenID Connect / OAuth 2.0 client applications (Client ID, Redirect URIs, PKCE S256).
-     - Assign authorized applications to directory users and groups with zero-trust assertions.
-  4. **Access Requests Queue**: Review, approve, or reject employee SaaS application access requests with automated assignment and audit logging.
+  3. **OIDC Applications & SSO (SCRUM-152)**:
+     - Independent, dedicated page for federated applications and client credentials.
+     - Subnav tabs: Federated Apps, IdP Metadata & X.509 Certificate Vault, OIDC OAuth 2.0 Clients, and SSO Sandbox Assertion Inspector.
+     - Separated cleanly from Access Requests to eliminate page collision and navigation confusion.
+  4. **Access Requests Queue (SCRUM-152)**:
+     - Dedicated, standalone administrative approval queue (`AdminAccessRequests` component).
+     - Live KPI metric cards: Total Requests, Pending Review, Approved & Assigned.
+     - Real-time filtering by status (`All`, `Pending Approval`, `Approved`, `Rejected`) and keyword search.
+     - 1-Click Approve (instantly provisions app) and contextual Reject modal with administrative audit reason capture.
+     - Truthful empty states with zero hardcoded mock/seed applicants.
   5. **Security Audit Log Stream**: Real-time authoritative event auditing with multi-field search, event category filtering, and CSV export.
   6. **Enterprise Settings & Branding**:
      - Enforce tenant-wide mandatory Multi-Factor Authentication (MFA).
      - Configure session timeouts and customize white-label branding (logo, colors, corporate name).
      - **Global Emergency Session Killswitch**: One-click server-side termination of all active web sessions and revocation of JWT refresh tokens.
-- **Pruned Obsolete & Simulated Features (SCRUM-151)**:
+- **Pruned Obsolete & Simulated Features (SCRUM-151 & SCRUM-152)**:
+  - **Separation of OIDC Apps and Access Requests (SCRUM-152)**: Segregated Access Requests into its own dedicated page component, removing the embedded subtab from the OIDC/SAML console.
+  - **Zero-Mock Data Policy (SCRUM-152)**: Purged all hardcoded mock applicants (e.g. Elena Rostova, Marcus Vance, Sarah Jenkins), fake groups (DevOps, SecOps), fake devices, fake connected apps (Acme Dummy Web), and simulated RADIUS activity. All collections default strictly to genuine data (from session/backend/Supabase/storage) or clean, truthful empty states.
   - Removed deferred protocol tabs from the sidebar and viewport: **Cloud LDAP (Port 636)** and **Cloud RADIUS (Port 1812)** (listeners unbonded on backend).
   - Removed client-side mock tabs: **Webhooks & Event API** (deferred pending backend worker/SSRF protection) and **Device Fleet & MDM** (deferred remote device wipe).
   - Re-scoped federation to focus strictly on genuine **OIDC Applications & SSO**, eliminating misleading claims of active SAML production endpoints.

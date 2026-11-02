@@ -44,22 +44,28 @@ The application enforces strict, account-type-based workspace boundaries and hea
   - Appbar displays the **🏢 User Portal** badge and the Corporate Directory indicator.
   - Personal Vault navigation links and Admin Console switchers are removed.
 
-### 1. Admin Console (Admin View)
-Designed for SecOps engineers and system administrators to configure enterprise access:
-- **Gateway Telemetry & Health**: Live monitoring for SAML 2.0 Web SSO, OIDC Clients, Cloud LDAP (Port 636), and Cloud RADIUS (Port 1812).
-- **Directory Vault & Provisioning**:
-  - Provision employees with auto-generated secure temporary passwords (`Vanguard#XXXX!`).
-  - One-click copy credentials confirmation card.
-  - Automated onboarding email dispatch with live delivery status pills (`sending`, `sent`, `failed`).
-  - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
-- **Protocol Management**:
-  - **SAML 2.0 SSO**: Manage SP connectors, download IdP metadata XML, and export X.509 certificates.
-  - **OIDC Clients**: Register client IDs, callbacks, and test via the interactive SSO Assertion Sandbox.
-  - **Cloud LDAP & RADIUS**: Manage host connections, access points, and VLAN mappings with interactive diagnostics.
-- **Enterprise Security Policies**:
-  - Enforce tenant-wide MFA, block high-risk IP ranges, and configure session timeouts.
-  - **Global Emergency Killswitch**: One-click revocation of all active sessions and gateway tokens.
-- **Tenant Audit Log Stream**: Real-time event auditing with multi-field search, protocol filtering, and CSV export.
+### 1. Admin Console (Admin View - Production Core & SCRUM-151 Pruning)
+Streamlined, high-assurance administrative portal for SecOps engineers and organizational administrators, pruned in accordance with the Security Improvement Plan (PRD §3, §4 FR-09, §9, §12) and backend protocol pruning (SCRUM-122):
+- **Core Production Tabs**:
+  1. **Overview**: Live directory metrics, admin identity UUID with one-click copy, active session diagnostics, and genuine OpenID Connect (OIDC) gateway health telemetry.
+  2. **Directory Users & Provisioning**:
+     - Provision employees with auto-generated secure temporary passwords (`Vanguard#XXXX!`).
+     - One-click copy credentials confirmation card.
+     - Automated onboarding email dispatch with live delivery status pills (`sending`, `sent`, `failed`).
+     - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
+  3. **OIDC Applications & SSO**:
+     - Register and configure OpenID Connect / OAuth 2.0 client applications (Client ID, Redirect URIs, PKCE S256).
+     - Assign authorized applications to directory users and groups with zero-trust assertions.
+  4. **Access Requests Queue**: Review, approve, or reject employee SaaS application access requests with automated assignment and audit logging.
+  5. **Security Audit Log Stream**: Real-time authoritative event auditing with multi-field search, event category filtering, and CSV export.
+  6. **Enterprise Settings & Branding**:
+     - Enforce tenant-wide mandatory Multi-Factor Authentication (MFA).
+     - Configure session timeouts and customize white-label branding (logo, colors, corporate name).
+     - **Global Emergency Session Killswitch**: One-click server-side termination of all active web sessions and revocation of JWT refresh tokens.
+- **Pruned Obsolete & Simulated Features (SCRUM-151)**:
+  - Removed deferred protocol tabs from the sidebar and viewport: **Cloud LDAP (Port 636)** and **Cloud RADIUS (Port 1812)** (listeners unbonded on backend).
+  - Removed client-side mock tabs: **Webhooks & Event API** (deferred pending backend worker/SSRF protection) and **Device Fleet & MDM** (deferred remote device wipe).
+  - Re-scoped federation to focus strictly on genuine **OIDC Applications & SSO**, eliminating misleading claims of active SAML production endpoints.
 
 ### 2. Employee Personal Workspace (User View)
 Tailored for corporate employees to access organizational resources:

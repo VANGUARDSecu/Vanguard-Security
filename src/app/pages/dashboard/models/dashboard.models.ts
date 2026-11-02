@@ -2,7 +2,7 @@ export interface ProtocolStatus {
   name: string;
   type: string;
   port: string;
-  status: 'online' | 'standby' | 'healthy';
+  status: 'online' | 'standby' | 'healthy' | 'offline';
   description: string;
   badge: string;
   certExpiry?: string;

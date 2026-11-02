@@ -1648,37 +1648,36 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // Protocol Gateway status items
   readonly protocols: ProtocolStatus[] = [
     {
-      name: 'SAML 2.0 Web SSO',
-      type: 'Identity Provider (IdP)',
-      port: 'HTTPS (443)',
-      status: 'healthy',
-      description: 'Signed XML assertions for SaaS web applications (AWS, Slack, GitHub, Jira).',
-      badge: 'Active',
-      certExpiry: '365 days remaining',
-    },
-    {
       name: 'OpenID Connect (OIDC)',
       type: 'OAuth 2.0 / JWT Issuer',
       port: 'HTTPS (443)',
       status: 'healthy',
       description: 'Discovery & JWKS token authentication for cloud services and mobile clients.',
-      badge: 'Active',
+      badge: 'Active (Production)',
+    },
+    {
+      name: 'SAML 2.0 Web SSO',
+      type: 'Identity Provider (IdP)',
+      port: 'HTTPS (443)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Production endpoint returns 404.',
+      badge: 'Deferred (PRD §3)',
     },
     {
       name: 'Cloud LDAP Directory',
       type: 'Directory Bind Endpoint',
       port: 'LDAPS (636)',
-      status: 'online',
-      description: 'Secure TLS directory service for legacy NAS storage and Linux server fleets.',
-      badge: 'Online (TLS 1.3)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
+      badge: 'Deferred (PRD §3)',
     },
     {
       name: 'Cloud RADIUS Gateway',
       type: 'Network Access (802.1X)',
       port: 'UDP (1812 / 1813)',
-      status: 'online',
-      description: 'Network-layer authentication for corporate WPA3 Enterprise Wi-Fi and VPN gateways.',
-      badge: 'Active (Port 1812)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
+      badge: 'Deferred (PRD §3)',
     },
   ];
 

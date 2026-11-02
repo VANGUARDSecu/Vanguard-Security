@@ -164,6 +164,16 @@ To ensure complete functionality (including live email dispatch, Supabase authen
 
 ---
 
+## Continuous Integration (GitHub Actions)
+
+The repository includes an automated CI workflow in `.github/workflows/ci.yml` (SCRUM-145):
+- **Node Setup & Cache**: `actions/setup-node@v4` with root `package-lock.json` dependency caching.
+- **Unit Tests**: `npm test -- --watch=false` running the complete Vitest test matrix (260 tests passed).
+- **Production Build**: `npm run build` compiling client and server bundles.
+- **Security Audit**: `npm audit --audit-level=high` (informational report).
+
+---
+
 ## Testing & Quality Assurance
 
 ### Run Unit Test Suite

@@ -1,4 +1,4 @@
-import { Component, inject, computed } from '@angular/core';
+import { Component, inject, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -11,8 +11,9 @@ import { AppAccessRequest } from '../../models/dashboard.models';
   templateUrl: './admin-access-requests.html',
   styleUrl: './admin-access-requests.css'
 })
-export class AdminAccessRequests {
+export class AdminAccessRequests implements OnInit {
   readonly dashboardService = inject(DashboardService);
+  readonly isAccessRequestsLoading = this.dashboardService.isAccessRequestsLoading;
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly appAccessRequests = this.dashboardService.appAccessRequests;
@@ -66,5 +67,14 @@ export class AdminAccessRequests {
 
   rejectAccessRequest(id: string, notes?: string): void {
     this.dashboardService.rejectAccessRequest(id, notes);
+  }
+
+  ngOnInit(): void {
+    this.dashboardService.loadAccessRequests();
+    this.dashboardService.setupAccessRequestsRealtime();
+  }
+
+  refreshAccessRequests(): void {
+    this.dashboardService.loadAccessRequests(true);
   }
 }

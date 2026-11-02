@@ -339,7 +339,7 @@ export class SupabaseService {
   }
 
   async upsertUserAssignedApp(assignment: {
-    id: string;
+    id?: string;
     tenant_id: string;
     user_id: string;
     app_id: string;
@@ -413,7 +413,7 @@ export class SupabaseService {
         })
         .eq('id', id)
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw error;
       return data;
     } catch (e) {

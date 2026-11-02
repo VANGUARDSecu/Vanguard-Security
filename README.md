@@ -29,6 +29,17 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Real-Time Application Access Request Synchronization (SCRUM-158)
+- **Shared Persistence to Live Database**:
+  - Employee application access requests submitted via the User Portal modal (`submitRequestApp()`) are persisted directly to the Supabase PostgreSQL `access_requests` store scoped by `tenant_id` and `user_id`.
+  - Obsoleted isolated browser-local storage queues, ensuring requests are visible across different browser sessions and administrative accounts.
+- **Instantaneous Real-Time Broadcast via Supabase Realtime Channels**:
+  - The Admin Console establishes a WebSocket subscription to `realtime:access_requests` on the `access_requests` table (`postgres_changes` on `INSERT`, `UPDATE`, and `DELETE`).
+  - When an employee requests access to an application, the request instantly appears in the Admin Console queue without requiring page reloads.
+  - When an administrator approves or rejects a request, status updates propagate in real time across active sessions.
+- **On-Demand Manual Refresh**:
+  - Added an interactive "Refresh" button with a spinning sync indicator to the Access Requests queue toolbar (`AdminAccessRequests.refreshAccessRequests()`), enabling instant forced synchronization from the database.
+
 ### Resilient Session Hydration & Guard Interception (SCRUM-157)
 - **Authentic Session Continuity**:
   - Propagates authoritative Supabase sessions across 2-step OTP verification flows to guarantee dashboard initialization with signed JWT access and refresh tokens.

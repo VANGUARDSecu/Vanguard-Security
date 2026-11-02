@@ -624,6 +624,8 @@ export class DashboardService {
   readonly selectedAccessRequestForReject = signal<AppAccessRequest | null>(null);
   readonly showRejectModal = signal<boolean>(false);
   rejectAdminNoteInput = '';
+  readonly isAccessRequestsLoading = signal<boolean>(false);
+  private accessRequestsChannel: any = null;
 
   readonly pendingAccessRequests = computed(() => {
     return this.appAccessRequests().filter((r) => r.status === 'Pending Approval');
@@ -1845,6 +1847,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.userDevices.set(mappedDevices.filter((d) => d.ownerEmail === currentUserEmail));
         this.saveStored('vanguard_user_devices', this.userDevices());
       }
+
+      // 6. Synchronize Application Access Requests from Supabase (SCRUM-158)
+      await this.loadAccessRequests();
+      this.setupAccessRequestsRealtime();
     } catch (err) {
       console.warn('Supabase: Background synchronization failed, defaulting to local cache:', err);
     }
@@ -1987,6 +1993,162 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.syncGroupInheritedApps();
   }
 
+  // ==========================================
+  // SCRUM-158: Real-time Supabase Access Requests Sync & Subscription
+  // ==========================================
+  async loadAccessRequests(force = false): Promise<void> {
+    if (!this.isBrowser) return;
+    const activeTenant = this.activeOrganizationId();
+    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+    this.isAccessRequestsLoading.set(true);
+
+    try {
+      const data = await this.supabaseService.getAccessRequests(tenantId);
+      if (data && data.length > 0) {
+        const mapped: AppAccessRequest[] = data.map((r: any) => ({
+          id: r.id,
+          tenantId: r.tenant_id,
+          userId: r.user_id,
+          userName: r.user_name,
+          userEmail: r.user_email,
+          department: r.department || 'General',
+          role: r.role || 'Directory Member',
+          appName: r.app_name,
+          protocol: r.protocol || 'SAML 2.0',
+          category: r.category || 'cloud',
+          icon: r.icon || '🚀',
+          launchUrl: r.launch_url || 'https://vanguard.security',
+          justification: r.justification || '',
+          status: r.status || 'Pending Approval',
+          submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
+          reviewedAt: r.reviewed_at,
+          reviewedBy: r.reviewed_by,
+          adminNotes: r.admin_notes,
+        }));
+        this.appAccessRequests.set(mapped);
+        this.saveStored('vanguard_access_requests', mapped);
+      } else if (tenantId) {
+        // Obey zero-mock data policy: if 0 requests exist in database for this tenant, empty list
+        this.appAccessRequests.set([]);
+        this.saveStored('vanguard_access_requests', []);
+      }
+    } catch (err) {
+      console.warn('loadAccessRequests notice:', err);
+    } finally {
+      this.isAccessRequestsLoading.set(false);
+    }
+  }
+
+  setupAccessRequestsRealtime(): void {
+    if (!this.isBrowser) return;
+    const g = globalThis as any;
+    if (g && g.process && (g.process.env?.['NODE_ENV'] === 'test' || g.process.env?.['VITEST'])) {
+      return;
+    }
+    if (this.accessRequestsChannel) return;
+
+    try {
+      const channels = (this.supabaseService.client as any).getChannels?.() || [];
+      const existing = channels.find((c: any) => c.topic === 'realtime:access_requests');
+      if (existing) {
+        this.supabaseService.client.removeChannel(existing);
+      }
+
+      this.accessRequestsChannel = this.supabaseService.client
+        .channel('realtime:access_requests')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'access_requests' },
+          (payload: any) => {
+            this.handleAccessRequestRealtimeChange(payload);
+          }
+        )
+        .subscribe((status: string) => {
+          // Connected to realtime publication
+        });
+    } catch (err) {
+      console.warn('Realtime subscription notice:', err);
+    }
+  }
+
+  cleanupAccessRequestsRealtime(): void {
+    if (this.accessRequestsChannel) {
+      try {
+        this.supabaseService.client.removeChannel(this.accessRequestsChannel);
+      } catch (e) {
+        // ignore
+      }
+      this.accessRequestsChannel = null;
+    }
+  }
+
+  handleAccessRequestRealtimeChange(payload: any): void {
+    if (!payload || !payload.eventType) return;
+    const activeTenant = this.activeOrganizationId();
+    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+
+    if (payload.eventType === 'INSERT') {
+      const r = payload.new;
+      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+        return;
+      }
+      const mapped: AppAccessRequest = {
+        id: r.id,
+        tenantId: r.tenant_id,
+        userId: r.user_id,
+        userName: r.user_name,
+        userEmail: r.user_email,
+        department: r.department || 'General',
+        role: r.role || 'Directory Member',
+        appName: r.app_name,
+        protocol: r.protocol || 'SAML 2.0',
+        category: r.category || 'cloud',
+        icon: r.icon || '🚀',
+        launchUrl: r.launch_url || 'https://vanguard.security',
+        justification: r.justification || '',
+        status: r.status || 'Pending Approval',
+        submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
+        reviewedAt: r.reviewed_at,
+        reviewedBy: r.reviewed_by,
+        adminNotes: r.admin_notes,
+      };
+
+      this.appAccessRequests.update((prev) => {
+        if (prev.some((item) => item.id === mapped.id)) {
+          return prev.map((item) => (item.id === mapped.id ? mapped : item));
+        }
+        return [mapped, ...prev];
+      });
+      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+      this.showAdminNotice(`New application access request from ${mapped.userName} for ${mapped.appName}.`);
+    } else if (payload.eventType === 'UPDATE') {
+      const r = payload.new;
+      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+        return;
+      }
+      this.appAccessRequests.update((prev) =>
+        prev.map((item) =>
+          item.id === r.id
+            ? {
+                ...item,
+                status: r.status,
+                reviewedAt: r.reviewed_at,
+                reviewedBy: r.reviewed_by,
+                adminNotes: r.admin_notes,
+              }
+            : item
+        )
+      );
+      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    } else if (payload.eventType === 'DELETE') {
+      const oldId = payload.old?.id;
+      if (oldId) {
+        this.appAccessRequests.update((prev) => prev.filter((item) => item.id !== oldId));
+        this.saveStored('vanguard_access_requests', this.appAccessRequests());
+      }
+    }
+  }
+
   setActiveTab(tab: string): void {
     const userTabs = [
       'personal-vault', 'my-apps', 'authenticator', 'user-security',
@@ -1997,6 +2159,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     if (tab === 'directory') {
       this.loadDirectoryUsers();
+    }
+    if (tab === 'access-requests') {
+      this.loadAccessRequests();
+      this.setupAccessRequestsRealtime();
     }
     this.activeTab.set(tab);
   }
@@ -2908,6 +3074,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
 
+    // Persist status update to Supabase (SCRUM-158)
+    if (this.isBrowser) {
+      this.supabaseService
+        .updateAccessRequestStatus(requestId, 'Approved', notes, reviewer)
+        .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+    }
+
     // 2. Automatically assign the SaaS application to the user's active launchpad
     const appToAssign: SaaSApp = {
       id: 'app-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -2924,6 +3097,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (!this.apps().some((a) => a.name.toLowerCase() === request.appName.toLowerCase())) {
       this.apps.update((prev) => [appToAssign, ...prev]);
       this.saveStored('vanguard_user_apps', this.apps());
+    }
+
+    // Persist app assignment to Supabase user_assigned_apps (SCRUM-158)
+    if (this.isBrowser && request.tenantId && request.userId && !request.tenantId.startsWith('org_')) {
+      this.supabaseService
+        .upsertUserAssignedApp({
+          id: appToAssign.id,
+          tenant_id: request.tenantId,
+          user_id: request.userId,
+          app_id: appToAssign.id,
+          name: appToAssign.name,
+          protocol: appToAssign.protocol,
+          launch_url: appToAssign.launchUrl,
+          category: appToAssign.category,
+          icon: appToAssign.icon,
+          assigned: true,
+        })
+        .catch((err) => console.warn('Supabase upsertUserAssignedApp notice:', err));
     }
 
     // 3. Log audit event in Tenant Audit Logs
@@ -2973,6 +3164,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       )
     );
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // Persist status update to Supabase (SCRUM-158)
+    if (this.isBrowser) {
+      this.supabaseService
+        .updateAccessRequestStatus(requestId, 'Rejected', notes, reviewer)
+        .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+    }
 
     // 2. Prevent application assignment and remove if previously assigned
     this.apps.update((prev) => prev.filter((a) => a.name.toLowerCase() !== request.appName.toLowerCase()));
@@ -4703,8 +4901,14 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const department = (u?.user_metadata as any)?.['department'] || 'General';
     const role = this.userRoleLabel() || 'Directory Member';
 
+    const activeTenant = this.activeOrganizationId();
+    const resolvedTenantId = activeTenant && !activeTenant.startsWith('org_')
+      ? activeTenant
+      : (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId);
+
     const newRequest: AppAccessRequest = {
       id: 'req-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      tenantId: resolvedTenantId || undefined,
       userId: u?.id || 'usr-current',
       userName,
       userEmail,
@@ -4723,6 +4927,29 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     // Add to access requests queue with Pending Approval status - DO NOT auto-provision into apps
     this.appAccessRequests.update((prev) => [newRequest, ...prev]);
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // Persist to live Supabase database (SCRUM-158)
+    if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
+      this.supabaseService
+        .createAccessRequest({
+          id: newRequest.id,
+          tenant_id: resolvedTenantId,
+          user_id: newRequest.userId,
+          user_name: newRequest.userName,
+          user_email: newRequest.userEmail,
+          department: newRequest.department,
+          role: newRequest.role,
+          app_name: newRequest.appName,
+          protocol: newRequest.protocol,
+          category: newRequest.category,
+          icon: newRequest.icon,
+          launch_url: newRequest.launchUrl,
+          justification: newRequest.justification,
+          status: newRequest.status,
+          submitted_at: newRequest.submittedAt,
+        })
+        .catch((err) => console.warn('Supabase createAccessRequest notice:', err));
+    }
 
     this.logAuditEvent(
       `Requested access for SaaS application: ${name} (Status: Pending Approval)`,
@@ -5986,6 +6213,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // Apply active brand accent
     this.applyBrandAccent(this.tenantBranding().primaryAccentColor);
+    this.loadAccessRequests(true);
 
     this.logAuditEvent(
       `Switched active organization context to: ${org.name} (${org.tier})`,

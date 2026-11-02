@@ -29,6 +29,23 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Functional Application Request Modal, Duplicate Prevention & Admin Governance (SCRUM-161)
+- **Interactive Multi-Protocol Request Modal**:
+  - Replaced unstyled stub with an accessible modal supporting delivery mode selection:
+    - **Single Sign-On (SSO)**: Pre-configured presets for the Vanguard Dummy Ecosystem (e.g., Acme Dummy Web on port 4201 with OIDC PKCE flow, and Vanguard Dummy Mobile Gateway on port 8081).
+    - **Browser Extension Autofill**: Direct integration with extension-vanguard for external web applications (GitHub, Figma, Facebook, AWS Console, Datadog) matching target domains and injecting client-side zero-knowledge credentials.
+  - Live target domain extraction (Domain: github.com, Domain: localhost:4201) with username/handle capture, urgency selector, and duration terms.
+- **Strict Duplicate Prevention**:
+  - Reactive duplicate verification prevents duplicate requests if an application is already active on the user's launchpad or currently in Pending Approval review.
+  - Renders real-time warning alerts and disables submission until the duplicate conflict is resolved.
+- **Tenant Application Removal & Request Withdrawal**:
+  - Employees can remove assigned applications from their company launchpad (✕ card removal button).
+  - Employees can withdraw pending or rejected requests from their "Requested Applications" list (✕ Withdraw).
+  - When an application is removed or withdrawn, the duplicate lock is cleared so the employee can re-request access anytime in the future.
+- **Admin Governance Review Modal with Zero-Knowledge Protection**:
+  - Administrators can inspect application requests via a dedicated "Review" dialog detailing applicant identity, target URL, target domain, account username, duration, and business justification.
+  - Strictly enforces zero-knowledge vault protection: passwords are encrypted client-side in the employee's personal vault, never included in request payloads, and never visible to administrators.
+
 ### Zero-Trust Tenant SSO Access Governance & Approval Notice (SCRUM-160)
 - **Zero-Trust Administrative Approval Interception**:
   - Intercepts external OIDC Single Sign-On attempts for corporate tenant accounts where the client application has not yet been assigned or approved by an administrator.

@@ -1,4 +1,4 @@
-import { Component, inject, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -24,6 +24,9 @@ export class AdminAccessRequests implements OnInit {
   readonly showRejectModal = this.dashboardService.showRejectModal;
   readonly selectedAccessRequestForReject = this.dashboardService.selectedAccessRequestForReject;
 
+  readonly selectedRequestForReview = signal<AppAccessRequest | null>(null);
+  readonly showReviewModal = signal<boolean>(false);
+
   readonly approvedAccessRequestsCount = computed(() => {
     return this.appAccessRequests().filter((r) => r.status === 'Approved').length;
   });
@@ -44,6 +47,26 @@ export class AdminAccessRequests implements OnInit {
 
   setAccessRequestStatusFilter(f: 'all' | 'Pending Approval' | 'Approved' | 'Rejected'): void {
     this.dashboardService.setAccessRequestStatusFilter(f);
+  }
+
+  openReviewModal(req: AppAccessRequest): void {
+    this.selectedRequestForReview.set(req);
+    this.showReviewModal.set(true);
+  }
+
+  closeReviewModal(): void {
+    this.showReviewModal.set(false);
+    this.selectedRequestForReview.set(null);
+  }
+
+  approveFromReview(id: string): void {
+    this.approveAccessRequest(id);
+    this.closeReviewModal();
+  }
+
+  rejectFromReview(req: AppAccessRequest): void {
+    this.closeReviewModal();
+    this.openRejectModal(req);
   }
 
   approveAccessRequest(id: string, notes?: string): void {

@@ -14,7 +14,7 @@ export interface SaaSApp {
   category: 'cloud' | 'developer' | 'collaboration' | 'custom';
   description: string;
   icon: string;
-  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth';
+  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth' | 'Extension Autofill' | string;
   launchUrl: string;
   assigned: boolean;
   inheritedViaGroup?: string;
@@ -22,6 +22,8 @@ export interface SaaSApp {
   isIntegrated?: boolean;
   connectedUrl?: string;
   connectionStatus?: string;
+  targetDomain?: string;
+  requestedUsername?: string;
 }
 
 export interface UserConnectedApp {
@@ -51,10 +53,15 @@ export interface AppAccessRequest {
   department: string;
   role: string;
   appName: string;
-  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth';
+  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth' | 'Extension Autofill' | string;
   category: 'cloud' | 'developer' | 'collaboration' | 'custom';
   icon?: string;
   launchUrl?: string;
+  targetDomain?: string;
+  requestedUsername?: string;
+  urgency?: 'Low' | 'Standard' | 'Critical';
+  duration?: 'Permanent' | '30 Days' | '90 Days' | 'Temporary' | string;
+  zeroKnowledgeProtected?: boolean;
   justification: string;
   status: AccessRequestStatus;
   submittedAt: string;

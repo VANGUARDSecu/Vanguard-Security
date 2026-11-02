@@ -1142,6 +1142,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly showRequestAppModal = signal<boolean>(false);
   requestedAppName = '';
   requestAppJustification = '';
+  requestAppDeliveryMode: 'sso' | 'extension' = 'extension';
+  requestAppCategory: SaaSApp['category'] = 'cloud';
+  requestAppProtocol: string = 'Extension Autofill';
+  requestAppIcon: string = '🚀';
+  requestAppUrl: string = '';
+  requestTargetDomain: string = '';
+  requestedUsername: string = '';
+  requestAppUrgency: 'Low' | 'Standard' | 'Critical' = 'Standard';
+  requestAppDuration: string = 'Permanent';
+  readonly requestAppError = signal<string | null>(null);
   readonly requestAppSuccess = signal<boolean>(false);
 
   // SCRUM-52: Personal Application Bookmarks & Launcher (Zero Hardcoded Initial State)
@@ -3182,6 +3192,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       icon: request.icon || '🚀',
       protocol: request.protocol || 'SAML 2.0',
       launchUrl: request.launchUrl || 'https://vanguard.security',
+      targetDomain: request.targetDomain,
+      requestedUsername: request.requestedUsername,
       assigned: true,
       status: 'Approved',
     };
@@ -4974,16 +4986,156 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.showRequestAppModal.set(true);
     this.requestedAppName = '';
     this.requestAppJustification = '';
+    this.requestAppDeliveryMode = 'extension';
+    this.requestAppCategory = 'cloud';
+    this.requestAppProtocol = 'Extension Autofill';
+    this.requestAppIcon = '🚀';
+    this.requestAppUrl = '';
+    this.requestTargetDomain = '';
+    this.requestedUsername = '';
+    this.requestAppUrgency = 'Standard';
+    this.requestAppDuration = 'Permanent';
+    this.requestAppError.set(null);
     this.requestAppSuccess.set(false);
   }
 
   closeRequestAppModal(): void {
     this.showRequestAppModal.set(false);
+    this.requestAppError.set(null);
   }
 
-  submitAppRequest(): void {
-    const name = this.requestedAppName.trim();
-    if (!name) return;
+  checkDuplicateAppRequest(appName: string): { isDuplicate: boolean; type?: 'assigned' | 'pending'; message?: string } {
+    const norm = appName.trim().toLowerCase();
+    if (!norm) return { isDuplicate: false };
+
+    // 1. Check if already active and assigned on launchpad
+    const activeApps = this.activeAppsList();
+    const existingApp = activeApps.find((a) => a.name.trim().toLowerCase() === norm) || this.apps().find((a) => a.name.trim().toLowerCase() === norm);
+    if (existingApp) {
+      return {
+        isDuplicate: true,
+        type: 'assigned',
+        message: `"${existingApp.name}" is already assigned and active on your application launchpad.`,
+      };
+    }
+
+    // 2. Check if a request is currently pending review
+    const myRequests = this.myAccessRequests();
+    const pendingRequest = myRequests.find(
+      (r) => r.status === 'Pending Approval' && r.appName.trim().toLowerCase() === norm
+    );
+    if (pendingRequest) {
+      return {
+        isDuplicate: true,
+        type: 'pending',
+        message: `A request for "${pendingRequest.appName}" is currently pending administrator review.`,
+      };
+    }
+
+    return { isDuplicate: false };
+  }
+
+  removeCompanyApp(appId: string): void {
+    const currentApps = this.apps();
+    const targetApp = currentApps.find((a) => a.id === appId) || this.activeAppsList().find((a) => a.id === appId);
+    const targetName = targetApp?.name?.toLowerCase().trim();
+
+    // 1. Remove from apps signal
+    this.apps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
+    this.saveStored('vanguard_user_apps', this.apps());
+
+    // 2. Clean up from appAccessRequests for current user so activeAppsList computed signal does not keep displaying it
+    const u = this.user();
+    const email = u?.email?.toLowerCase();
+    const uid = u?.id;
+
+    this.appAccessRequests.update((prev) =>
+      prev.filter((r) => {
+        const matchApp = r.id === appId || (targetName && r.appName.toLowerCase().trim() === targetName);
+        if (!matchApp) return true;
+        const isUserMatch =
+          (email && r.userEmail?.toLowerCase() === email) ||
+          (uid && r.userId === uid) ||
+          (!email && !uid);
+        return !isUserMatch;
+      })
+    );
+    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // 3. Persist unassign to Supabase if applicable
+    const activeTenant = this.activeOrganizationId();
+    const resolvedTenantId =
+      activeTenant && !activeTenant.startsWith('org_')
+        ? activeTenant
+        : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+
+    if (this.isBrowser && resolvedTenantId && uid) {
+      this.supabaseService
+        .deleteUserAssignedApp(resolvedTenantId, uid, appId)
+        .catch((err) => console.warn('Supabase deleteUserAssignedApp notice:', err));
+    }
+
+    this.logAuditEvent(
+      `Removed application: ${targetApp?.name || appId} from user launchpad`,
+      'User Application Portal',
+      'Application Removal',
+      'success',
+      'Low'
+    );
+    this.showAdminNotice(`Removed "${targetApp?.name || 'Application'}" from your launchpad. You can re-request it anytime.`);
+  }
+
+  withdrawAccessRequest(requestId: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request) return;
+
+    // 1. Remove from local signal
+    this.appAccessRequests.update((prev) => prev.filter((r) => r.id !== requestId));
+    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // 2. Persist to Supabase if applicable
+    if (this.isBrowser) {
+      this.supabaseService
+        .deleteAccessRequest(requestId)
+        .catch((err) => console.warn('Supabase deleteAccessRequest notice:', err));
+    }
+
+    // 3. Log audit event
+    this.logAuditEvent(
+      `Withdrew application access request for: ${request.appName}`,
+      'User Application Portal',
+      'Access Request',
+      'success',
+      'Low'
+    );
+    this.showAdminNotice(`Withdrew request for "${request.appName}".`);
+  }
+
+  submitAppRequest(options?: {
+    appName?: string;
+    category?: SaaSApp['category'];
+    protocol?: string;
+    icon?: string;
+    launchUrl?: string;
+    targetDomain?: string;
+    requestedUsername?: string;
+    urgency?: 'Low' | 'Standard' | 'Critical';
+    duration?: string;
+    justification?: string;
+  }): boolean {
+    const name = (options?.appName ?? this.requestedAppName).trim();
+    if (!name) {
+      this.requestAppError.set('Please provide an application name.');
+      return false;
+    }
+
+    const dup = this.checkDuplicateAppRequest(name);
+    if (dup.isDuplicate) {
+      this.requestAppError.set(dup.message || 'This application has already been requested or assigned.');
+      return false;
+    }
+
+    this.requestAppError.set(null);
 
     const u = this.user();
     const userEmail = u?.email || 'employee@vanguard.security';
@@ -4994,9 +5146,24 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const role = this.userRoleLabel() || 'Directory Member';
 
     const activeTenant = this.activeOrganizationId();
-    const resolvedTenantId = activeTenant && !activeTenant.startsWith('org_')
-      ? activeTenant
-      : (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId);
+    const resolvedTenantId =
+      activeTenant && !activeTenant.startsWith('org_')
+        ? activeTenant
+        : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+
+    const protocol = options?.protocol ?? this.requestAppProtocol ?? 'Extension Autofill';
+    const launchUrl = (options?.launchUrl ?? this.requestAppUrl ?? '').trim() || 'https://vanguard.security';
+
+    // Auto-extract domain if not explicitly provided
+    let targetDomain = (options?.targetDomain ?? this.requestTargetDomain ?? '').trim();
+    if (!targetDomain && launchUrl) {
+      try {
+        const parsed = new URL(launchUrl.startsWith('http') ? launchUrl : `https://${launchUrl}`);
+        targetDomain = parsed.hostname;
+      } catch {
+        targetDomain = launchUrl.replace(/^https?:\/\//, '').split('/')[0];
+      }
+    }
 
     const newRequest: AppAccessRequest = {
       id: 'req-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -5007,11 +5174,16 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       department,
       role,
       appName: name,
-      protocol: 'SAML 2.0',
-      category: 'cloud',
-      icon: '🚀',
-      launchUrl: 'https://vanguard.security',
-      justification: this.requestAppJustification.trim() || 'General access',
+      protocol,
+      category: options?.category ?? this.requestAppCategory ?? 'cloud',
+      icon: options?.icon ?? this.requestAppIcon ?? '🚀',
+      launchUrl,
+      targetDomain: targetDomain || undefined,
+      requestedUsername: (options?.requestedUsername ?? this.requestedUsername ?? '').trim() || undefined,
+      urgency: options?.urgency ?? this.requestAppUrgency ?? 'Standard',
+      duration: options?.duration ?? this.requestAppDuration ?? 'Permanent',
+      zeroKnowledgeProtected: true,
+      justification: (options?.justification ?? this.requestAppJustification ?? '').trim() || 'General access',
       status: 'Pending Approval',
       submittedAt: new Date().toISOString(),
     };
@@ -5044,7 +5216,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     }
 
     this.logAuditEvent(
-      `Requested access for SaaS application: ${name} (Status: Pending Approval)`,
+      `Requested access for SaaS application: ${name} (Protocol: ${protocol}, Status: Pending Approval)`,
       'User Application Portal',
       'Access Request',
       'success',
@@ -5057,10 +5229,16 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       this.requestAppSuccess.set(false);
       this.requestedAppName = '';
       this.requestAppJustification = '';
+      this.requestAppUrl = '';
+      this.requestTargetDomain = '';
+      this.requestedUsername = '';
+      this.requestAppError.set(null);
     }, 1800);
+
+    return true;
   }
 
-  // ==========================================
+    // ==========================================
   // TOTP Authenticator Enrollment (SCRUM-32 / RFC 6238)
   // ==========================================
   startEnrollTotp(): void {

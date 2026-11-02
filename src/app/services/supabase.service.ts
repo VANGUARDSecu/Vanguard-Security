@@ -422,6 +422,42 @@ export class SupabaseService {
     }
   }
 
+  async deleteUserAssignedApp(tenantId: string, userId: string, appId: string): Promise<boolean> {
+    try {
+      const { error } = await this.client
+        .from('user_assigned_apps')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('user_id', userId)
+        .eq('app_id', appId);
+      if (error) {
+        console.warn('Supabase: deleteUserAssignedApp notice:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('Supabase: deleteUserAssignedApp exception:', e);
+      return false;
+    }
+  }
+
+  async deleteAccessRequest(requestId: string): Promise<boolean> {
+    try {
+      const { error } = await this.client
+        .from('access_requests')
+        .delete()
+        .eq('id', requestId);
+      if (error) {
+        console.warn('Supabase: deleteAccessRequest notice:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('Supabase: deleteAccessRequest exception:', e);
+      return false;
+    }
+  }
+
   // =========================================================================
   // Managed Endpoint Devices Operations
   // =========================================================================

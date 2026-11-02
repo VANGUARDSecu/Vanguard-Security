@@ -190,4 +190,48 @@ describe('AdminAccessRequests Component (SCRUM-152)', () => {
     expect(updated?.status).toBe('Rejected');
     expect(updated?.adminNotes).toBe('Security training incomplete');
   });
+
+  // ==========================================================================
+  // SCRUM-161: Governance Review Modal & Zero-Knowledge Verification
+  // ==========================================================================
+  it('should open review modal with full metadata and zero-knowledge security protection', () => {
+    dashboardService.appAccessRequests.set(testRequests);
+    fixture.detectChanges();
+
+    const targetReq = testRequests[0];
+    component.openReviewModal(targetReq);
+
+    expect(component.showReviewModal()).toBe(true);
+    expect(component.selectedRequestForReview()).toEqual(targetReq);
+
+    component.closeReviewModal();
+    expect(component.showReviewModal()).toBe(false);
+    expect(component.selectedRequestForReview()).toBeNull();
+  });
+
+  it('should approve access request directly from review modal', () => {
+    dashboardService.appAccessRequests.set(testRequests);
+    fixture.detectChanges();
+
+    const targetReq = testRequests[0];
+    component.openReviewModal(targetReq);
+    component.approveFromReview(targetReq.id);
+
+    expect(component.showReviewModal()).toBe(false);
+    const updated = dashboardService.appAccessRequests().find((r) => r.id === targetReq.id);
+    expect(updated?.status).toBe('Approved');
+  });
+
+  it('should transition to reject modal from review modal', () => {
+    dashboardService.appAccessRequests.set(testRequests);
+    fixture.detectChanges();
+
+    const targetReq = testRequests[0];
+    component.openReviewModal(targetReq);
+    component.rejectFromReview(targetReq);
+
+    expect(component.showReviewModal()).toBe(false);
+    expect(component.showRejectModal()).toBe(true);
+    expect(component.selectedAccessRequestForReject()).toEqual(targetReq);
+  });
 });

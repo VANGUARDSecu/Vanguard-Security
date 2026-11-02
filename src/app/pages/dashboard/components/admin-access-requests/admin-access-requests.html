@@ -168,8 +168,20 @@
             </span>
           </td>
           <td class="text-right">
-            <!-- Admin Action Buttons for Pending requests: 1-Click Approve & Reject -->
+            <!-- Admin Action Buttons for Pending requests: Review, 1-Click Approve & Reject -->
             <div class="action-buttons-group" *ngIf="req.status === 'Pending Approval'">
+              <button
+                type="button"
+                class="btn-action-review"
+                (click)="openReviewModal(req)"
+                title="Review request details, target domain, and zero-knowledge governance"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-svg">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <span>Review</span>
+              </button>
               <button
                 type="button"
                 class="btn-action-approve"
@@ -195,7 +207,7 @@
               </button>
             </div>
 
-            <!-- History details for resolved requests -->
+            <!-- History details for resolved requests with metadata review button -->
             <div class="resolved-info" *ngIf="req.status !== 'Pending Approval'">
               <span class="resolved-approved" *ngIf="req.status === 'Approved'">
                 ✓ Approved by {{ req.reviewedBy || 'Admin' }}
@@ -203,6 +215,14 @@
               <span class="resolved-rejected" *ngIf="req.status === 'Rejected'" [title]="req.adminNotes || ''">
                 ✕ Rejected: {{ req.adminNotes || 'Declined by Admin' }}
               </span>
+              <button
+                type="button"
+                class="btn-action-review-sm"
+                (click)="openReviewModal(req)"
+                title="View detailed request metadata"
+              >
+                Details
+              </button>
             </div>
           </td>
         </tr>
@@ -250,6 +270,135 @@
       <button type="button" class="btn-ghost" (click)="closeRejectModal()">Cancel</button>
       <button type="button" class="btn-danger-killswitch" (click)="confirmRejectAccessRequest()">
         Confirm Rejection
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================
+     MODAL: REVIEW ACCESS REQUEST DETAILS (SCRUM-161)
+     ======================================================================== -->
+<div class="modal-backdrop" *ngIf="showReviewModal() && selectedRequestForReview()">
+  <div class="modal-card modal-card-review">
+    <div class="modal-header">
+      <div class="modal-header-title-wrap">
+        <div class="review-icon-box">{{ selectedRequestForReview()?.icon || '🚀' }}</div>
+        <div>
+          <h3 class="modal-title">Access Request Review</h3>
+          <p class="modal-desc">{{ selectedRequestForReview()?.appName }} • Submitted {{ selectedRequestForReview()?.submittedAt | date:'mediumDate' }}</p>
+        </div>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeReviewModal()">✕</button>
+    </div>
+
+    <div class="modal-body review-modal-body">
+      <!-- Applicant Information Grid -->
+      <div class="review-section">
+        <h4 class="review-section-title">Applicant Identity</h4>
+        <div class="review-meta-grid">
+          <div class="meta-item">
+            <span class="meta-item-label">Employee Name</span>
+            <span class="meta-item-value">{{ selectedRequestForReview()?.userName }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Corporate Email</span>
+            <span class="meta-item-value font-mono">{{ selectedRequestForReview()?.userEmail }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Department</span>
+            <span class="meta-item-value">{{ selectedRequestForReview()?.department || 'General' }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Directory Role</span>
+            <span class="meta-item-value">{{ selectedRequestForReview()?.role || 'Directory Member' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Target Application & Integration Metadata -->
+      <div class="review-section">
+        <h4 class="review-section-title">Application & Integration Metadata</h4>
+        <div class="review-meta-grid">
+          <div class="meta-item">
+            <span class="meta-item-label">Application Name</span>
+            <span class="meta-item-value font-semibold">{{ selectedRequestForReview()?.appName }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Integration Protocol</span>
+            <span class="proto-tag">{{ selectedRequestForReview()?.protocol }}</span>
+          </div>
+          <div class="meta-item span-2">
+            <span class="meta-item-label">Target / Login URL</span>
+            <a [href]="selectedRequestForReview()?.launchUrl" target="_blank" class="url-link">
+              {{ selectedRequestForReview()?.launchUrl || 'https://vanguard.security' }}
+            </a>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Target Domain</span>
+            <span class="domain-tag-pill">{{ selectedRequestForReview()?.targetDomain || 'vanguard.security' }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Requested Account / Username</span>
+            <span class="meta-item-value font-mono">{{ selectedRequestForReview()?.requestedUsername || 'Default Corporate Account' }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Access Duration</span>
+            <span class="meta-item-value">{{ selectedRequestForReview()?.duration || 'Permanent' }}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-item-label">Urgency</span>
+            <span class="urgency-pill" [class.critical]="selectedRequestForReview()?.urgency === 'Critical'">
+              {{ selectedRequestForReview()?.urgency || 'Standard' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Business Justification -->
+      <div class="review-section">
+        <h4 class="review-section-title">Business Justification</h4>
+        <div class="justification-box">
+          {{ selectedRequestForReview()?.justification }}
+        </div>
+      </div>
+
+      <!-- Zero-Knowledge Security Notice (Passwords are completely protected!) -->
+      <div class="zero-knowledge-box">
+        <div class="zk-box-icon">🔒</div>
+        <div class="zk-box-content">
+          <h5 class="zk-box-title">Zero-Knowledge Protected Credentials</h5>
+          <p class="zk-box-text">
+            Plaintext passwords are strictly private to the employee's encrypted local vault and never disclosed to
+            administrators. The Vanguard web extension will securely fill credentials on <code>{{ selectedRequestForReview()?.targetDomain || 'domain' }}</code>
+            without exposing credentials over the wire or to audit logs.
+          </p>
+        </div>
+      </div>
+
+      <!-- If request is already resolved -->
+      <div class="resolved-banner" *ngIf="selectedRequestForReview()?.status !== 'Pending Approval'">
+        <span *ngIf="selectedRequestForReview()?.status === 'Approved'">✓ This request was approved by {{ selectedRequestForReview()?.reviewedBy }} on {{ selectedRequestForReview()?.reviewedAt | date:'medium' }}</span>
+        <span *ngIf="selectedRequestForReview()?.status === 'Rejected'">✕ This request was rejected by {{ selectedRequestForReview()?.reviewedBy }} on {{ selectedRequestForReview()?.reviewedAt | date:'medium' }} (Reason: {{ selectedRequestForReview()?.adminNotes }})</span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" (click)="closeReviewModal()">Close</button>
+      <button
+        type="button"
+        class="btn-reject"
+        *ngIf="selectedRequestForReview()?.status === 'Pending Approval'"
+        (click)="rejectFromReview(selectedRequestForReview()!)"
+      >
+        Reject Access
+      </button>
+      <button
+        type="button"
+        class="btn-approve"
+        *ngIf="selectedRequestForReview()?.status === 'Pending Approval'"
+        (click)="approveFromReview(selectedRequestForReview()!.id)"
+      >
+        Approve & Provision App
       </button>
     </div>
   </div>

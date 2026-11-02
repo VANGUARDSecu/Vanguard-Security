@@ -56,7 +56,11 @@ Tailored for corporate employees to access organizational resources:
 - **Personal Activity History**: Review personal sign-in history, device locations, and security challenges.
 
 ### 3. Authentication & Identity Verification
-- **Login Portal (`/login`)**: Email/password entry with "Remember Me" caching and seamless employee directory session recognition.
+- **Registration Portal (`/register`)**:
+  - Dual account types: Individual / Personal Vault (password vault, 2FA authenticator & credentials) and Company / Organization (enterprise directory, Single Sign-On via OIDC/OAuth 2.0, team applications & zero-trust access control).
+  - Enforced strong password policy: minimum 8 characters with lowercase, uppercase, and special character validation.
+  - Automatic dispatch of an 8-digit email OTP verification code upon registration with 10-minute validity.
+- **Login Portal (`/login`): Email/password entry with "Remember Me" caching and seamless employee directory session recognition.
 - **2-Step Verification (`/verify-otp`)**:
   - 8-digit Email OTP codes with 60-second cooldown resend countdown for direct portal logins.
   - 6-digit Authenticator TOTP codes with QR code enrollment.

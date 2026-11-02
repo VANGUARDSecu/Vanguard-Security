@@ -661,6 +661,15 @@
                   Ready to dispatch
                 </ng-container>
               </span>
+              <button
+                *ngIf="inviteEmailStatus() === 'failed'"
+                type="button"
+                class="btn-retry-dispatch"
+                (click)="retryInviteEmail()"
+                title="Retry sending invitation email"
+              >
+                ↻ Retry
+              </button>
             </div>
           </div>
 

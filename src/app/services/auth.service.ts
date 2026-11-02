@@ -536,6 +536,7 @@ export class AuthService {
     department: string;
     temporaryPassword: string;
     loginUrl?: string;
+    tenantId?: string;
   }): Observable<{ success: boolean; message: string; emailResult?: any }> {
     return this.http
       .post<{ success: boolean; message: string; emailResult?: any }>(
@@ -544,7 +545,16 @@ export class AuthService {
       )
       .pipe(
         catchError((error: HttpErrorResponse) => {
-          const msg = error.error?.message || 'Could not dispatch credentials email to employee.';
+          let msg = error.error?.message;
+          if (!msg) {
+            if (error.status === 0 || error.message?.includes('Failed to fetch')) {
+              msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+            } else {
+              msg = 'Could not dispatch credentials email to employee.';
+            }
+          } else if (typeof msg === 'string' && msg.includes('Failed to fetch')) {
+            msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+          }
           return throwError(() => new Error(msg));
         })
       );

@@ -196,6 +196,7 @@ export class AdminDirectory {
   submitInviteUser() { this.dashboardService.submitInviteUser(); }
   generateRandomPassword() { return this.dashboardService.generateRandomPassword(); }
   copyTemporaryPassword() { this.dashboardService.copyTemporaryPassword(); }
+  retryInviteEmail() { this.dashboardService.retryInviteEmail(); }
   resendInvitation(user: DirectoryUser) { this.dashboardService.resendInvitation(user); }
   renewExistingPendingUser() { this.dashboardService.renewExistingPendingUser(); }
   getInviteExpiryText(user: DirectoryUser) { return this.dashboardService.getInviteExpiryText(user); }

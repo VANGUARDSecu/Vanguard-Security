@@ -62,8 +62,9 @@ Streamlined, high-assurance administrative portal for SecOps engineers and organ
   1. **Overview**: Live directory metrics, admin identity UUID with one-click copy, active session diagnostics, and genuine OpenID Connect (OIDC) gateway health telemetry.
   2. **Directory Users & Provisioning**:
      - Provision employees with auto-generated secure temporary passwords (`Vanguard#XXXX!`).
-     - One-click copy credentials confirmation card.
-     - Automated onboarding email dispatch with live delivery status pills (`sending`, `sent`, `failed`).
+     - One-click copy credentials confirmation card with live email dispatch status pills (`sending`, `sent`, `failed`) and 1-click **↻ Retry** button (SCRUM-154).
+     - Multi-tenant isolation: invitation dispatch automatically binds `tenantId` to link invited employees directly to the active organization (SCRUM-154).
+     - Resilient error handling: network timeouts and offline backend statuses are normalized into actionable administrator notices (SCRUM-154).
      - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
   3. **OIDC Applications & SSO (SCRUM-152)**:
      - Independent, dedicated page for federated applications and client credentials.

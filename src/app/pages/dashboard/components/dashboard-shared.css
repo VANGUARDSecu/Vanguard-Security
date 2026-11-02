@@ -2179,3 +2179,23 @@
 }
 
 
+
+.btn-retry-dispatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+}
+.btn-retry-dispatch:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #60a5fa;
+}

@@ -2122,6 +2122,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: newUser.department,
         temporaryPassword: newUser.temporaryPassword || this.invitePassword.trim(),
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
       })
       .subscribe({
         next: (res) => {
@@ -2134,6 +2135,35 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           const msg = err.message || 'Email delivery failed.';
           this.inviteEmailMessage.set(msg);
           this.showAdminNotice(`Account created. Notice: ${msg}`);
+        },
+      });
+  }
+
+  retryInviteEmail(): void {
+    const user = this.inviteCreatedUser();
+    if (!user) return;
+    this.inviteEmailStatus.set('sending');
+    this.authService
+      .sendInviteEmail({
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        department: user.department,
+        temporaryPassword: user.temporaryPassword || '',
+        loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.inviteEmailStatus.set('sent');
+          this.inviteEmailMessage.set(res.message || `Credentials sent to ${user.email}`);
+          this.showAdminNotice(`Credentials successfully emailed to ${user.email}`);
+        },
+        error: (err) => {
+          this.inviteEmailStatus.set('failed');
+          const msg = err.message || 'Email delivery failed.';
+          this.inviteEmailMessage.set(msg);
+          this.showAdminNotice(`Notice: ${msg}`);
         },
       });
   }
@@ -2190,6 +2220,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: updatedUser.department,
         temporaryPassword: newTempPw,
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
       })
       .subscribe({
         next: (res) => {

@@ -234,4 +234,46 @@ describe('AuthService', () => {
       expect(localStorage.getItem('vanguard_remembered_email')).toBe('remember@user.com');
     });
   });
+
+  describe('Employee invitation & network error handling (SCRUM-154)', () => {
+    it('sendInviteEmail() passes tenantId and payload to /send-invite-email', () => {
+      let result: any = null;
+      service.sendInviteEmail({
+        email: 'employee@test.com',
+        name: 'Employee Test',
+        role: 'user',
+        department: 'Engineering',
+        temporaryPassword: 'TempPassword#1',
+        tenantId: 'tenant-123'
+      }).subscribe((res) => { result = res; });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/send-invite-email'));
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body.tenantId).toBe('tenant-123');
+      expect(req.request.body.email).toBe('employee@test.com');
+
+      req.flush({ success: true, message: 'Invitation dispatched' });
+      expect(result.success).toBe(true);
+    });
+
+    it('sendInviteEmail() normalizes status 0 / connection refused errors to actionable message', () => {
+      let errorMsg = '';
+      service.sendInviteEmail({
+        email: 'employee@test.com',
+        name: 'Employee Test',
+        role: 'user',
+        department: 'Engineering',
+        temporaryPassword: 'TempPassword#1'
+      }).subscribe({
+        next: () => {},
+        error: (err) => { errorMsg = err.message; }
+      });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/send-invite-email'));
+      req.error(new ProgressEvent('error'), { status: 0, statusText: 'Unknown Error' });
+
+      expect(errorMsg).toContain('Unable to connect to backend');
+      expect(errorMsg).toContain('http://localhost:3000');
+    });
+  });
 });

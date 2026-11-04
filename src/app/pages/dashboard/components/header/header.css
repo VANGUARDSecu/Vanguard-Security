@@ -167,40 +167,52 @@
   flex-shrink: 0;
 }
 
-.mode-toggle-pill {
-  display: flex;
-  background: rgba(10, 16, 45, 0.9);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-}
-
-.mode-btn {
-  display: flex;
+/* SCRUM-150: Scoped Access Badges (Strict Account-Level Appbar) */
+.account-scope-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  color: #94a3b8;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 8px;
   font-size: 12.5px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   transition: all 0.2s ease;
+  user-select: none;
 }
 
-.mode-btn.active {
-  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+.account-scope-badge .scope-icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
-.mode-icon {
-  font-size: 13px;
+.account-scope-badge .scope-label {
+  line-height: 1;
 }
 
+/* 1. Company Admin: Premium Blue / Indigo */
+.account-scope-badge.badge-company {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.25) 0%, rgba(30, 64, 175, 0.35) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #93c5fa;
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+/* 2. Individual Account: Emerald / Cyan Personal Vault */
+.account-scope-badge.badge-individual {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.3) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  color: #6ee7b7;
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+/* 3. Managed Tenant: Slate / Amber User Portal */
+.account-scope-badge.badge-tenant {
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.15) 0%, rgba(71, 85, 105, 0.25) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #cbd5e1;
+}
 .user-profile-pill {
   display: flex;
   align-items: center;
@@ -587,6 +599,53 @@
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.35);
   color: #34d399;
+}
+
+/* SCRUM-150: Tenant Account Organization Indicator (Corporate Directory Managed) */
+.tenant-org-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(14, 23, 62, 0.7);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  margin-left: 12px;
+}
+
+.tenant-badge-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.tenant-btn-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tenant-name-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.tenant-tier-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
 }
 
 .btn-upgrade-org {

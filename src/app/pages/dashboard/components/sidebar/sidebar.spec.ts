@@ -85,4 +85,36 @@ describe('DashboardSidebar Component (SCRUM-54 Individual Security Suite)', () =
     expect(statusTitle.textContent).toContain('Personal Security Vault');
     expect(statusSub.textContent).toContain('End-to-End Encrypted');
   });
+
+  it('should render genuine production tabs and hide obsolete deferred tabs for company admin (SCRUM-151)', () => {
+    authService.currentUser.set({
+      id: 'usr-admin-corp',
+      email: 'admin@sentinel.corp',
+      firstName: 'Sarah',
+      lastName: 'Connor',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Sentinel Defense',
+    });
+    dashboardService.initDashboardForCurrentUser();
+    fixture.detectChanges();
+
+    const navButtons: HTMLButtonElement[] = Array.from(fixture.nativeElement.querySelectorAll('.nav-link-btn'));
+    const buttonTexts = navButtons.map((btn) => btn.textContent?.trim() || '');
+
+    // Genuine production tabs MUST be present
+    expect(buttonTexts.some((t) => t.includes('Overview'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('Directory Users'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('OIDC Applications & SSO'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('Access Requests'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('Security Audit Log'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('Enterprise Settings'))).toBe(true);
+
+    // Obsolete and deferred tabs MUST NOT be present
+    expect(buttonTexts.some((t) => t.includes('Cloud LDAP'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('Cloud RADIUS'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('Webhooks'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('Device Fleet'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('Personal Vault'))).toBe(false);
+  });
 });

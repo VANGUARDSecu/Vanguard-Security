@@ -2,7 +2,8 @@ import { Injectable, inject, signal, computed, PLATFORM_ID } from '@angular/core
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Observable, catchError, map, of, tap, throwError } from 'rxjs';
+import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay } from 'rxjs';
+import { SupabaseService } from './supabase.service';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
 
 export interface UserProfile {
@@ -15,6 +16,7 @@ export interface UserProfile {
   phone?: string;
   role?: 'admin' | 'security_officer' | 'user';
   accountType?: 'individual' | 'company';
+  isTemporaryPassword?: boolean;
   avatarUrl?: string;
   user_metadata?: Record<string, any>;
 }
@@ -159,10 +161,17 @@ export class AuthService {
 
   private readonly API_URL = 'http://localhost:3000/auth';
   private readonly isBrowser = isPlatformBrowser(this.platformId);
+  private readonly supabaseService = inject(SupabaseService);
 
   // Signals for state management
   readonly currentUser = signal<UserProfile | null>(this.loadStoredUser());
   readonly token = signal<string | null>(this.loadStoredToken());
+  readonly refreshToken = signal<string | null>(this.loadStoredRefreshToken());
+  readonly tokenExpiresAt = signal<number | null>(this.loadStoredExpiresAt());
+
+  // Proactive token auto-renewal (SCRUM-142 / NFR-02 300s TTL)
+  private refreshInFlight$: Observable<AuthResponse> | null = null;
+  private autoRefreshTimer: any = null;
   readonly isAuthenticated = computed(() => !!this.currentUser());
   readonly isPasswordResetRequired = signal<boolean>(this.loadStoredResetRequired());
 
@@ -185,6 +194,7 @@ export class AuthService {
 
   constructor() {
     this.checkForOAuthCallback();
+    this.initSessionAutoRefresh();
   }
 
   private loadStoredUser(): UserProfile | null {
@@ -200,6 +210,18 @@ export class AuthService {
       } else if (parsed.role === 'security_officer' || meta['role'] === 'security_officer') {
         role = 'security_officer';
       }
+      const rawAccountType = parsed.accountType || meta['account_type'];
+      const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || parsed.accountType === 'company');
+      const accountType: 'individual' | 'company' =
+        rawAccountType === 'individual'
+          ? 'individual'
+          : (isTenant || role === 'admin' ? 'company' : 'individual');
+      const isTemporaryPassword = Boolean(
+        parsed.isTemporaryPassword ||
+        meta['is_temporary_password'] === true ||
+        meta['isTemporaryPassword'] === true
+      );
+
       return {
         ...parsed,
         firstName: parsed.firstName || meta['first_name'] || meta['firstName'] || meta['given_name'] || meta['name']?.split(' ')[0] || '',
@@ -207,6 +229,8 @@ export class AuthService {
         companyName: parsed.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
         phone: parsed.phone || meta['phone'] || '',
         role,
+        accountType,
+        isTemporaryPassword,
         avatarUrl: parsed.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       };
     } catch {
@@ -218,6 +242,25 @@ export class AuthService {
     if (!this.isBrowser) return null;
     try {
       return localStorage.getItem('vanguard_token');
+    } catch {
+      return null;
+    }
+  }
+
+  private loadStoredRefreshToken(): string | null {
+    if (!this.isBrowser) return null;
+    try {
+      return localStorage.getItem('vanguard_refresh_token');
+    } catch {
+      return null;
+    }
+  }
+
+  private loadStoredExpiresAt(): number | null {
+    if (!this.isBrowser) return null;
+    try {
+      const val = localStorage.getItem('vanguard_token_expires_at');
+      return val ? parseInt(val, 10) : null;
     } catch {
       return null;
     }
@@ -364,20 +407,9 @@ export class AuthService {
         }
       }),
       catchError((error: HttpErrorResponse) => {
-        try {
-          const localAuth = this.attemptLocalDirectoryAuth(credentials.email, credentials.password);
-          if (localAuth) {
-            this.pendingEmail.set(credentials.email);
-            this.pendingMode.set('signin');
-            if (localAuth.user && localAuth.session) {
-              this.setSession(localAuth.user, localAuth.session);
-            }
-            return of(localAuth);
-          }
-        } catch (localErr: any) {
-          return throwError(() => new Error(localErr.message));
-        }
-
+        // SCRUM-129: removed attemptLocalDirectoryAuth — a failed server login
+        // must not be rescued by locally cached directory credentials. A network
+        // or credential failure is surfaced as a real error.
         let errorMessage = 'An unexpected error occurred. Please try again.';
         if (error.error && error.error.message) {
           errorMessage = Array.isArray(error.error.message)
@@ -391,95 +423,6 @@ export class AuthService {
     );
   }
 
-  private attemptLocalDirectoryAuth(email: string, password: string): AuthResponse | null {
-    if (!this.isBrowser) return null;
-    try {
-      const stored = localStorage.getItem('vanguard_directory_users');
-      if (!stored) return null;
-      const users: any[] = JSON.parse(stored);
-      const cleanEmail = email.trim().toLowerCase();
-      const user = users.find((u) => u.email?.trim().toLowerCase() === cleanEmail);
-      if (!user) return null;
-
-      const expectedPassword = user.temporaryPassword || user.password;
-      if (expectedPassword && expectedPassword !== password.trim()) {
-        throw new Error('Invalid password for this directory employee account.');
-      }
-
-      let role: 'admin' | 'security_officer' | 'user' = 'user';
-      if (user.role === 'Security Officer') {
-        role = 'security_officer';
-      }
-
-      const names = (user.name || '').trim().split(' ');
-      const firstName = names[0] || user.firstName || 'Employee';
-      const lastName = names.slice(1).join(' ') || user.lastName || '';
-
-      const userProfile: UserProfile = {
-        id: user.id || 'usr_' + Date.now(),
-        email: user.email,
-        firstName,
-        lastName,
-        companyName: 'Vanguard Security Inc.',
-        role,
-        user_metadata: {
-          role,
-          department: user.department || 'Engineering',
-          first_name: firstName,
-          last_name: lastName,
-          is_temporary_password: !!user.temporaryPassword,
-        },
-      };
-
-      // Mark user as Active and update lastLogin
-      user.accountStatus = 'Active';
-      user.lastLogin = 'Just now';
-      localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
-
-      // Ensure password reset flag is cleared on normal employee directory sign-in
-      this.isPasswordResetRequired.set(false);
-      if (this.isBrowser) {
-        localStorage.removeItem('vanguard_reset_required');
-      }
-
-      const session: AuthSession = {
-        access_token: 'vanguard_dir_session_' + Date.now(),
-        expires_at: Math.floor(Date.now() / 1000) + 86400,
-      };
-
-      const hasTotp = user.mfaStatus === 'Enrolled (TOTP)';
-
-      // Trigger OTP dispatch via backend so real email accounts receive the Supabase email code!
-      if (!hasTotp) {
-        this.http.post(`${this.API_URL}/resend-otp`, { email: user.email, type: 'signin' }).subscribe({
-          error: () => {}, // Safe silent fallback if offline/mock
-        });
-      }
-
-      // Store pending directory auth so verifyOtp can activate the session
-      if (this.isBrowser) {
-        localStorage.setItem('vanguard_pending_dir_user', JSON.stringify({ user: userProfile, session }));
-      }
-
-      this.pendingEmail.set(user.email);
-      this.pendingMode.set('signin');
-
-      return {
-        success: true,
-        requireMfa: true,
-        hasTotp,
-        enrolledMethods: hasTotp ? ['totp'] : ['email_otp'],
-        user: userProfile,
-        session,
-        message: 'Credentials verified. Please complete 2-Step Verification.',
-      };
-    } catch (e: any) {
-      if (e.message && e.message.includes('Invalid password')) {
-        throw e;
-      }
-      return null;
-    }
-  }
 
   signup(payload: RegisterPayload): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.API_URL}/signup`, payload).pipe(
@@ -510,25 +453,17 @@ export class AuthService {
   verifyOtp(email: string, token: string, type: 'signup' | 'email' | 'recovery' = 'signup'): Observable<AuthResponse> {
     const cleanedToken = token.trim();
 
-    // Check if we have a pending directory employee verification
+    // Check if we have a pending directory employee verification (used only to
+    // enrich the verified response with display metadata — never to authenticate).
     const pendingDir = this.isBrowser ? localStorage.getItem('vanguard_pending_dir_user') : null;
     let pendingData: any = null;
     try {
       if (pendingDir) pendingData = JSON.parse(pendingDir);
     } catch {}
 
-    // Allow test bypass code 123456 for fast developer verification
-    if (pendingData && (cleanedToken === '123456' || cleanedToken === '12345678')) {
-      if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-      this.setSession(pendingData.user, pendingData.session);
-      return of({
-        success: true,
-        message: 'Verification successful!',
-        user: pendingData.user,
-        session: pendingData.session,
-      });
-    }
-
+    // SCRUM-129: the developer bypass codes (123456 / 12345678) that created a
+    // session from cached localStorage data have been removed. Only a
+    // server-verified OTP response can establish a session.
     return this.http
       .post<AuthResponse>(`${this.API_URL}/verify-otp`, { email, token: cleanedToken, type })
       .pipe(
@@ -548,18 +483,8 @@ export class AuthService {
           }
         }),
         catchError((error: HttpErrorResponse) => {
-          // Fallback for directory employee with test bypass code
-          if (pendingData && (cleanedToken === '123456' || cleanedToken === '12345678')) {
-            if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-            this.setSession(pendingData.user, pendingData.session);
-            return of({
-              success: true,
-              message: 'Verification successful!',
-              user: pendingData.user,
-              session: pendingData.session,
-            });
-          }
-
+          // SCRUM-129: no developer-code fallback. A failed server verification
+          // is a real failure; it never establishes a session from cached data.
           let errorMessage = 'Invalid or expired verification code.';
           if (error.error && error.error.message) {
             errorMessage = Array.isArray(error.error.message)
@@ -579,19 +504,10 @@ export class AuthService {
       if (pendingDir) pendingData = JSON.parse(pendingDir);
     } catch {}
 
-    if (pendingData && (cleanedCode === '123456' || cleanedCode.length === 6)) {
-      if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-      this.setSession(pendingData.user, pendingData.session);
-      return of({
-        success: true,
-        message: 'Authenticator verified!',
-        user: pendingData.user,
-        session: pendingData.session,
-      });
-    }
-
+    // SCRUM-129/126: removed the client-side bypass that accepted 123456 or ANY
+    // 6-digit code and fabricated a session. Real TOTP is verified server-side.
     return this.http
-      .post<AuthResponse>(`${this.API_URL}/verify-totp`, { email, code: cleanedCode })
+      .post<AuthResponse>(`${this.API_URL}/mfa/verify`, { code: cleanedCode })
       .pipe(
         tap((response) => {
           if (response.success && response.user && response.session) {
@@ -605,17 +521,8 @@ export class AuthService {
           }
         }),
         catchError((error: HttpErrorResponse) => {
-          if (pendingData && (cleanedCode === '123456' || cleanedCode.length === 6)) {
-            if (this.isBrowser) localStorage.removeItem('vanguard_pending_dir_user');
-            this.setSession(pendingData.user, pendingData.session);
-            return of({
-              success: true,
-              message: 'Authenticator verified!',
-              user: pendingData.user,
-              session: pendingData.session,
-            });
-          }
-
+          // SCRUM-129: no developer-code fallback; a failed verification is a
+          // real failure and never fabricates a session.
           let errorMessage = 'Invalid Authenticator code.';
           if (error.error && error.error.message) {
             errorMessage = Array.isArray(error.error.message)
@@ -644,6 +551,7 @@ export class AuthService {
     department: string;
     temporaryPassword: string;
     loginUrl?: string;
+    tenantId?: string;
   }): Observable<{ success: boolean; message: string; emailResult?: any }> {
     return this.http
       .post<{ success: boolean; message: string; emailResult?: any }>(
@@ -652,7 +560,16 @@ export class AuthService {
       )
       .pipe(
         catchError((error: HttpErrorResponse) => {
-          const msg = error.error?.message || 'Could not dispatch credentials email to employee.';
+          let msg = error.error?.message;
+          if (!msg) {
+            if (error.status === 0 || error.message?.includes('Failed to fetch')) {
+              msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+            } else {
+              msg = 'Could not dispatch credentials email to employee.';
+            }
+          } else if (typeof msg === 'string' && msg.includes('Failed to fetch')) {
+            msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+          }
           return throwError(() => new Error(msg));
         })
       );
@@ -674,6 +591,27 @@ export class AuthService {
       .pipe(
         catchError((error: HttpErrorResponse) => {
           return throwError(() => new Error(error.error?.message || 'Failed to verify Authenticator code.'));
+        })
+      );
+  }
+
+  unenrollTotp(factorId: string): Observable<{ success: boolean; message: string }> {
+    return this.http
+      .delete<{ success: boolean; message: string }>(`${this.API_URL}/mfa/${encodeURIComponent(factorId)}`)
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          return throwError(() => new Error(error.error?.message || 'Failed to remove Authenticator.'));
+        })
+      );
+  }
+
+  listMfaFactors(type?: string): Observable<{ success: boolean; factors: any[] }> {
+    const url = type ? `${this.API_URL}/mfa/factors?type=${encodeURIComponent(type)}` : `${this.API_URL}/mfa/factors`;
+    return this.http
+      .get<{ success: boolean; factors: any[] }>(url)
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          return throwError(() => new Error(error.error?.message || 'Failed to list MFA factors.'));
         })
       );
   }
@@ -734,6 +672,19 @@ export class AuthService {
 
     const resolvedFullName = (user as any).name || (firstName || lastName ? `${firstName} ${lastName}`.trim() : meta['name'] || '');
 
+    const isTenant = Boolean(meta['tenant_id'] || meta['account_type'] === 'company' || user.accountType === 'company');
+    const resolvedAccountType: 'individual' | 'company' =
+      user.accountType === 'individual' || meta['account_type'] === 'individual'
+        ? 'individual'
+        : (isTenant || resolvedRole === 'admin' ? 'company' : 'individual');
+
+    const isTemp = Boolean(
+      meta['is_temporary_password'] === true ||
+      meta['isTemporaryPassword'] === true ||
+      user.isTemporaryPassword === true ||
+      (user as any).is_temporary_password === true
+    );
+
     const normalizedUser: UserProfile = {
       ...user,
       firstName,
@@ -742,6 +693,8 @@ export class AuthService {
       companyName: user.companyName || meta['company_name'] || meta['companyName'] || 'Vanguard Security Inc.',
       phone: user.phone || meta['phone'] || '',
       role: resolvedRole,
+      accountType: resolvedAccountType,
+      isTemporaryPassword: isTemp,
       avatarUrl: user.avatarUrl || meta['avatar_url'] || meta['picture'] || '',
       user_metadata: {
         ...meta,
@@ -749,11 +702,13 @@ export class AuthService {
         last_name: lastName,
         name: resolvedFullName || undefined,
         role: resolvedRole,
+        account_type: resolvedAccountType,
+        is_temporary_password: isTemp,
       },
     };
 
-    // Only flag password reset required if explicitly undergoing a recovery flow
-    if (this.pendingMode() === 'recovery') {
+    // SCRUM-155: Flag password reset required if explicitly undergoing a recovery flow OR authenticated with temporary password
+    if (this.pendingMode() === 'recovery' || isTemp) {
       this.isPasswordResetRequired.set(true);
       if (this.isBrowser) {
         localStorage.setItem('vanguard_reset_required', 'true');
@@ -767,11 +722,55 @@ export class AuthService {
 
     this.currentUser.set(normalizedUser);
     this.token.set(session.access_token);
+    if (session.refresh_token) {
+      this.refreshToken.set(session.refresh_token);
+    }
+    if (session.expires_at) {
+      this.tokenExpiresAt.set(session.expires_at);
+    }
 
     if (this.isBrowser) {
+      // SCRUM-153 & SCRUM-155: If the active user has changed, wipe previous user's cached directory, apps, & tenant state
+      const prevUserRaw = localStorage.getItem('vanguard_user');
+      if (prevUserRaw) {
+        try {
+          const prev = JSON.parse(prevUserRaw);
+          const isDifferent = (prev?.id && user.id && prev.id !== user.id) ||
+                              (prev?.email && user.email && prev.email.toLowerCase().trim() !== user.email.toLowerCase().trim());
+          if (isDifferent) {
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && (k.startsWith('vanguard_') || k.startsWith('sb-')) && k !== 'vanguard_remembered_email') {
+                keysToRemove.push(k);
+              }
+            }
+            keysToRemove.forEach((k) => localStorage.removeItem(k));
+          }
+        } catch {}
+      }
+
       localStorage.setItem('vanguard_user', JSON.stringify(normalizedUser));
       localStorage.setItem('vanguard_token', session.access_token);
+      if (session.refresh_token) {
+        localStorage.setItem('vanguard_refresh_token', session.refresh_token);
+      }
+      if (session.expires_at) {
+        localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+      }
+
+      if (session.access_token && session.refresh_token) {
+        try {
+          this.supabaseService.client.auth.setSession({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+          }).catch(() => {});
+        } catch {}
+      }
     }
+
+    // Schedule proactive auto-renewal 60s before token expiration (SCRUM-142)
+    this.scheduleAutoRefresh(session.expires_at);
   }
 
   forgotPassword(email: string): Observable<{ success: boolean; message: string; email?: string }> {
@@ -815,7 +814,10 @@ export class AuthService {
 
           if (idx !== -1) {
             users[idx].password = password.trim();
+            users[idx].accountStatus = 'Active';
+            users[idx].lastLogin = 'Just now';
             delete users[idx].temporaryPassword;
+            delete users[idx].isTemporaryPassword;
             localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
           }
         }
@@ -1059,6 +1061,13 @@ export class AuthService {
     );
   }
 
+  retryPushChallenge(challengeId: string): Observable<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/retry`;
+    return this.http.post<{ success: boolean; numberMatching: { enabled: boolean; code: number }; expiresInSeconds: number; retryCount: number; retriesRemaining: number; message: string }>(url, { challengeId }).pipe(
+      catchError((err) => throwError(() => new Error(err.error?.message || 'Failed to retry push challenge.')))
+    );
+  }
+
   getPushMfaPreference(email: string): Observable<{ success: boolean; email: string; enabled: boolean }> {
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/preference?email=${encodeURIComponent(email)}`;
     return this.http.get<{ success: boolean; email: string; enabled: boolean }>(url).pipe(
@@ -1111,17 +1120,186 @@ export class AuthService {
     );
   }
 
+
+  hasRefreshToken(): boolean {
+    return !!this.refreshToken();
+  }
+
+  /**
+   * Proactive token auto-renewal timer (SCRUM-142, PRD NFR-02 / P1-01).
+   * Refreshes 60s prior to token expiry so active users never experience token expiration errors.
+   */
+  scheduleAutoRefresh(expiresAt?: number): void {
+    if (!this.isBrowser) return;
+    if (this.autoRefreshTimer) {
+      clearTimeout(this.autoRefreshTimer);
+      this.autoRefreshTimer = null;
+    }
+
+    let exp = expiresAt || this.tokenExpiresAt();
+    if (!exp) {
+      const tok = this.token();
+      if (tok && tok.includes('.')) {
+        try {
+          const payload = JSON.parse(atob(tok.split('.')[1]));
+          if (payload.exp) {
+            exp = payload.exp;
+            this.tokenExpiresAt.set(exp);
+            localStorage.setItem('vanguard_token_expires_at', String(exp));
+          }
+        } catch {}
+      }
+    }
+
+    if (!exp) {
+      exp = Math.floor(Date.now() / 1000) + 300;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Renew 60s before expiration, bounded to minimum 5s
+    const delaySec = Math.max(5, Math.min(exp - nowSec - 60, 86400));
+
+    this.autoRefreshTimer = setTimeout(() => {
+      if (this.isLoggedIn() && this.hasRefreshToken()) {
+        this.refreshSession().subscribe({
+          error: () => {},
+        });
+      }
+    }, delaySec * 1000);
+  }
+
+  /**
+   * Refreshes the session via POST /auth/refresh with mutex queueing (SCRUM-142).
+   */
+  refreshSession(): Observable<AuthResponse> {
+    const refreshToken = this.refreshToken();
+    if (!refreshToken) {
+      this.logout();
+      return throwError(() => new Error('No refresh token available.'));
+    }
+
+    if (this.refreshInFlight$) {
+      return this.refreshInFlight$;
+    }
+
+    this.refreshInFlight$ = this.http
+      .post<AuthResponse>(`${this.API_URL}/refresh`, { refreshToken })
+      .pipe(
+        tap((res) => {
+          if (res.success && res.session) {
+            this.token.set(res.session.access_token);
+            if (res.session.refresh_token) {
+              this.refreshToken.set(res.session.refresh_token);
+            }
+            if (res.session.expires_at) {
+              this.tokenExpiresAt.set(res.session.expires_at);
+            }
+            if (this.isBrowser) {
+              localStorage.setItem('vanguard_token', res.session.access_token);
+              if (res.session.refresh_token) {
+                localStorage.setItem('vanguard_refresh_token', res.session.refresh_token);
+              }
+              if (res.session.expires_at) {
+                localStorage.setItem('vanguard_token_expires_at', String(res.session.expires_at));
+              }
+              if (res.session.access_token && res.session.refresh_token) {
+                try {
+                  this.supabaseService.client.auth.setSession({
+                    access_token: res.session.access_token,
+                    refresh_token: res.session.refresh_token,
+                  }).catch(() => {});
+                } catch {}
+              }
+            }
+            this.scheduleAutoRefresh(res.session.expires_at);
+          }
+        }),
+        catchError((err: any) => {
+          this.logout();
+          return throwError(() => err);
+        }),
+        finalize(() => {
+          this.refreshInFlight$ = null;
+        }),
+        shareReplay(1),
+      );
+
+    return this.refreshInFlight$;
+  }
+
+  private initSessionAutoRefresh(): void {
+    if (!this.isBrowser) return;
+
+    try {
+      this.supabaseService.client.auth.onAuthStateChange((event, session) => {
+        if (event === 'TOKEN_REFRESHED' && session) {
+          this.token.set(session.access_token);
+          this.refreshToken.set(session.refresh_token || null);
+          this.tokenExpiresAt.set(session.expires_at || null);
+          localStorage.setItem('vanguard_token', session.access_token);
+          if (session.refresh_token) {
+            localStorage.setItem('vanguard_refresh_token', session.refresh_token);
+          }
+          if (session.expires_at) {
+            localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+            this.scheduleAutoRefresh(session.expires_at);
+          }
+        }
+      });
+    } catch {}
+
+    const tok = this.token();
+    const ref = this.refreshToken();
+    const exp = this.tokenExpiresAt();
+    if (tok && ref) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (exp && nowSec >= exp - 30) {
+        this.refreshSession().subscribe({ error: () => {} });
+      } else {
+        this.scheduleAutoRefresh(exp || undefined);
+      }
+    }
+  }
+
+  /**
+   * SCRUM-156: Fetch authoritative directory users and activation statuses from backend
+   */
+  getDirectoryUsers(tenantId?: string): Observable<any[]> {
+    const params: Record<string, string> = {};
+    if (tenantId) params['tenantId'] = tenantId;
+    return this.http.get<any[]>(`${this.API_URL}/directory-users`, { params });
+  }
+
   logout(): void {
+    if (this.autoRefreshTimer) {
+      clearTimeout(this.autoRefreshTimer);
+      this.autoRefreshTimer = null;
+    }
     if (this.isBrowser) {
       this.http.post(`${this.API_URL}/logout`, {}).subscribe({
         error: () => {},
       });
-      localStorage.removeItem('vanguard_user');
-      localStorage.removeItem('vanguard_token');
-      localStorage.removeItem('vanguard_reset_required');
+      // SCRUM-153: Thoroughly purge all session, directory, tenant, devices, apps, and workspace state from storage
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('vanguard_') || key.startsWith('sb-'))) {
+          if (key !== 'vanguard_remembered_email') {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+      sessionStorage.clear();
+
+      try {
+        this.supabaseService.client.auth.signOut().catch(() => {});
+      } catch {}
     }
     this.currentUser.set(null);
     this.token.set(null);
+    this.refreshToken.set(null);
+    this.tokenExpiresAt.set(null);
     this.isPasswordResetRequired.set(false);
     this.router.navigate(['/login']);
   }

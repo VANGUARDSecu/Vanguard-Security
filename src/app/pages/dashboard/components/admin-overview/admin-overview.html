@@ -138,9 +138,9 @@
                   <span class="metric-icon">⚡</span>
                   <span class="metric-badge badge-green">Operational</span>
                 </div>
-                <div class="metric-value">{{ protocols.length }} / {{ protocols.length }}</div>
-                <div class="metric-label">Active Protocol Gateways</div>
-                <div class="metric-subtext">SAML, OIDC, LDAP, RADIUS</div>
+                <div class="metric-value">1 Active</div>
+                <div class="metric-label">Active SSO Gateway</div>
+                <div class="metric-subtext">OpenID Connect (OIDC) / OAuth 2.0</div>
               </div>
 
               <div class="metric-card">
@@ -239,7 +239,7 @@
       <div class="modal-body">
         <p class="modal-desc text-danger">
           <strong>WARNING: High Impact Security Action</strong><br>
-          This action will immediately terminate all active sessions, invalidate JWT refresh tokens, drop active RADIUS network connections, and unbind LDAP credentials for <strong>all {{ directoryUsers().length }} users</strong> across the entire organization.
+          This action will immediately terminate all active web sessions, invalidate JWT refresh tokens, and revoke OAuth access for <strong>all {{ directoryUsers().length }} users</strong> across the entire organization.
         </p>
         <p class="modal-desc">
           Employees will be required to re-authenticate with their password and complete 2-Step Verification (Email OTP / Authenticator App).

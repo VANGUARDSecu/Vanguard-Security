@@ -35,6 +35,9 @@
   min-width: 0;
   padding: 24px clamp(16px, 2.5vw, 36px);
   box-sizing: border-box;
+  position: relative;
+  z-index: 10;
+  min-height: calc(100vh - 65px);
 }
 
 /* Toast Alerts */

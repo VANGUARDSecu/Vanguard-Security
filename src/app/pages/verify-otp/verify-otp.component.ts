@@ -26,26 +26,51 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly method = signal<VerificationMethod>('email_otp');
   readonly hasTotp = signal<boolean>(false);
 
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160)
+  readonly ssoApprovalRequired = signal<boolean>(false);
+  readonly ssoApprovalMessage = signal<string>('');
+
+  private isApprovalRequiredError(err: any): boolean {
+    const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
+    return (
+      msg.includes('administrative approval is required') ||
+      msg.includes('zero-trust access governance') ||
+      (msg.includes('approval') && msg.includes('corporate'))
+    );
+  }
+
+  private handleApprovalRequired(err: any): void {
+    this.isLoading.set(false);
+    this.ssoApprovalRequired.set(true);
+    const msg =
+      err?.message ||
+      'Zero-Trust Access Governance: Administrative approval is required before corporate account can access this application.';
+    this.ssoApprovalMessage.set(msg);
+    this.showNotification('error', msg, 8000);
+  }
+
   // Push MFA state signals (SCRUM-85)
   readonly numberCode = signal<string>('');
   readonly clientAppIcon = signal<string>('🛡️');
   readonly clientType = signal<'web' | 'mobile'>('web');
   readonly pushSecondsRemaining = signal<number>(60);
   readonly pushStatusText = signal<string>('Waiting for mobile approval...');
+  readonly pushRetryCount = signal<number>(0);
+  readonly pushRetriesRemaining = signal<number>(3);
   private pushPollInterval: any = null;
   private pushCountdownInterval: any = null;
 
   // SSO state signals (SCRUM-61)
   readonly challengeId = signal<string | null>(null);
   readonly ssoParams = signal<Record<string, string> | null>(null);
+  // Client name as stored in the backend client registry (clientName in the SSO challenge response).
+  readonly serverClientName = signal<string | null>(null);
   readonly isSsoVerification = computed<boolean>(() => !!this.challengeId() || !!this.ssoParams());
   readonly clientDisplayName = computed<string>(() => {
     const sso = this.ssoParams();
     if (!sso) return '';
-    if (sso['client_id'] === 'vanguard-dummy-portal') return 'Acme Enterprise Portal';
-    if (sso['client_id'] === 'vg_client_b3121c514e83037d') return 'Acme Dummy Web';
-    if (sso['client_id'] === 'vanguard-dummy-mobile') return 'Dummy Mobile App';
-    return sso['client_id'] || 'Client Application';
+    // The name comes from the server, so this page and the mobile approval prompt show the same name.
+    return this.serverClientName() || sso['client_id'] || 'Client Application';
   });
   
   // Dynamic code length: SSO MFA and TOTP are strictly 6 digits; Email OTP for direct portal signup is 8 digits
@@ -91,6 +116,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.challengeId.set(params['challengeId']);
       }
 
+      if (params['clientName'] || params['client_name']) {
+        // Display only: the server's client registry name, passed by the login page or backend.
+        this.serverClientName.set(params['clientName'] || params['client_name']);
+      }
       if (params['client_id'] && params['redirect_uri']) {
         this.ssoParams.set({
           client_id: params['client_id'],
@@ -118,6 +147,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           }).subscribe({
             next: (res) => {
               this.challengeId.set(res.challengeId);
+              this.serverClientName.set(res.clientName || null);
               this.startResendTimer(res.resendCooldownSeconds || 60);
             },
             error: (err: Error) => {
@@ -127,10 +157,46 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         }
       }
 
-      // If method is push_approval, initiate polling loop
       if (methodParam === 'push_approval' && this.challengeId()) {
+        this.pushRetryCount.set(0);
+        this.pushRetriesRemaining.set(3);
         this.startPushPolling(this.challengeId()!);
+      } else if (!this.isSsoVerification()) {
+        // For non-SSO flows, send initial OTP email on page load
+        this.isLoading.set(true);
+        
+        if (modeParam === 'recovery') {
+          // Recovery mode uses forgotPassword
+          this.authService.forgotPassword(emailParam).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(60);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send recovery code.');
+              this.startResendTimer(30);
+            },
+          });
+        } else {
+          // Signup/signin modes use resendOtp
+          const otpType = modeParam === 'signup' ? 'signup' : 'signin';
+          this.authService.resendOtp(emailParam, otpType).subscribe({
+            next: (res) => {
+              this.isLoading.set(false);
+              this.startResendTimer(45);
+              this.clearOtpInputs();
+            },
+            error: (err: Error) => {
+              this.isLoading.set(false);
+              this.showNotification('error', err.message || 'Failed to send verification code.');
+              this.startResendTimer(30);
+            },
+          });
+        }
       } else {
+        // SSO flows already handled above in initiateSsoMfa call
         this.clearOtpInputs();
         this.startResendTimer(this.isSsoVerification() ? 60 : 30);
       }
@@ -222,6 +288,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.isLoading.set(false);
         this.challengeId.set(res.challengeId);
+        this.serverClientName.set(res.clientName || null);
         this.method.set('email_otp');
         this.clearOtpInputs();
         this.startResendTimer(res.resendCooldownSeconds || 60);
@@ -254,6 +321,30 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         window.open(webAuthUrl, '_blank');
       }
     }
+  }
+
+  retryPushChallenge(): void {
+    const challengeId = this.challengeId();
+    if (!challengeId) return;
+
+    this.isLoading.set(true);
+    this.authService.retryPushChallenge(challengeId).subscribe({
+      next: (res) => {
+        this.isLoading.set(false);
+        this.numberCode.set(res.numberMatching.code.toString());
+        this.pushRetryCount.set(res.retryCount);
+        this.pushRetriesRemaining.set(res.retriesRemaining);
+        this.pushSecondsRemaining.set(res.expiresInSeconds);
+        this.pushStatusText.set('Waiting for mobile approval...');
+        this.showNotification('success', res.message, 4000);
+        // Restart polling with fresh 60-second window
+        this.startPushPolling(challengeId);
+      },
+      error: (err: Error) => {
+        this.isLoading.set(false);
+        this.showNotification('error', err.message || 'Failed to retry push challenge.');
+      },
+    });
   }
 
   setMethod(newMethod: VerificationMethod): void {
@@ -459,6 +550,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         },
         error: (err: Error) => {
           this.isLoading.set(false);
+          if (this.isApprovalRequiredError(err)) {
+            this.handleApprovalRequired(err);
+            return;
+          }
           this.showNotification('error', err.message || 'Invalid or expired SSO verification code.');
         },
       });
@@ -512,7 +607,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       if (sso) {
         const originUrl = new URL(sso['redirect_uri']).origin;
         const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
-        const appName = sso['client_id']?.includes('dummy') ? 'Acme Dummy Web' : 'External Application';
+        const appName = this.clientDisplayName();
         const newConn = {
           id: `conn_${sso['client_id']}`,
           clientId: sso['client_id'],
@@ -605,6 +700,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         },
         error: (err: Error) => {
           this.isLoading.set(false);
+          if (this.isApprovalRequiredError(err)) {
+            this.handleApprovalRequired(err);
+            return;
+          }
           this.showNotification('error', err.message || 'SSO authorization failed.');
         },
       });
@@ -612,7 +711,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
 
     this.isLoading.set(false);
-    this.showNotification('success', 'Verification successful! Redirecting to secure vault...', 3000);
+    if (this.authService.isPasswordResetRequired()) {
+      this.showNotification('success', 'Temporary credentials verified. Please set your new password.', 3000);
+      setTimeout(() => {
+        this.router.navigate(['/reset-password']);
+      }, 800);
+      return;
+    }
+
+    this.showNotification('success', 'Verification successful! Redirecting...', 3000);
     setTimeout(() => {
       this.router.navigate(['/dashboard']);
     }, 800);
@@ -622,16 +729,21 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     const sso = this.ssoParams();
     if (!sso) return;
 
+    const errorDescription = this.ssoApprovalRequired()
+      ? 'Access approval pending administrator review'
+      : 'User cancelled MFA verification for Vanguard SSO';
+
     try {
       const redirectUri = new URL(sso['redirect_uri']);
       redirectUri.searchParams.set('error', 'access_denied');
-      redirectUri.searchParams.set('error_description', 'User cancelled MFA verification for Vanguard SSO');
+      redirectUri.searchParams.set('error_description', errorDescription);
       if (sso['state']) {
         redirectUri.searchParams.set('state', sso['state']);
       }
       window.location.href = redirectUri.toString();
     } catch {
-      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=User+cancelled+MFA+verification+for+Vanguard+SSO${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
+      const encodedDesc = encodeURIComponent(errorDescription);
+      window.location.href = `${sso['redirect_uri']}?error=access_denied&error_description=${encodedDesc}${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
     }
   }
 }

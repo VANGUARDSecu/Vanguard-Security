@@ -43,6 +43,8 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
     fixture = TestBed.createComponent(UserMyApps);
     component = fixture.componentInstance;
     fixture.detectChanges();
+    const httpMock = TestBed.inject(HttpTestingController);
+    httpMock.match(() => true).forEach((r) => r.flush([]));
   });
 
   afterEach(() => {
@@ -134,10 +136,10 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
     }
   });
 
-  it('should switch between personal workspace and organization context', () => {
+  it('should retain personal workspace for individual accounts and disallow enterprise context (SCRUM-150)', () => {
     dashboardService.switchWorkspace('org_root');
-    expect(dashboardService.isPersonalWorkspace()).toBe(false);
-    expect(dashboardService.activeOrganization().id).toBe('org_root');
+    expect(dashboardService.isPersonalWorkspace()).toBe(true);
+    expect(dashboardService.activeWorkspaceId()).toBe('personal');
 
     dashboardService.switchWorkspace('personal');
     expect(dashboardService.isPersonalWorkspace()).toBe(true);
@@ -167,6 +169,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
 
   describe('SCRUM-42 Admin Approval Workflow & Access Request Queue', () => {
     beforeEach(() => {
+      authService.currentUser.set({
+        id: 'usr-employee-1',
+        email: 'employee@vanguard.security',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
       // Switch to organization workspace
       dashboardService.switchWorkspace('org_root');
       fixture.detectChanges();
@@ -258,12 +269,53 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       const assignedApp = component.apps().find((a) => a.name === 'Unauthorized Cloud DB');
       expect(assignedApp).toBeUndefined();
     });
+
+    it('SCRUM-159: should move approved requests to active applications and exclude from requested list', () => {
+      // 1. Submit request
+      component.requestedAppName = 'Datadog APM';
+      component.requestAppJustification = 'Application performance monitoring';
+      component.submitAppRequest();
+
+      // Before approval: in requested apps queue, not in active apps
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(true);
+
+      const req = dashboardService.appAccessRequests().find((r) => r.appName === 'Datadog APM');
+      expect(req).toBeDefined();
+
+      // 2. Admin approves request
+      dashboardService.approveAccessRequest(req!.id, 'Approved by SecOps Admin');
+
+      // 3. After approval: excluded from myAccessRequests (requested applications queue)
+      expect(component.myAccessRequests().some((r) => r.appName === 'Datadog APM')).toBe(false);
+
+      // 4. Present in activeAppsList (applications launchpad)
+      const inActiveApps = component.activeAppsList().some((a) => a.name === 'Datadog APM');
+      expect(inActiveApps).toBe(true);
+    });
   });
 
   // ==========================================================================
   // SCRUM-57: Active SSO Integrations & Connected Applications Display
   // ==========================================================================
   describe('SCRUM-57 Connected Client Applications & Live Status', () => {
+    beforeEach(() => {
+      component.dashboardService.connectedApps.set([
+        {
+          id: 'conn-dummy-portal',
+          clientId: 'vanguard-dummy-portal',
+          clientName: 'Acme Dummy Web',
+          protocol: 'OpenID Connect 1.0 (PKCE)',
+          scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
+          redirectUri: 'http://localhost:4201/auth/callback',
+          originUrl: 'http://localhost:4201',
+          status: 'Connected',
+          connectedAt: 'Oct 23, 2026',
+          lastActiveAt: 'Active Session',
+          icon: '🌐',
+          description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
+        },
+      ]);
+    });
     it('should display Acme Dummy Web as an active connected integration with live status', () => {
       expect(component.activeConnectedApps().length).toBeGreaterThanOrEqual(1);
 
@@ -362,7 +414,7 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       dashboardService.loadCompanyApps();
 
       const req = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/my' && r.params.get('userId') === 'owner-9',
+        (r) => r.url === 'http://localhost:3000/apps/my',
       );
       req.flush([
         {
@@ -396,11 +448,130 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
         .subscribe();
 
       const req = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/assign' && r.params.get('userId') === 'owner-9',
+        (r) => r.url === 'http://localhost:3000/apps/assign',
       );
       expect(req.request.body.target).toBe('all');
       expect(req.request.body.appId).toBe('slack');
       req.flush({ assigned: 3 });
     });
+  // ==========================================================================
+  // SCRUM-161: End-to-End Application Request Lifecycle & Duplicate Prevention
+  // ==========================================================================
+  describe('SCRUM-161 Request Application Lifecycle, Duplicate Prevention & Removal', () => {
+    beforeEach(() => {
+      authService.currentUser.set({
+        id: 'usr-employee-1',
+        email: 'employee@vanguard.security',
+        role: 'user',
+        accountType: 'company',
+        user_metadata: { department: 'Engineering', account_type: 'company', tenant_id: 'tenant-vanguard' },
+      } as any);
+      dashboardService.switchWorkspace('org_root');
+      fixture.detectChanges();
+    });
+    it('should detect duplicate and block submission if application is already assigned and active', () => {
+      // 1. App already in active apps
+      dashboardService.apps.set([
+        {
+          id: 'app-jira-cloud',
+          name: 'Jira Cloud',
+          category: 'collaboration',
+          description: 'Project tracking',
+          icon: '📋',
+          protocol: 'SAML 2.0',
+          launchUrl: 'https://jira.atlassian.com',
+          assigned: true,
+        },
+      ]);
+
+      component.reqAppName.set('Jira Cloud');
+      expect(component.duplicateCheck().isDuplicate).toBe(true);
+      expect(component.duplicateCheck().type).toBe('assigned');
+
+      // Attempt submit
+      component.submitAppRequest();
+      expect(component.requestAppError()).toContain('already assigned');
+    });
+
+    it('should detect duplicate and block submission if a request is already pending approval', () => {
+      component.reqAppName.set('Snowflake DW');
+      component.reqJustification.set('Analytics modeling');
+      component.submitAppRequest();
+
+      expect(component.duplicateCheck().isDuplicate).toBe(true);
+      expect(component.duplicateCheck().type).toBe('pending');
+
+      // Attempt second submission
+      const initialCount = dashboardService.appAccessRequests().length;
+      component.submitAppRequest();
+      expect(dashboardService.appAccessRequests().length).toBe(initialCount);
+      expect(component.requestAppError()).toContain('pending administrator review');
+    });
+
+    it('should allow tenant to remove an assigned company app and re-request it afterwards', () => {
+      const app = {
+        id: 'app-datadog-test',
+        name: 'Datadog Cloud',
+        category: 'cloud' as const,
+        description: 'APM monitoring',
+        icon: '🐶',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://app.datadoghq.com',
+        assigned: true,
+      };
+      dashboardService.apps.set([app]);
+      expect(component.activeAppsList().some((a) => a.name === 'Datadog Cloud')).toBe(true);
+
+      // Remove company application
+      component.removeCompanyApp(app);
+      expect(component.activeAppsList().some((a) => a.name === 'Datadog Cloud')).toBe(false);
+
+      // Verify duplicate check is now clear
+      const check = dashboardService.checkDuplicateAppRequest('Datadog Cloud');
+      expect(check.isDuplicate).toBe(false);
+
+      // Re-request is permitted
+      component.reqAppName.set('Datadog Cloud');
+      component.reqJustification.set('Re-requesting after project reassignment');
+      component.submitAppRequest();
+      expect(dashboardService.appAccessRequests().some((r) => r.appName === 'Datadog Cloud')).toBe(true);
+    });
+
+    it('should allow tenant to withdraw an access request and re-request it later', () => {
+      component.reqAppName.set('Notion Enterprise');
+      component.reqJustification.set('Documentation wiki');
+      component.submitAppRequest();
+
+      const req = dashboardService.appAccessRequests().find((r) => r.appName === 'Notion Enterprise');
+      expect(req).toBeDefined();
+
+      // Withdraw the request
+      component.withdrawAccessRequest(req!);
+      expect(dashboardService.appAccessRequests().some((r) => r.appName === 'Notion Enterprise')).toBe(false);
+
+      // Duplicate check should be cleared
+      expect(dashboardService.checkDuplicateAppRequest('Notion Enterprise').isDuplicate).toBe(false);
+    });
+
+    it('should populate delivery modes and auto-extract domains from URL inputs', () => {
+      // SSO Mode
+      component.setDeliveryMode('sso');
+      expect(component.reqDeliveryMode()).toBe('sso');
+      expect(component.reqAppName()).toBe('Acme Dummy Web');
+      expect(component.reqUrl()).toBe('http://localhost:4201');
+      expect(component.reqDomain()).toBe('localhost:4201');
+
+      // Extension Mode
+      component.setDeliveryMode('extension');
+      expect(component.reqDeliveryMode()).toBe('extension');
+      expect(component.reqAppName()).toBe('GitHub');
+      expect(component.reqUrl()).toBe('https://github.com/login');
+      expect(component.reqDomain()).toBe('github.com');
+
+      // Live URL change auto-extracts domain
+      component.onUrlChange('https://analytics.google.com/reporting');
+      expect(component.reqDomain()).toBe('analytics.google.com');
+    });
+  });
   });
 });

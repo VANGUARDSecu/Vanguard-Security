@@ -55,7 +55,7 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     expect(names).toContain('Cloud RADIUS Gateway');
   });
 
-  it('should toggle view mode between admin and user for admin user', () => {
+  it('should restrict company account to admin console only (SCRUM-150)', () => {
     authService.currentUser.set({
       id: 'adm-1',
       email: 'admin@vanguard.io',
@@ -66,8 +66,8 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     });
 
     component.toggleViewMode('user');
-    expect(component.viewMode()).toBe('user');
-    expect(component.activeTab()).toBe('my-apps');
+    expect(component.viewMode()).toBe('admin');
+    expect(component.activeTab()).toBe('overview');
 
     component.toggleViewMode('admin');
     expect(component.viewMode()).toBe('admin');
@@ -608,6 +608,9 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     component.openGlobalKillswitchModal();
     expect(component.showGlobalKillswitchModal()).toBe(true);
 
+    vi.spyOn(component.dashboardService, 'executeGlobalKillswitch').mockImplementation(() => {
+      component.dashboardService.globalKillswitchSuccess.set(true);
+    });
     component.executeGlobalKillswitch();
     expect(component.globalKillswitchSuccess()).toBe(true);
 
@@ -1027,6 +1030,55 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   it('should manage recent 802.1X authentication activity stream and filtering', () => {
+    component.dashboardService.radiusAuthActivity.set([
+      {
+        id: 'rad-act-1',
+        timestamp: '2 mins ago',
+        clientMac: 'D4:61:9D:3A:8B:01',
+        username: 'alex.vanguard@vanguard.security',
+        nasClientName: 'Main HQ Wi-Fi - UniFi AP',
+        nasIp: '192.168.1.50',
+        protocol: 'PEAP-MSCHAPv2',
+        status: 'Access-Accept',
+        vlanId: 10,
+        reason: 'Credentials verified against Supabase Vault',
+      },
+      {
+        id: 'rad-act-2',
+        timestamp: '6 mins ago',
+        clientMac: 'BC:D0:74:11:F2:A9',
+        username: 'sarah.connor@vanguard.security',
+        nasClientName: 'Cisco Meraki MR Branch Gateway',
+        nasIp: '10.200.0.1',
+        protocol: 'EAP-TLS',
+        status: 'Access-Accept',
+        vlanId: 20,
+        reason: 'Valid X.509 client certificate presented',
+      },
+      {
+        id: 'rad-act-3',
+        timestamp: '14 mins ago',
+        clientMac: 'F0:18:98:C3:4D:7E',
+        username: 'unknown_contractor',
+        nasClientName: 'Main HQ Wi-Fi - UniFi AP',
+        nasIp: '192.168.1.50',
+        protocol: 'MS-CHAPv2',
+        status: 'Access-Reject',
+        reason: 'Authentication failed: Invalid credentials or expired account',
+      },
+      {
+        id: 'rad-act-4',
+        timestamp: '28 mins ago',
+        clientMac: '70:EF:00:81:4A:23',
+        username: 'dev-ops-service',
+        nasClientName: 'Aruba CX R&D Lab AP',
+        nasIp: '172.16.50.10',
+        protocol: 'PAP',
+        status: 'Access-Accept',
+        vlanId: 30,
+        reason: 'Service token authenticated',
+      },
+    ]);
     const initialEvents = component.radiusAuthActivity();
     expect(initialEvents.length).toBeGreaterThanOrEqual(4);
     expect(initialEvents[0].clientMac).toMatch(/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i);
@@ -1395,6 +1447,71 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   describe('SCRUM-25: User Groups & Group-to-App Permission Matrix', () => {
+    beforeEach(() => {
+      const rootId = component.directoryUsers()[0]?.id || 'usr-root';
+      component.dashboardService.directoryGroups.set([
+        {
+          id: 'grp-devops',
+          name: 'DevOps & Cloud Infrastructure',
+          description: 'Core engineering and infrastructure leads with production cloud access.',
+          department: 'Engineering',
+          email: 'devops-team@vanguard.security',
+          memberIds: [rootId],
+          appIds: ['aws-iam', 'github', 'datadog'],
+          policy: {
+            requireMfa: true,
+            mfaType: 'hardware_totp',
+            sessionDurationHours: 4,
+          },
+          createdAt: '2026-09-01T00:00:00.000Z',
+        },
+        {
+          id: 'grp-secops',
+          name: 'Security Operations (SecOps)',
+          description: 'Cybersecurity threat responders, SOC analysts, and incident handlers.',
+          department: 'Security Ops',
+          email: 'secops@vanguard.security',
+          memberIds: [rootId, 'johnroben.manayon31@gmail.com'],
+          appIds: ['jira', 'github', 'slack'],
+          policy: {
+            requireMfa: true,
+            mfaType: 'hardware_totp',
+            sessionDurationHours: 2,
+          },
+          createdAt: '2026-09-01T00:00:00.000Z',
+        },
+        {
+          id: 'grp-design',
+          name: 'Product & Design',
+          description: 'UI/UX product designers, design system engineers, and product managers.',
+          department: 'Engineering',
+          email: 'design-team@vanguard.security',
+          memberIds: [],
+          appIds: ['figma', 'slack', 'jira'],
+          policy: {
+            requireMfa: true,
+            mfaType: 'any',
+            sessionDurationHours: 8,
+          },
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+        {
+          id: 'grp-sales',
+          name: 'Sales & Marketing',
+          description: 'Enterprise account executives, marketing leads, and customer success specialists.',
+          department: 'Finance',
+          email: 'revenue-ops@vanguard.security',
+          memberIds: [],
+          appIds: ['salesforce', 'slack', 'google-workspace'],
+          policy: {
+            requireMfa: false,
+            mfaType: 'any',
+            sessionDurationHours: 12,
+          },
+          createdAt: '2026-09-03T00:00:00.000Z',
+        },
+      ]);
+    });
     it('should initialize default user groups with expected policy configurations', () => {
       const groups = component.directoryGroups();
       expect(groups.length).toBeGreaterThanOrEqual(4);
@@ -1564,6 +1681,26 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   describe('SCRUM-42: Admin Approval Workflow & Access Request Queue', () => {
+    beforeEach(() => {
+      component.dashboardService.appAccessRequests.set([
+        {
+          id: 'req-101',
+          userId: 'usr-analyst-1',
+          userName: 'Elena Rostova',
+          userEmail: 'elena.rostova@vanguard.security',
+          department: 'Security Ops',
+          role: 'SOC Analyst',
+          appName: 'Datadog Cloud SIEM',
+          protocol: 'SAML 2.0',
+          category: 'cloud',
+          icon: '📊',
+          launchUrl: 'https://app.datadoghq.com',
+          justification: 'Need access to inspect real-time firewall threat telemetry and incident event correlations.',
+          status: 'Pending Approval',
+          submittedAt: new Date().toISOString(),
+        },
+      ]);
+    });
     it('should filter access requests by search query and status badge', () => {
       component.setAccessRequestStatusFilter('all');
       expect(component.filteredAccessRequests().length).toBeGreaterThanOrEqual(1);
@@ -1581,8 +1718,7 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     it('should open Access Requests queue directly via sidebar navigation', () => {
       component.openAccessRequestsQueue();
       expect(component.dashboardService.viewMode()).toBe('admin');
-      expect(component.dashboardService.activeTab()).toBe('saml-oidc');
-      expect(component.dashboardService.samlSubTab()).toBe('access-requests');
+      expect(component.dashboardService.activeTab()).toBe('access-requests');
     });
 
     it('should approve an access request, assign SaaS app, and log audit event', () => {

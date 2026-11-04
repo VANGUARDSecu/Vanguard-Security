@@ -7,11 +7,8 @@ import { DashboardSidebar } from './components/sidebar/sidebar';
 import { AdminOverview } from './components/admin-overview/admin-overview';
 import { AdminDirectory } from './components/admin-directory/admin-directory';
 import { AdminSamlOidc } from './components/admin-saml-oidc/admin-saml-oidc';
-import { AdminCloudLdap } from './components/admin-cloud-ldap/admin-cloud-ldap';
-import { AdminCloudRadius } from './components/admin-cloud-radius/admin-cloud-radius';
+import { AdminAccessRequests } from './components/admin-access-requests/admin-access-requests';
 import { AdminAuditLogs } from './components/admin-audit-logs/admin-audit-logs';
-import { AdminWebhooks } from './components/admin-webhooks/admin-webhooks';
-import { AdminDeviceFleet } from './components/admin-device-fleet/admin-device-fleet';
 import { AdminSettings } from './components/admin-settings/admin-settings';
 import { UserMyApps } from './components/user-my-apps/user-my-apps';
 import { UserSecurity } from './components/user-security/user-security';
@@ -75,11 +72,8 @@ export type {
     AdminOverview,
     AdminDirectory,
     AdminSamlOidc,
-    AdminCloudLdap,
-    AdminCloudRadius,
+    AdminAccessRequests,
     AdminAuditLogs,
-    AdminWebhooks,
-    AdminDeviceFleet,
     AdminSettings,
     UserMyApps,
     UserSecurity,

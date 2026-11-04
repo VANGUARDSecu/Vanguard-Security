@@ -131,26 +131,82 @@ describe('DashboardHeader Component (SCRUM-28 Header Org Switcher)', () => {
     expect(upgradeBtn).toBeNull();
   });
 
-  it('should render the First-Timer Guide button and trigger openFirstTimerGuide on click (SCRUM-86)', () => {
-    const guideBtn = fixture.nativeElement.querySelector('.guide-btn-header');
-    expect(guideBtn).not.toBeNull();
+  it('should render Admin Console scope badge and enterprise switcher for Company Admin (SCRUM-150)', () => {
+    authService.currentUser.set({
+      id: 'usr-company-admin',
+      email: 'admin@acmecorp.com',
+      firstName: 'Bruce',
+      lastName: 'Wayne',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Wayne Enterprises',
+    });
+    fixture.detectChanges();
 
-    const openSpy = vi.spyOn(dashboardService, 'openFirstTimerGuide');
-    guideBtn.click();
-    expect(openSpy).toHaveBeenCalled();
+    const companyBadge = fixture.nativeElement.querySelector('.badge-company');
+    expect(companyBadge).toBeTruthy();
+    expect(companyBadge.textContent).toContain('Admin Console');
+
+    // Individual & Tenant badges and indicators must NOT be present
+    expect(fixture.nativeElement.querySelector('.badge-individual')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.badge-tenant')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.individual-vault-indicator')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.tenant-org-indicator')).toBeNull();
+
+    // Enterprise Org Switcher must be present for company admin
+    expect(fixture.nativeElement.querySelector('.org-switcher-container')).toBeTruthy();
   });
 
-  it('should display pulse indicator when first-timer guide is not completed (SCRUM-86)', () => {
-    dashboardService.firstTimerCompleted.set(false);
+  it('should render Personal Vault scope badge and indicator for Individual Account (SCRUM-150)', () => {
+    authService.currentUser.set({
+      id: 'usr-indiv-1',
+      email: 'clark@kent.io',
+      firstName: 'Clark',
+      lastName: 'Kent',
+      role: 'user',
+      accountType: 'individual',
+    });
     fixture.detectChanges();
 
-    const dot = fixture.nativeElement.querySelector('.guide-pulse-dot');
-    expect(dot).not.toBeNull();
+    const indivBadge = fixture.nativeElement.querySelector('.badge-individual');
+    expect(indivBadge).toBeTruthy();
+    expect(indivBadge.textContent).toContain('Personal Vault');
 
-    dashboardService.firstTimerCompleted.set(true);
+    const indivIndicator = fixture.nativeElement.querySelector('.individual-vault-indicator');
+    expect(indivIndicator).toBeTruthy();
+    expect(indivIndicator.textContent).toContain('Personal Vault');
+
+    // Company & Tenant badges must NOT be present
+    expect(fixture.nativeElement.querySelector('.badge-company')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.badge-tenant')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.tenant-org-indicator')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.org-switcher-container')).toBeNull();
+  });
+
+  it('should render User Portal scope badge and corporate directory indicator for Tenant Account (SCRUM-150)', () => {
+    authService.currentUser.set({
+      id: 'usr-tenant-1',
+      email: 'barry@waynecorp.com',
+      firstName: 'Barry',
+      lastName: 'Allen',
+      role: 'user',
+      accountType: 'company',
+      companyName: 'Wayne Enterprises',
+    });
     fixture.detectChanges();
 
-    const hiddenDot = fixture.nativeElement.querySelector('.guide-pulse-dot');
-    expect(hiddenDot).toBeNull();
+    const tenantBadge = fixture.nativeElement.querySelector('.badge-tenant');
+    expect(tenantBadge).toBeTruthy();
+    expect(tenantBadge.textContent).toContain('User Portal');
+
+    const tenantIndicator = fixture.nativeElement.querySelector('.tenant-org-indicator');
+    expect(tenantIndicator).toBeTruthy();
+    expect(tenantIndicator.textContent).toContain('Corporate Directory');
+
+    // Admin & Individual badges must NOT be present
+    expect(fixture.nativeElement.querySelector('.badge-company')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.badge-individual')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.individual-vault-indicator')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.org-switcher-container')).toBeNull();
   });
 });

@@ -339,7 +339,7 @@ export class SupabaseService {
   }
 
   async upsertUserAssignedApp(assignment: {
-    id: string;
+    id?: string;
     tenant_id: string;
     user_id: string;
     app_id: string;
@@ -413,12 +413,48 @@ export class SupabaseService {
         })
         .eq('id', id)
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw error;
       return data;
     } catch (e) {
       console.warn('Supabase: updateAccessRequestStatus exception:', e);
       return null;
+    }
+  }
+
+  async deleteUserAssignedApp(tenantId: string, userId: string, appId: string): Promise<boolean> {
+    try {
+      const { error } = await this.client
+        .from('user_assigned_apps')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('user_id', userId)
+        .eq('app_id', appId);
+      if (error) {
+        console.warn('Supabase: deleteUserAssignedApp notice:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('Supabase: deleteUserAssignedApp exception:', e);
+      return false;
+    }
+  }
+
+  async deleteAccessRequest(requestId: string): Promise<boolean> {
+    try {
+      const { error } = await this.client
+        .from('access_requests')
+        .delete()
+        .eq('id', requestId);
+      if (error) {
+        console.warn('Supabase: deleteAccessRequest notice:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn('Supabase: deleteAccessRequest exception:', e);
+      return false;
     }
   }
 

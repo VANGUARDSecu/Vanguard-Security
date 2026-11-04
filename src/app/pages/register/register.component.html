@@ -31,7 +31,7 @@
           </svg>
         </div>
         <h2 class="card-title">Create Account</h2>
-        <p class="card-subtitle">Set up your organization's secure directory & vault</p>
+        <p class="card-subtitle">{{ accountType() === 'individual' ? 'Set up your personal password vault, 2FA authenticator & credentials' : 'Set up your organization\'s secure enterprise directory & SSO' }}</p>
       </div>
 
       <div class="header-divider"></div>
@@ -87,7 +87,7 @@
               <div class="account-type-badge">🏢</div>
               <div class="account-type-info">
                 <strong class="account-type-name">Company / Organization</strong>
-                <span class="account-type-desc">Enterprise directory, SSO, SAML, RADIUS & LDAP</span>
+                <span class="account-type-desc">Enterprise directory, Single Sign-On (OIDC/OAuth 2.0), team applications & zero-trust access control</span>
               </div>
               <span class="type-check-indicator" *ngIf="accountType() === 'company'">✓</span>
             </button>
@@ -271,7 +271,7 @@
             </div>
             <div class="criteria-item" [class.met]="hasSpecial">
               <span class="criteria-icon">{{ hasSpecial ? '✓' : '○' }}</span>
-              <span>Special letter (!@#$...)</span>
+              <span>Special character (!@#$%...)</span>
             </div>
           </div>
 

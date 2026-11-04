@@ -1034,3 +1034,268 @@
   border-color: #94a3b8;
   color: #ffffff;
 }
+
+/* Retry Push Challenge Button */
+.push-retry-row {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.retry-push-btn {
+  width: 100%;
+  padding: 13px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%);
+  border: 1.5px solid rgba(34, 211, 238, 0.5);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.retry-push-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.25) 0%, rgba(59, 130, 246, 0.25) 100%);
+  border-color: #22d3ee;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.3);
+  transform: translateY(-1px);
+}
+
+.retry-push-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.retry-push-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.retry-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.retry-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(34, 211, 238, 0.25);
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #22d3ee;
+  margin-left: auto;
+}
+
+.retry-exhausted-notice {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.exhausted-icon {
+  font-size: 16px;
+}
+
+/* ==========================================================================
+   Zero-Trust SSO Access Governance Approval Notice (SCRUM-160)
+   ========================================================================== */
+
+.sso-approval-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  padding: 8px 4px;
+  width: 100%;
+}
+
+.sso-approval-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.pulse-dot-amber {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  animation: pulseAmber 1.8s infinite ease-in-out;
+}
+
+@keyframes pulseAmber {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.sso-approval-icon-box {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(245, 158, 11, 0.25) 0%, rgba(245, 158, 11, 0.05) 70%);
+  border: 1.5px solid rgba(245, 158, 11, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0 0;
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.2);
+}
+
+.governance-icon {
+  font-size: 32px;
+}
+
+.sso-approval-title {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+.sso-approval-text {
+  color: #cbd5e1;
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 400px;
+}
+
+.sso-approval-status-card {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.status-label {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.status-val {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.sso-approval-pill {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+  text-align: left;
+  line-height: 1.45;
+}
+
+.sso-approval-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.sso-return-btn {
+  width: 100%;
+  height: 46px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.35);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.sso-return-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(217, 119, 6, 0.5);
+  filter: brightness(1.06);
+}
+
+.sso-return-btn:active {
+  transform: translateY(0);
+}
+
+.sso-dashboard-link {
+  color: #93c5fd;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+  padding: 8px;
+  transition: color 0.2s ease;
+}
+
+.sso-dashboard-link:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}

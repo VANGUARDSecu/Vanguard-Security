@@ -2,7 +2,7 @@ export interface ProtocolStatus {
   name: string;
   type: string;
   port: string;
-  status: 'online' | 'standby' | 'healthy';
+  status: 'online' | 'standby' | 'healthy' | 'offline';
   description: string;
   badge: string;
   certExpiry?: string;
@@ -14,7 +14,7 @@ export interface SaaSApp {
   category: 'cloud' | 'developer' | 'collaboration' | 'custom';
   description: string;
   icon: string;
-  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth';
+  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth' | 'Extension Autofill' | string;
   launchUrl: string;
   assigned: boolean;
   inheritedViaGroup?: string;
@@ -22,6 +22,8 @@ export interface SaaSApp {
   isIntegrated?: boolean;
   connectedUrl?: string;
   connectionStatus?: string;
+  targetDomain?: string;
+  requestedUsername?: string;
 }
 
 export interface UserConnectedApp {
@@ -44,16 +46,22 @@ export type AccessRequestStatus = 'Pending Approval' | 'Approved' | 'Rejected';
 
 export interface AppAccessRequest {
   id: string;
+  tenantId?: string;
   userId: string;
   userName: string;
   userEmail: string;
   department: string;
   role: string;
   appName: string;
-  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth';
+  protocol: 'SAML 2.0' | 'OIDC' | 'OAuth 2.0' | 'Web Auth' | 'Extension Autofill' | string;
   category: 'cloud' | 'developer' | 'collaboration' | 'custom';
   icon?: string;
   launchUrl?: string;
+  targetDomain?: string;
+  requestedUsername?: string;
+  urgency?: 'Low' | 'Standard' | 'Critical';
+  duration?: 'Permanent' | '30 Days' | '90 Days' | 'Temporary' | string;
+  zeroKnowledgeProtected?: boolean;
   justification: string;
   status: AccessRequestStatus;
   submittedAt: string;
@@ -163,6 +171,14 @@ export interface TenantAuditEvent {
   threatIndicator?: AuditThreatIndicator;
   isoTimestamp?: string;
   rawPayload?: Record<string, any>;
+  /**
+   * SCRUM-133: provenance of this record. 'client-ui' events are generated in
+   * the browser for immediate UX feedback and are NOT authoritative evidence;
+   * authoritative records come from the server ('server'). The UI must label
+   * client-ui events as local/unconfirmed.
+   */
+  source?: 'client-ui' | 'server';
+  authoritative?: boolean;
 }
 
 

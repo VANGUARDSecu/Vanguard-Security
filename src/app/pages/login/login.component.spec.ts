@@ -74,13 +74,22 @@ describe('LoginComponent', () => {
     expect(component.notification()).toBeNull();
   });
 
-  it('should parse SSO query params and set clientDisplayName', () => {
+  it('should show the client name from the server registry, falling back to the client id', () => {
     component.ssoParams.set({
       client_id: 'vanguard-dummy-portal',
       redirect_uri: 'http://localhost:4201/auth/callback',
       state: 'test_state_123',
     });
-    expect(component.clientDisplayName()).toBe('Acme Enterprise Portal');
+    // No name from the server yet: show the client id, never a hard-coded alias.
+    expect(component.clientDisplayName()).toBe('vanguard-dummy-portal');
+
+    component.ssoParams.set({
+      client_id: 'vanguard-dummy-portal',
+      client_name: 'Acme Dummy Portal (Angular SPA)',
+      redirect_uri: 'http://localhost:4201/auth/callback',
+      state: 'test_state_123',
+    });
+    expect(component.clientDisplayName()).toBe('Acme Dummy Portal (Angular SPA)');
 
     component.ssoParams.set({
       client_id: 'custom-partner-app',
@@ -132,5 +141,33 @@ describe('LoginComponent', () => {
     });
 
     expect(component.isAccountMismatch()).toBe(false);
+  });
+
+  it('should include pending administrator review error description on cancel when ssoApprovalRequired is true', () => {
+    component.ssoParams.set({
+      client_id: 'vanguard-dummy-portal',
+      redirect_uri: 'http://localhost:4201/auth/callback',
+      state: 'state_xyz',
+    });
+    component.ssoApprovalRequired.set(true);
+
+    const originalLocation = window.location;
+    delete (window as any).location;
+    (window as any).location = { href: '' };
+
+    component.onCancelSso();
+    expect(window.location.href).toContain('http://localhost:4201/auth/callback');
+    expect(window.location.href).toContain('error=access_denied');
+    expect(window.location.href).toContain('Access+approval+pending+administrator+review');
+    expect(window.location.href).toContain('state=state_xyz');
+
+    (window as any).location = originalLocation;
+  });
+
+  it('should activate ssoApprovalRequired signal when handling zero-trust approval error', () => {
+    expect(component.ssoApprovalRequired()).toBe(false);
+    (component as any).handleApprovalRequired(new Error('Zero-Trust Access Governance: Administrative approval is required before corporate account can access'));
+    expect(component.ssoApprovalRequired()).toBe(true);
+    expect(component.ssoApprovalMessage()).toContain('Zero-Trust Access Governance');
   });
 });

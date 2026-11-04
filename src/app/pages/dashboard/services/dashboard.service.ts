@@ -88,21 +88,25 @@ export class DashboardService {
   readonly userRole = this.authService.userRole;
   readonly isAdmin = this.authService.isAdmin;
 
-  // Account Type Detection (Individual vs Company)
+  // Account Type Detection (Individual vs Company / Tenant)
   readonly accountType = computed<'individual' | 'company'>(() => {
     const u = this.user();
-    return (u?.accountType || (u?.user_metadata as any)?.['account_type']) === 'individual' ? 'individual' : 'company';
+    const meta = (u?.user_metadata as any) || {};
+    const raw = u?.accountType || meta['account_type'];
+    if (raw === 'individual') return 'individual';
+    if (raw === 'company' || meta['tenant_id'] || u?.role === 'admin') return 'company';
+    return 'company';
   });
   readonly isIndividual = computed<boolean>(() => this.accountType() === 'individual');
 
   // View mode switcher: 'admin' (Admin Console) vs 'user' (User Portal)
-  readonly viewMode = signal<'admin' | 'user'>('admin');
+  readonly viewMode = signal<'admin' | 'user'>(this.isIndividual() || !this.isAdmin() ? 'user' : 'admin');
 
   // Search input in top header
   searchQuery = '';
 
   // Active navigation tab
-  readonly activeTab = signal<string>('overview');
+  readonly activeTab = signal<string>(this.isIndividual() ? 'personal-vault' : (this.isAdmin() ? 'overview' : 'my-apps'));
 
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
@@ -117,30 +121,35 @@ export class DashboardService {
   readonly directorySearch = signal<string>('');
 
   private initDirectoryUsers(): DirectoryUser[] {
-    const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (stored && stored.length > 0) {
-      const seen = new Set<string>();
-      const now = Date.now();
-      const updated = stored
-        .filter((u) => {
-          const email = u.email?.toLowerCase().trim();
-          if (!email || seen.has(email)) return false;
-          seen.add(email);
-          return true;
-        })
-        .map((u) => {
-          if (u.accountStatus === 'Pending' && u.expiresAt) {
-            const exp = new Date(u.expiresAt).getTime();
-            if (exp < now) {
-              return { ...u, accountStatus: 'Expired' as const };
-            }
-          }
-          return u;
-        });
-      return updated;
-    }
-
     const u = this.authService.currentUser();
+    const userEmail = u?.email?.toLowerCase().trim();
+
+    const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
+    if (stored && stored.length > 0 && userEmail) {
+      // SCRUM-153: Verify that stored users belong to the current authenticated account
+      const currentUserInStore = stored.some((usr) => usr.email?.toLowerCase().trim() === userEmail);
+      if (currentUserInStore) {
+        const seen = new Set<string>();
+        const now = Date.now();
+        const updated = stored
+          .filter((usr) => {
+            const email = usr.email?.toLowerCase().trim();
+            if (!email || seen.has(email)) return false;
+            seen.add(email);
+            return true;
+          })
+          .map((usr) => {
+            if (usr.accountStatus === 'Pending' && usr.expiresAt) {
+              const exp = new Date(usr.expiresAt).getTime();
+              if (exp < now) {
+                return { ...usr, accountStatus: 'Expired' as const };
+              }
+            }
+            return usr;
+          });
+        return updated;
+      }
+    }
     if (u && u.email) {
       const name = u.firstName && u.lastName
         ? `${u.firstName} ${u.lastName}`
@@ -212,73 +221,15 @@ export class DashboardService {
   private initDirectoryGroups(): DirectoryGroup[] {
     const stored = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter(
+        (g) => !['grp-devops', 'grp-secops', 'grp-design', 'grp-sales'].includes(g.id)
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_directory_groups', genuine);
+      }
+      return genuine;
     }
-    const users = this.directoryUsers();
-    const rootId = users[0]?.id || 'usr-root';
-
-    return [
-      {
-        id: 'grp-devops',
-        name: 'DevOps & Cloud Infrastructure',
-        description: 'Core engineering and infrastructure leads with production cloud access.',
-        department: 'Engineering',
-        email: 'devops-team@vanguard.security',
-        memberIds: [rootId],
-        appIds: ['aws-iam', 'github', 'datadog'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'hardware_totp',
-          sessionDurationHours: 4,
-        },
-        createdAt: '2026-09-01T00:00:00.000Z',
-      },
-      {
-        id: 'grp-secops',
-        name: 'Security Operations (SecOps)',
-        description: 'Cybersecurity threat responders, SOC analysts, and incident handlers.',
-        department: 'Security Ops',
-        email: 'secops@vanguard.security',
-        memberIds: [rootId, 'johnroben.manayon31@gmail.com'],
-        appIds: ['jira', 'github', 'slack'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'hardware_totp',
-          sessionDurationHours: 2,
-        },
-        createdAt: '2026-09-01T00:00:00.000Z',
-      },
-      {
-        id: 'grp-design',
-        name: 'Product & Design',
-        description: 'UI/UX product designers, design system engineers, and product managers.',
-        department: 'Engineering',
-        email: 'design-team@vanguard.security',
-        memberIds: [],
-        appIds: ['figma', 'slack', 'jira'],
-        policy: {
-          requireMfa: true,
-          mfaType: 'any',
-          sessionDurationHours: 8,
-        },
-        createdAt: '2026-09-02T00:00:00.000Z',
-      },
-      {
-        id: 'grp-sales',
-        name: 'Sales & Marketing',
-        description: 'Enterprise account executives, marketing leads, and customer success specialists.',
-        department: 'Finance',
-        email: 'revenue-ops@vanguard.security',
-        memberIds: [],
-        appIds: ['salesforce', 'slack', 'google-workspace'],
-        policy: {
-          requireMfa: false,
-          mfaType: 'any',
-          sessionDurationHours: 12,
-        },
-        createdAt: '2026-09-03T00:00:00.000Z',
-      },
-    ];
+    return [];
   }
 
   readonly directoryGroups = signal<DirectoryGroup[]>(this.initDirectoryGroups());
@@ -514,6 +465,10 @@ export class DashboardService {
       timestamp: timeStr,
       isoTimestamp: isoStr,
       actor,
+      // SCRUM-133: this is a client-generated UI event for immediate feedback;
+      // it is NOT authoritative. The authoritative trail is the server audit log.
+      source: 'client-ui',
+      authoritative: false,
       target,
       protocol,
       clientIp: options?.clientIp || '127.0.0.1 (Local)',
@@ -575,6 +530,48 @@ export class DashboardService {
     }
   }
 
+  /** Authoritative server-generated audit events for the signed-in principal. */
+  readonly serverAuditEvents = signal<TenantAuditEvent[]>([]);
+
+  /**
+   * SCRUM-133: load the authoritative audit trail from the backend
+   * (`GET /auth/audit-logs`, scoped server-side to the principal). These are
+   * tagged source:'server' / authoritative:true to distinguish them from the
+   * local client-ui feedback events.
+   */
+  loadServerAuditLogs(): void {
+    if (!this.isBrowser) return;
+    this.http
+      .get<any[]>(`${this.apiBase}/auth/audit-logs`)
+      .subscribe({
+        next: (rows) => {
+          const mapped: TenantAuditEvent[] = (rows || []).map((r) => ({
+            id: r.id || 'srv-' + Math.random().toString(36).slice(2),
+            action: r.metadata?.action || r.status,
+            timestamp: r.timestamp,
+            isoTimestamp: r.timestamp,
+            actor: r.actorEmail,
+            source: 'server',
+            authoritative: true,
+            target: r.applicationName || r.clientId || '—',
+            protocol: r.protocol || 'Web Portal',
+            clientIp: r.ipAddress || '—',
+            location: r.location || '—',
+            device: r.device || '—',
+            status: r.status === 'SUCCESS' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
+            riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
+            eventType: 'SSO_LOGIN',
+            severity: r.severity || 'INFO',
+            requestId: r.id || '',
+          }));
+          this.serverAuditEvents.set(mapped);
+        },
+        error: () => {
+          // Leave prior authoritative events; do not fabricate on failure.
+        },
+      });
+  }
+
   // ==========================================
   // PHASE 3: Vault Settings & Killswitch State
   // ==========================================
@@ -587,6 +584,15 @@ export class DashboardService {
   readonly sessionTimeoutMinutes = signal<number>(60);
   readonly showGlobalKillswitchModal = signal<boolean>(false);
   readonly globalKillswitchSuccess = signal<boolean>(false);
+  readonly globalKillswitchPending = signal<boolean>(false);
+  readonly globalKillswitchResult = signal<{
+    totalMembers: number;
+    revoked: number;
+    failed: number;
+    maxResidualAccessSeconds: number;
+    notCovered: string[];
+  } | null>(null);
+  readonly globalKillswitchError = signal<string | null>(null);
 
   // ==========================================
   // PHASE 4: SAML 2.0 & OIDC Web Federation State (Dynamic) & SCRUM-42 Approval Queue
@@ -599,62 +605,19 @@ export class DashboardService {
   private initAppAccessRequests(): AppAccessRequest[] {
     const stored = this.loadStored<AppAccessRequest[]>('vanguard_access_requests', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter(
+        (r) =>
+          !['req-101', 'req-102', 'req-103'].includes(r.id) &&
+          r.userEmail !== 'elena.rostova@vanguard.security' &&
+          r.userEmail !== 'marcus.vance@vanguard.security' &&
+          r.userEmail !== 'sarah.jenkins@vanguard.security'
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_access_requests', genuine);
+      }
+      return genuine;
     }
-    // Seed realistic initial enterprise access requests
-    return [
-      {
-        id: 'req-101',
-        userId: 'usr-analyst-1',
-        userName: 'Elena Rostova',
-        userEmail: 'elena.rostova@vanguard.security',
-        department: 'Security Ops',
-        role: 'SOC Analyst',
-        appName: 'Datadog Cloud SIEM',
-        protocol: 'SAML 2.0',
-        category: 'cloud',
-        icon: '📊',
-        launchUrl: 'https://app.datadoghq.com',
-        justification: 'Need access to inspect real-time firewall threat telemetry and incident event correlations.',
-        status: 'Pending Approval',
-        submittedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-      },
-      {
-        id: 'req-102',
-        userId: 'usr-dev-2',
-        userName: 'Marcus Vance',
-        userEmail: 'marcus.vance@vanguard.security',
-        department: 'Engineering',
-        role: 'Senior Backend Engineer',
-        appName: 'Figma Enterprise',
-        protocol: 'SAML 2.0',
-        category: 'collaboration',
-        icon: '🎨',
-        launchUrl: 'https://www.figma.com/login',
-        justification: 'Reviewing and implementing UX workflow specifications for zero-trust authorization gates.',
-        status: 'Pending Approval',
-        submittedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-      },
-      {
-        id: 'req-103',
-        userId: 'usr-sales-3',
-        userName: 'Sarah Jenkins',
-        userEmail: 'sarah.jenkins@vanguard.security',
-        department: 'Finance',
-        role: 'Enterprise Account Executive',
-        appName: 'Salesforce Enterprise SSO',
-        protocol: 'SAML 2.0',
-        category: 'cloud',
-        icon: '☁️',
-        launchUrl: 'https://login.salesforce.com',
-        justification: 'Customer relationship tracking and enterprise NDA renewal pipeline management.',
-        status: 'Approved',
-        submittedAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-        reviewedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-        reviewedBy: 'Vanguard Administrator',
-        adminNotes: 'Approved based on sales department license allocation.',
-      },
-    ];
+    return [];
   }
 
   readonly appAccessRequests = signal<AppAccessRequest[]>(this.initAppAccessRequests());
@@ -663,6 +626,8 @@ export class DashboardService {
   readonly selectedAccessRequestForReject = signal<AppAccessRequest | null>(null);
   readonly showRejectModal = signal<boolean>(false);
   rejectAdminNoteInput = '';
+  readonly isAccessRequestsLoading = signal<boolean>(false);
+  private accessRequestsChannel: any = null;
 
   readonly pendingAccessRequests = computed(() => {
     return this.appAccessRequests().filter((r) => r.status === 'Pending Approval');
@@ -674,11 +639,13 @@ export class DashboardService {
     const u = this.user();
     const email = u?.email?.toLowerCase();
     const uid = u?.id;
+    // SCRUM-159: Exclude approved requests so only pending review or non-approved requests appear in requested applications
     return this.appAccessRequests().filter(
       (r) =>
-        (email && r.userEmail.toLowerCase() === email) ||
-        (uid && r.userId === uid) ||
-        r.userEmail.includes('@vanguard.security')
+        r.status !== 'Approved' &&
+        ((email && r.userEmail.toLowerCase() === email) ||
+          (uid && r.userId === uid) ||
+          (!email && !uid && r.userEmail.includes('@vanguard.security')))
     );
   });
 
@@ -1079,55 +1046,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly rotateRadiusSecretSuccess = signal<boolean>(false);
 
   // Recent 802.1X Authentication Activity Stream (SCRUM-23)
-  readonly radiusAuthActivity = signal<RadiusAuthActivityEvent[]>([
-    {
-      id: 'rad-act-1',
-      timestamp: '2 mins ago',
-      clientMac: 'D4:61:9D:3A:8B:01',
-      username: 'alex.vanguard@vanguard.security',
-      nasClientName: 'Main HQ Wi-Fi - UniFi AP',
-      nasIp: '192.168.1.50',
-      protocol: 'PEAP-MSCHAPv2',
-      status: 'Access-Accept',
-      vlanId: 10,
-      reason: 'Credentials verified against Supabase Vault',
-    },
-    {
-      id: 'rad-act-2',
-      timestamp: '6 mins ago',
-      clientMac: 'BC:D0:74:11:F2:A9',
-      username: 'sarah.connor@vanguard.security',
-      nasClientName: 'Cisco Meraki MR Branch Gateway',
-      nasIp: '10.200.0.1',
-      protocol: 'EAP-TLS',
-      status: 'Access-Accept',
-      vlanId: 20,
-      reason: 'Valid X.509 client certificate presented',
-    },
-    {
-      id: 'rad-act-3',
-      timestamp: '14 mins ago',
-      clientMac: 'F0:18:98:C3:4D:7E',
-      username: 'unknown_contractor',
-      nasClientName: 'Main HQ Wi-Fi - UniFi AP',
-      nasIp: '192.168.1.50',
-      protocol: 'MS-CHAPv2',
-      status: 'Access-Reject',
-      reason: 'Authentication failed: Invalid credentials or expired account',
-    },
-    {
-      id: 'rad-act-4',
-      timestamp: '28 mins ago',
-      clientMac: '70:EF:00:81:4A:23',
-      username: 'dev-ops-service',
-      nasClientName: 'Aruba CX R&D Lab AP',
-      nasIp: '172.16.50.10',
-      protocol: 'PAP',
-      status: 'Access-Accept',
-      vlanId: 30,
-      reason: 'Service token authenticated',
-    },
-  ]);
+  readonly radiusAuthActivity = signal<RadiusAuthActivityEvent[]>([]);
 
   readonly radiusActivityFilter = signal<'all' | 'Access-Accept' | 'Access-Reject'>('all');
 
@@ -1158,89 +1077,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private initFleetDevices(): EnrolledDevice[] {
     const stored = this.loadStored<EnrolledDevice[]>('vanguard_fleet_devices', []);
     if (stored && stored.length > 0) {
-      return stored;
+      const genuine = stored.filter((d) => !d.id.startsWith('dev-fleet-'));
+      if (genuine.length !== stored.length) {
+        this.saveStored('vanguard_fleet_devices', genuine);
+      }
+      return genuine;
     }
-    const name = this.resolveDisplayName();
-    const email = this.user()?.email || 'admin@vanguard.security';
-    const dept = 'Engineering';
-
-    const baseDevices: EnrolledDevice[] = [
-      {
-        id: 'dev-fleet-1',
-        name: `${name}'s MacBook Pro 16"`,
-        model: 'Apple MacBook Pro (M3 Max)',
-        type: 'macOS Workstation',
-        osVersion: 'macOS Sequoia 15.1',
-        ownerName: name,
-        ownerEmail: email,
-        department: dept,
-        biometricType: 'Touch ID',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-01T09:00:00Z',
-        lastSync: '2 minutes ago',
-      },
-      {
-        id: 'dev-fleet-2',
-        name: `${name}'s iPhone 16 Pro`,
-        model: 'Apple iPhone 16 Pro (A3293)',
-        type: 'Mobile iOS',
-        osVersion: 'iOS 18.2',
-        ownerName: name,
-        ownerEmail: email,
-        department: dept,
-        biometricType: 'Face ID',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-02T11:15:00Z',
-        lastSync: '5 minutes ago',
-      },
-    ];
-
-    const users = this.directoryUsers();
-    const colleague = users.find((u) => u.email !== email);
-    if (colleague) {
-      baseDevices.push({
-        id: 'dev-fleet-3',
-        name: `${colleague.name}'s ThinkPad X1 Carbon`,
-        model: 'Lenovo ThinkPad X1 Gen 12',
-        type: 'Windows Workstation',
-        osVersion: 'Windows 11 Pro 24H2',
-        ownerName: colleague.name,
-        ownerEmail: colleague.email,
-        department: colleague.department || 'Security Ops',
-        biometricType: 'Windows Hello',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: true,
-        complianceStatus: 'Compliant',
-        enrolledAt: '2026-09-05T08:30:00Z',
-        lastSync: '18 minutes ago',
-      });
-      baseDevices.push({
-        id: 'dev-fleet-4',
-        name: `${colleague.name}'s Pixel 9 Pro`,
-        model: 'Google Pixel 9 Pro',
-        type: 'Mobile Android',
-        osVersion: 'Android 15 (AP2A)',
-        ownerName: colleague.name,
-        ownerEmail: colleague.email,
-        department: colleague.department || 'Security Ops',
-        biometricType: 'Fingerprint',
-        diskEncrypted: true,
-        jailbroken: false,
-        edrActive: false,
-        complianceStatus: 'Warning',
-        enrolledAt: '2026-09-08T14:40:00Z',
-        lastSync: '1 hour ago',
-      });
-    }
-
-    return baseDevices;
+    return [];
   }
 
   readonly userDevices = signal<EnrolledDevice[]>(
@@ -1301,6 +1144,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly showRequestAppModal = signal<boolean>(false);
   requestedAppName = '';
   requestAppJustification = '';
+  requestAppDeliveryMode: 'sso' | 'extension' = 'extension';
+  requestAppCategory: SaaSApp['category'] = 'cloud';
+  requestAppProtocol: string = 'Extension Autofill';
+  requestAppIcon: string = '🚀';
+  requestAppUrl: string = '';
+  requestTargetDomain: string = '';
+  requestedUsername: string = '';
+  requestAppUrgency: 'Low' | 'Standard' | 'Critical' = 'Standard';
+  requestAppDuration: string = 'Permanent';
+  readonly requestAppError = signal<string | null>(null);
   readonly requestAppSuccess = signal<boolean>(false);
 
   // SCRUM-52: Personal Application Bookmarks & Launcher (Zero Hardcoded Initial State)
@@ -1329,8 +1182,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.apps.set([]);
       return;
     }
+    // SCRUM-131: identity comes from the bearer token (auth interceptor); the
+    // backend ignores any userId param (SCRUM-123).
     this.http
-      .get<any[]>(`${this.apiBase}/apps/my`, { params: { userId } })
+      .get<any[]>(`${this.apiBase}/apps/my`)
       .subscribe({
         next: (rows) => {
           const mapped: SaaSApp[] = (rows || []).map((r) => ({
@@ -1362,8 +1217,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     app: Partial<SaaSApp> & { appId: string; name: string },
     target: { userId?: string; all?: boolean },
   ): Observable<{ assigned: number }> {
-    const u = this.authService.currentUser();
-    const userId = u?.id || (u?.user_metadata as any)?.['sub'];
+    // SCRUM-131: admin identity is derived from the bearer token server-side.
     return this.http.post<{ assigned: number }>(
       `${this.apiBase}/apps/assign`,
       {
@@ -1376,17 +1230,45 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         target: target.all ? 'all' : 'user',
         userId: target.all ? undefined : target.userId,
       },
-      { params: { userId: userId || '' } },
     );
   }
 
   // Active apps source: personal apps when in personal workspace, company apps when in organization
-  // SCRUM-58: Strict deduplication ensuring no application ever appears twice
+  // SCRUM-58 & SCRUM-159: Strict deduplication ensuring no application ever appears twice,
+  // and automatically including access requests that have been approved by administrators.
   readonly activeAppsList = computed<SaaSApp[]>(() => {
     const source = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
     const seen = new Set<string>();
     const deduped: SaaSApp[] = [];
-    for (const app of source) {
+
+    // SCRUM-159: Also include any approved access requests for the logged-in user in company workspace
+    const approvedRequests: SaaSApp[] = !this.isPersonalWorkspace()
+      ? this.appAccessRequests()
+          .filter((r) => {
+            if (r.status !== 'Approved') return false;
+            const u = this.user();
+            const email = u?.email?.toLowerCase();
+            const uid = u?.id;
+            return (
+              (email && r.userEmail?.toLowerCase() === email) ||
+              (uid && r.userId === uid) ||
+              (!email && !uid && r.userEmail?.includes('@vanguard.security'))
+            );
+          })
+          .map((r) => ({
+            id: r.id,
+            name: r.appName,
+            category: (r.category as SaaSApp['category']) || 'cloud',
+            description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved access)`,
+            icon: r.icon || '🚀',
+            protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
+            launchUrl: r.launchUrl || 'https://vanguard.security',
+            assigned: true,
+            status: 'Approved',
+          }))
+      : [];
+
+    for (const app of [...source, ...approvedRequests]) {
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
@@ -1437,48 +1319,57 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   private initConnectedApps(): UserConnectedApp[] {
-    const stored = this.loadStored<UserConnectedApp[]>('vanguard_connected_apps', []);
+    const email = this.user()?.email?.toLowerCase().trim();
+    if (!email) return [];
+    const stored = this.loadStored<UserConnectedApp[]>(`vanguard_connected_apps_${email}`, []);
     if (stored && stored.length > 0) {
-      return this.deduplicateConnectedAppsList(stored);
+      const genuine = stored.filter(
+        (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
+      );
+      if (genuine.length !== stored.length) {
+        this.saveStored(`vanguard_connected_apps_${email}`, genuine);
+      }
+      return this.deduplicateConnectedAppsList(genuine);
     }
-    return [
-      {
-        id: 'conn-dummy-portal',
-        clientId: 'vanguard-dummy-portal',
-        clientName: 'Acme Dummy Web',
-        protocol: 'OpenID Connect 1.0 (PKCE)',
-        scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
-        redirectUri: 'http://localhost:4201/auth/callback',
-        originUrl: 'http://localhost:4201',
-        status: 'Connected',
-        connectedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        lastActiveAt: 'Active Session',
-        icon: '🌐',
-        description: 'Single-page web portal connected to your Vanguard Security account via OpenID Connect 1.0 PKCE authentication.',
-      },
-    ];
+    return [];
   }
 
   readonly connectedApps = signal<UserConnectedApp[]>(this.initConnectedApps());
 
   readonly activeConnectedApps = computed<UserConnectedApp[]>(() => {
-    const active = this.connectedApps().filter(
-      (app) => app.status === 'Connected' || app.status === 'Active'
-    );
+    const currentEmail = this.user()?.email?.toLowerCase().trim();
+    const active = this.connectedApps().filter((app) => {
+      const isStatusActive = app.status === 'Connected' || app.status === 'Active';
+      if (!isStatusActive) return false;
+      // If userEmail is 'all', filter out global seed mocks
+      if (app.userEmail === 'all') return false;
+      // If userEmail is specified on the app, ensure it belongs to the current user
+      if (app.userEmail && currentEmail) {
+        return app.userEmail.toLowerCase().trim() === currentEmail;
+      }
+      return true;
+    });
     return this.deduplicateConnectedAppsList(active);
   });
 
   fetchConnectedApps(): void {
-    const email = this.user()?.email;
+    const email = this.user()?.email?.toLowerCase().trim();
+    if (!email) {
+      this.connectedApps.set([]);
+      return;
+    }
     this.authService.getConnectedApps(email).subscribe({
       next: (res) => {
-        if (res.success && res.connectedApps && res.connectedApps.length > 0) {
+        if (res.success && res.connectedApps) {
+          const userSpecific = (res.connectedApps || []).filter(
+            (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
+          );
           const merged = this.deduplicateConnectedAppsList([
-            ...res.connectedApps,
-            ...this.connectedApps(),
+            ...userSpecific,
+            ...this.connectedApps().filter((a) => !a.userEmail || a.userEmail.toLowerCase().trim() === email),
           ]);
           this.connectedApps.set(merged);
-          this.saveStored('vanguard_connected_apps', this.connectedApps());
+          this.saveStored(`vanguard_connected_apps_${email}`, merged);
         }
       },
       error: () => {},
@@ -1488,14 +1379,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   disconnectApp(clientId: string): void {
     const target = this.connectedApps().find((a) => a.clientId === clientId);
     const targetOrigin = target ? (target.originUrl || '').toLowerCase().trim().replace(/\/$/, '') : '';
-    const email = this.user()?.email;
+    const email = this.user()?.email?.toLowerCase().trim();
     this.connectedApps.update((apps) =>
       apps.filter((a) => {
         const origin = (a.originUrl || '').toLowerCase().trim().replace(/\/$/, '');
         return a.clientId !== clientId && (!targetOrigin || origin !== targetOrigin);
       })
     );
-    this.saveStored('vanguard_connected_apps', this.connectedApps());
+    if (email) {
+      this.saveStored(`vanguard_connected_apps_${email}`, this.connectedApps());
+    }
 
     this.authService.disconnectConnectedApp(clientId, email).subscribe({
       next: () => {},
@@ -1595,37 +1488,36 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // Protocol Gateway status items
   readonly protocols: ProtocolStatus[] = [
     {
-      name: 'SAML 2.0 Web SSO',
-      type: 'Identity Provider (IdP)',
-      port: 'HTTPS (443)',
-      status: 'healthy',
-      description: 'Signed XML assertions for SaaS web applications (AWS, Slack, GitHub, Jira).',
-      badge: 'Active',
-      certExpiry: '365 days remaining',
-    },
-    {
       name: 'OpenID Connect (OIDC)',
       type: 'OAuth 2.0 / JWT Issuer',
       port: 'HTTPS (443)',
       status: 'healthy',
       description: 'Discovery & JWKS token authentication for cloud services and mobile clients.',
-      badge: 'Active',
+      badge: 'Active (Production)',
+    },
+    {
+      name: 'SAML 2.0 Web SSO',
+      type: 'Identity Provider (IdP)',
+      port: 'HTTPS (443)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Production endpoint returns 404.',
+      badge: 'Deferred (PRD §3)',
     },
     {
       name: 'Cloud LDAP Directory',
       type: 'Directory Bind Endpoint',
       port: 'LDAPS (636)',
-      status: 'online',
-      description: 'Secure TLS directory service for legacy NAS storage and Linux server fleets.',
-      badge: 'Online (TLS 1.3)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
+      badge: 'Deferred (PRD §3)',
     },
     {
       name: 'Cloud RADIUS Gateway',
       type: 'Network Access (802.1X)',
       port: 'UDP (1812 / 1813)',
-      status: 'online',
-      description: 'Network-layer authentication for corporate WPA3 Enterprise Wi-Fi and VPN gateways.',
-      badge: 'Active (Port 1812)',
+      status: 'offline',
+      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
+      badge: 'Deferred (PRD §3)',
     },
   ];
 
@@ -1656,11 +1548,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // SCRUM-28: Multi-Tenant Organizations & White-Label Branding State
   // ==========================================
   private initOrganizations(): TenantOrganization[] {
-    const stored = this.loadStored<TenantOrganization[]>('vanguard_organizations', []);
-    if (stored && stored.length > 0) {
-      return stored;
-    }
-    const company = this.user()?.companyName || 'Vanguard Security Systems';
+    const u = this.user();
+    const company = u?.companyName || 'Vanguard Security Systems';
     const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'vanguard-corp';
     const initialOrg: TenantOrganization = {
       id: 'org_root',
@@ -1668,11 +1557,30 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       slug: slug,
       tier: 'Enterprise',
       domain: `${slug}.security`,
-      primaryContactEmail: this.user()?.email || 'admin@vanguard.security',
+      primaryContactEmail: u?.email || 'admin@vanguard.security',
       createdAt: new Date().toISOString(),
       memberCount: 1,
       isCustomDomainVerified: true,
     };
+
+    const stored = this.loadStored<TenantOrganization[]>('vanguard_organizations', []);
+    if (stored && stored.length > 0) {
+      // SCRUM-153: Only retain organizations matching the current authenticated user/company
+      const userEmail = u?.email?.toLowerCase().trim();
+      const userCompany = company.toLowerCase().trim();
+      const userTenantId = (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId)?.toLowerCase();
+
+      const scoped = stored.filter((org) => {
+        if (userTenantId && org.id.toLowerCase() === userTenantId) return true;
+        if (org.name?.toLowerCase().trim() === userCompany) return true;
+        if (userEmail && org.primaryContactEmail?.toLowerCase().trim() === userEmail) return true;
+        return false;
+      });
+
+      if (scoped.length > 0) {
+        return scoped;
+      }
+    }
     return [initialOrg];
   }
 
@@ -1698,7 +1606,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   );
 
   readonly isPersonalWorkspace = computed<boolean>(() => {
-    return this.activeWorkspaceId() === 'personal';
+    return this.isIndividual() && this.activeWorkspaceId() === 'personal';
   });
 
   readonly allWorkspaces = computed<TenantOrganization[]>(() => {
@@ -1800,23 +1708,40 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       // 1. Synchronize Tenant Organizations from Supabase
       const cloudTenants = await this.supabaseService.getTenants();
       if (cloudTenants && cloudTenants.length > 0) {
-        const mappedTenants: TenantOrganization[] = cloudTenants.map((t) => ({
-          id: t.id,
-          name: t.name,
-          slug: t.slug,
-          tier: (t.subscription_tier as any) || 'Enterprise',
-          domain: t.domain || undefined,
-          logoUrl: t.branding?.logoUrl || undefined,
-          primaryContactEmail: t.branding?.supportEmail || undefined,
-          createdAt: t.created_at,
-          memberCount: 1,
-          isCustomDomainVerified: t.branding?.ssoDomainVerified || false,
-        }));
-        this.organizations.set(mappedTenants);
-        this.saveStored('vanguard_organizations', mappedTenants);
+        const u = this.user();
+        const userTenantId = (u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId)?.toLowerCase();
+        const userCompany = u?.companyName?.toLowerCase().trim();
+        const userEmail = u?.email?.toLowerCase().trim();
 
-        const currentActiveId = this.activeOrganizationId();
-        const activeCloud = cloudTenants.find((c) => c.id === currentActiveId) || cloudTenants[0];
+        // SCRUM-153: Strictly scope cloud tenants to current user/membership to prevent cross-tenant leaks
+        const relevantTenants = cloudTenants.filter((t) => {
+          if (userTenantId && t.id.toLowerCase() === userTenantId) return true;
+          if (userCompany && t.name?.toLowerCase().trim() === userCompany) return true;
+          if (userEmail && (
+            t.branding?.supportEmail?.toLowerCase().trim() === userEmail ||
+            t.primaryContactEmail?.toLowerCase().trim() === userEmail
+          )) return true;
+          return false;
+        });
+
+        if (relevantTenants.length > 0) {
+          const mappedTenants: TenantOrganization[] = relevantTenants.map((t) => ({
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            tier: (t.subscription_tier as any) || 'Enterprise',
+            domain: t.domain || undefined,
+            logoUrl: t.branding?.logoUrl || undefined,
+            primaryContactEmail: t.branding?.supportEmail || undefined,
+            createdAt: t.created_at,
+            memberCount: 1,
+            isCustomDomainVerified: t.branding?.ssoDomainVerified || false,
+          }));
+          this.organizations.set(mappedTenants);
+          this.saveStored('vanguard_organizations', mappedTenants);
+
+          const currentActiveId = this.activeOrganizationId();
+          const activeCloud = relevantTenants.find((c) => c.id === currentActiveId) || relevantTenants[0];
         if (activeCloud) {
           if (activeCloud.id !== currentActiveId) {
             this.activeOrganizationId.set(activeCloud.id);
@@ -1839,6 +1764,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.saveStored('vanguard_tenant_branding', mergedBranding);
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
+        }
         }
       }
 
@@ -1964,17 +1890,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.userDevices.set(mappedDevices.filter((d) => d.ownerEmail === currentUserEmail));
         this.saveStored('vanguard_user_devices', this.userDevices());
       }
+
+      // 6. Synchronize Application Access Requests from Supabase (SCRUM-158)
+      await this.loadAccessRequests();
+      this.setupAccessRequestsRealtime();
     } catch (err) {
       console.warn('Supabase: Background synchronization failed, defaulting to local cache:', err);
     }
   }
 
   constructor() {
-    // Default view mode to the user's role and account type
+    // Default view mode to the user's role and account type (SCRUM-150)
     if (this.isIndividual()) {
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-    } else if (!this.isAdmin()) {
+    } else if (this.isAdmin()) {
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+    } else {
       this.viewMode.set('user');
       this.activeTab.set('my-apps');
     }
@@ -1984,24 +1917,95 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.fetchConnectedApps();
   }
 
+  readonly isDirectoryLoading = signal<boolean>(false);
+
+  /**
+   * SCRUM-156: Synchronize directory users and activation statuses with the backend.
+   */
+  loadDirectoryUsers(): void {
+    if (!this.isBrowser) return;
+    const tenantId = this.activeOrganizationId();
+    this.isDirectoryLoading.set(true);
+    this.authService.getDirectoryUsers(tenantId).subscribe({
+      next: (backendUsers) => {
+        this.isDirectoryLoading.set(false);
+        if (!backendUsers || backendUsers.length === 0) return;
+        this.directoryUsers.update((current) => {
+          const merged = [...current];
+          for (const b of backendUsers) {
+            const idx = merged.findIndex(
+              (u) => u.email?.toLowerCase().trim() === b.email?.toLowerCase().trim()
+            );
+            if (idx !== -1) {
+              merged[idx] = {
+                ...merged[idx],
+                accountStatus: b.accountStatus,
+                lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : merged[idx].lastLogin),
+                mfaStatus: b.mfaStatus || merged[idx].mfaStatus,
+                role: b.role || merged[idx].role,
+                department: b.department || merged[idx].department,
+              };
+            } else {
+              merged.push({
+                id: b.id,
+                name: b.name,
+                email: b.email,
+                department: b.department,
+                role: b.role,
+                mfaStatus: b.mfaStatus,
+                accountStatus: b.accountStatus,
+                lastLogin: b.lastLogin,
+                initials: b.initials,
+                invitedAt: b.invitedAt,
+                expiresAt: b.expiresAt,
+              });
+            }
+          }
+          return merged;
+        });
+        this.saveStored('vanguard_directory_users', this.directoryUsers());
+      },
+      error: () => {
+        this.isDirectoryLoading.set(false);
+      },
+    });
+  }
+
   initDashboardForCurrentUser(): void {
     const currentUser = this.authService.currentUser();
     if (!currentUser) return;
 
     if (this.isIndividual()) {
+      this.activeWorkspaceId.set('personal');
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-    } else if (!this.isAdmin()) {
+    } else if (this.isAdmin()) {
+      if (this.activeWorkspaceId() === 'personal') {
+        this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
+      }
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+    } else {
+      if (this.activeWorkspaceId() === 'personal') {
+        this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
+      }
       this.viewMode.set('user');
       this.activeTab.set('my-apps');
     }
 
     this.initSupabaseSync();
+    this.loadDirectoryUsers();
     this.fetchConnectedApps();
 
     const storedUsers = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (storedUsers && storedUsers.length > 0) {
+    const u = this.user();
+    const userEmail = u?.email?.toLowerCase().trim();
+    if (storedUsers && storedUsers.length > 0 && userEmail && storedUsers.some((usr) => usr.email?.toLowerCase().trim() === userEmail)) {
       this.directoryUsers.set(storedUsers);
+    } else {
+      const freshUsers = this.initDirectoryUsers();
+      this.directoryUsers.set(freshUsers);
+      this.saveStored('vanguard_directory_users', freshUsers);
     }
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
@@ -2009,20 +2013,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.directoryGroups.set(storedGroups);
     }
 
-    // Ensure SecOps includes employee member johnroben.manayon31@gmail.com
-    this.directoryGroups.update((groups) =>
-      groups.map((g) => {
-        if (g.id === 'grp-secops' || g.name.toLowerCase().includes('secops')) {
-          const members = new Set(g.memberIds);
-          members.add('johnroben.manayon31@gmail.com');
-          return {
-            ...g,
-            memberIds: Array.from(members),
-          };
-        }
-        return g;
-      })
-    );
+    // SCRUM-153: Purged hardcoded injection of legacy emails
     this.saveStored('vanguard_directory_groups', this.directoryGroups());
 
     this.syncGroupMembershipsToUsers();
@@ -2030,26 +2021,253 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   toggleViewMode(mode: 'admin' | 'user'): void {
-    if (this.isIndividual() && mode === 'admin') {
-      return; // Individual personal accounts do not have access to corporate governance console
+    if (this.isIndividual()) {
+      this.viewMode.set('user');
+      this.activeTab.set('personal-vault');
+      return;
     }
-    if (!this.isAdmin() && mode === 'admin') {
-      return; // Disallow non-admin directory members from entering admin console
-    }
-    this.viewMode.set(mode);
-    if (mode === 'admin') {
+    if (this.isAdmin()) {
+      this.viewMode.set('admin');
       this.activeTab.set('overview');
-    } else {
-      if (this.isIndividual()) {
-        this.activeTab.set('personal-vault');
-      } else {
-        this.activeTab.set('my-apps');
-        this.syncGroupInheritedApps();
+      return;
+    }
+    this.viewMode.set('user');
+    this.activeTab.set('my-apps');
+    this.syncGroupInheritedApps();
+  }
+
+  // ==========================================
+  // SCRUM-158: Real-time Supabase Access Requests Sync & Subscription
+  // ==========================================
+  async loadAccessRequests(force = false): Promise<void> {
+    if (!this.isBrowser) return;
+    const activeTenant = this.activeOrganizationId();
+    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+    this.isAccessRequestsLoading.set(true);
+
+    try {
+      const data = await this.supabaseService.getAccessRequests(tenantId);
+      if (data && data.length > 0) {
+        const mapped: AppAccessRequest[] = data.map((r: any) => ({
+          id: r.id,
+          tenantId: r.tenant_id,
+          userId: r.user_id,
+          userName: r.user_name,
+          userEmail: r.user_email,
+          department: r.department || 'General',
+          role: r.role || 'Directory Member',
+          appName: r.app_name,
+          protocol: r.protocol || 'SAML 2.0',
+          category: r.category || 'cloud',
+          icon: r.icon || '🚀',
+          launchUrl: r.launch_url || 'https://vanguard.security',
+          justification: r.justification || '',
+          status: r.status || 'Pending Approval',
+          submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
+          reviewedAt: r.reviewed_at,
+          reviewedBy: r.reviewed_by,
+          adminNotes: r.admin_notes,
+        }));
+        this.appAccessRequests.set(mapped);
+        this.saveStored('vanguard_access_requests', mapped);
+
+        // SCRUM-159: Sync approved requests into assigned apps list
+        const u = this.user();
+        const email = u?.email?.toLowerCase();
+        const uid = u?.id;
+        const approvedForMe = mapped.filter(
+          (r) =>
+            r.status === 'Approved' &&
+            ((email && r.userEmail.toLowerCase() === email) || (uid && r.userId === uid))
+        );
+        if (approvedForMe.length > 0) {
+          const currentApps = this.apps();
+          const missing = approvedForMe.filter(
+            (r) => !currentApps.some((a) => a.name.toLowerCase() === r.appName.toLowerCase())
+          );
+          if (missing.length > 0) {
+            const additions: SaaSApp[] = missing.map((r) => ({
+              id: r.id,
+              name: r.appName,
+              category: (r.category as SaaSApp['category']) || 'cloud',
+              description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved access)`,
+              icon: r.icon || '🚀',
+              protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
+              launchUrl: r.launchUrl || 'https://vanguard.security',
+              assigned: true,
+              status: 'Approved',
+            }));
+            this.apps.update((prev) => [...additions, ...prev]);
+            this.saveStored('vanguard_user_apps', this.apps());
+          }
+        }
+      } else if (tenantId) {
+        // Obey zero-mock data policy: if 0 requests exist in database for this tenant, empty list
+        this.appAccessRequests.set([]);
+        this.saveStored('vanguard_access_requests', []);
+      }
+    } catch (err) {
+      console.warn('loadAccessRequests notice:', err);
+    } finally {
+      this.isAccessRequestsLoading.set(false);
+    }
+  }
+
+  setupAccessRequestsRealtime(): void {
+    if (!this.isBrowser) return;
+    const g = globalThis as any;
+    if (g && g.process && (g.process.env?.['NODE_ENV'] === 'test' || g.process.env?.['VITEST'])) {
+      return;
+    }
+    if (this.accessRequestsChannel) return;
+
+    try {
+      const channels = (this.supabaseService.client as any).getChannels?.() || [];
+      const existing = channels.find((c: any) => c.topic === 'realtime:access_requests');
+      if (existing) {
+        this.supabaseService.client.removeChannel(existing);
+      }
+
+      this.accessRequestsChannel = this.supabaseService.client
+        .channel('realtime:access_requests')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'access_requests' },
+          (payload: any) => {
+            this.handleAccessRequestRealtimeChange(payload);
+          }
+        )
+        .subscribe((status: string) => {
+          // Connected to realtime publication
+        });
+    } catch (err) {
+      console.warn('Realtime subscription notice:', err);
+    }
+  }
+
+  cleanupAccessRequestsRealtime(): void {
+    if (this.accessRequestsChannel) {
+      try {
+        this.supabaseService.client.removeChannel(this.accessRequestsChannel);
+      } catch (e) {
+        // ignore
+      }
+      this.accessRequestsChannel = null;
+    }
+  }
+
+  handleAccessRequestRealtimeChange(payload: any): void {
+    if (!payload || !payload.eventType) return;
+    const activeTenant = this.activeOrganizationId();
+    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+
+    if (payload.eventType === 'INSERT') {
+      const r = payload.new;
+      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+        return;
+      }
+      const mapped: AppAccessRequest = {
+        id: r.id,
+        tenantId: r.tenant_id,
+        userId: r.user_id,
+        userName: r.user_name,
+        userEmail: r.user_email,
+        department: r.department || 'General',
+        role: r.role || 'Directory Member',
+        appName: r.app_name,
+        protocol: r.protocol || 'SAML 2.0',
+        category: r.category || 'cloud',
+        icon: r.icon || '🚀',
+        launchUrl: r.launch_url || 'https://vanguard.security',
+        justification: r.justification || '',
+        status: r.status || 'Pending Approval',
+        submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
+        reviewedAt: r.reviewed_at,
+        reviewedBy: r.reviewed_by,
+        adminNotes: r.admin_notes,
+      };
+
+      this.appAccessRequests.update((prev) => {
+        if (prev.some((item) => item.id === mapped.id)) {
+          return prev.map((item) => (item.id === mapped.id ? mapped : item));
+        }
+        return [mapped, ...prev];
+      });
+      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+      this.showAdminNotice(`New application access request from ${mapped.userName} for ${mapped.appName}.`);
+    } else if (payload.eventType === 'UPDATE') {
+      const r = payload.new;
+      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+        return;
+      }
+      this.appAccessRequests.update((prev) =>
+        prev.map((item) =>
+          item.id === r.id
+            ? {
+                ...item,
+                status: r.status,
+                reviewedAt: r.reviewed_at,
+                reviewedBy: r.reviewed_by,
+                adminNotes: r.admin_notes,
+              }
+            : item
+        )
+      );
+      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+      // SCRUM-159: If approved, ensure app is added to assigned apps and refresh company apps
+      if (r.status === 'Approved') {
+        const u = this.user();
+        const email = u?.email?.toLowerCase();
+        const uid = u?.id;
+        const matchesUser =
+          (email && r.user_email?.toLowerCase() === email) ||
+          (uid && r.user_id === uid);
+
+        if (matchesUser) {
+          const appToAssign: SaaSApp = {
+            id: r.id || ('app-' + Date.now()),
+            name: r.app_name,
+            category: r.category || 'cloud',
+            description: `${r.app_name} (Approved access: ${r.justification || ''})`,
+            icon: r.icon || '🚀',
+            protocol: r.protocol || 'SAML 2.0',
+            launchUrl: r.launch_url || 'https://vanguard.security',
+            assigned: true,
+            status: 'Approved',
+          };
+          if (!this.apps().some((a) => a.name.toLowerCase() === r.app_name.toLowerCase())) {
+            this.apps.update((prev) => [appToAssign, ...prev]);
+            this.saveStored('vanguard_user_apps', this.apps());
+          }
+          this.loadCompanyApps();
+          this.showAdminNotice(`Your request for ${r.app_name} has been approved!`);
+        }
+      }
+    } else if (payload.eventType === 'DELETE') {
+      const oldId = payload.old?.id;
+      if (oldId) {
+        this.appAccessRequests.update((prev) => prev.filter((item) => item.id !== oldId));
+        this.saveStored('vanguard_access_requests', this.appAccessRequests());
       }
     }
   }
 
   setActiveTab(tab: string): void {
+    const userTabs = [
+      'personal-vault', 'my-apps', 'authenticator', 'user-security',
+      'user-network', 'user-ssh', 'user-activity', 'user-devices'
+    ];
+    if (userTabs.includes(tab) && this.viewMode() === 'admin' && !this.isAdmin()) {
+      this.viewMode.set('user');
+    }
+    if (tab === 'directory') {
+      this.loadDirectoryUsers();
+    }
+    if (tab === 'access-requests') {
+      this.loadAccessRequests();
+      this.setupAccessRequestsRealtime();
+    }
     this.activeTab.set(tab);
   }
 
@@ -2256,6 +2474,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: newUser.department,
         temporaryPassword: newUser.temporaryPassword || this.invitePassword.trim(),
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
       })
       .subscribe({
         next: (res) => {
@@ -2268,6 +2487,35 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           const msg = err.message || 'Email delivery failed.';
           this.inviteEmailMessage.set(msg);
           this.showAdminNotice(`Account created. Notice: ${msg}`);
+        },
+      });
+  }
+
+  retryInviteEmail(): void {
+    const user = this.inviteCreatedUser();
+    if (!user) return;
+    this.inviteEmailStatus.set('sending');
+    this.authService
+      .sendInviteEmail({
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        department: user.department,
+        temporaryPassword: user.temporaryPassword || '',
+        loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.inviteEmailStatus.set('sent');
+          this.inviteEmailMessage.set(res.message || `Credentials sent to ${user.email}`);
+          this.showAdminNotice(`Credentials successfully emailed to ${user.email}`);
+        },
+        error: (err) => {
+          this.inviteEmailStatus.set('failed');
+          const msg = err.message || 'Email delivery failed.';
+          this.inviteEmailMessage.set(msg);
+          this.showAdminNotice(`Notice: ${msg}`);
         },
       });
   }
@@ -2324,6 +2572,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: updatedUser.department,
         temporaryPassword: newTempPw,
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        tenantId: this.activeOrganizationId(),
       })
       .subscribe({
         next: (res) => {
@@ -2841,15 +3090,52 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   executeGlobalKillswitch(): void {
-    this.globalKillswitchSuccess.set(true);
-    this.logAuditEvent('GLOBAL EMERGENCY KILLSWITCH EXECUTED', 'Directory Vault', 'Emergency Revocation', 'blocked', 'High');
-    setTimeout(() => {
-      this.showGlobalKillswitchModal.set(false);
-      this.globalKillswitchSuccess.set(false);
-      this.showAdminNotice(
-        'GLOBAL EMERGENCY KILLSWITCH EXECUTED: All active sessions, Web/LDAP/RADIUS tokens terminated across the entire directory.'
-      );
-    }, 1800);
+    // SCRUM-131: real tenant-wide revocation via the backend. Reports the
+    // CONFIRMED per-tenant outcome and residual-access bound — no fabricated
+    // "all tokens terminated everywhere" claim.
+    this.globalKillswitchPending.set(true);
+    this.globalKillswitchError.set(null);
+    this.globalKillswitchResult.set(null);
+    this.http
+      .post<{
+        tenantId: string;
+        totalMembers: number;
+        revoked: number;
+        failed: number;
+        maxResidualAccessSeconds: number;
+        notCovered: string[];
+      }>(`${this.apiBase}/apps/killswitch`, {})
+      .subscribe({
+        next: (res) => {
+          this.globalKillswitchPending.set(false);
+          this.globalKillswitchSuccess.set(res.failed === 0);
+          this.globalKillswitchResult.set(res);
+          this.logAuditEvent(
+            'GLOBAL EMERGENCY KILLSWITCH EXECUTED',
+            'Directory Vault',
+            'Emergency Revocation',
+            'blocked',
+            'High',
+          );
+          const residualMin = Math.ceil((res.maxResidualAccessSeconds || 0) / 60);
+          this.showAdminNotice(
+            `Killswitch complete: revoked ${res.revoked}/${res.totalMembers} member sessions` +
+              (res.failed ? `, ${res.failed} failed` : '') +
+              `. Existing access tokens expire within ~${residualMin} min. ` +
+              `Not covered: ${res.notCovered.join('; ') || 'none reported'}.`,
+          );
+        },
+        error: (err) => {
+          this.globalKillswitchPending.set(false);
+          this.globalKillswitchSuccess.set(false);
+          this.globalKillswitchError.set(
+            err?.error?.message || err?.message || 'Killswitch failed.',
+          );
+          this.showAdminNotice(
+            `Killswitch FAILED: ${err?.error?.message || 'Unable to reach the revocation service.'}`,
+          );
+        },
+      });
   }
 
   // ==========================================
@@ -2861,8 +3147,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   openAccessRequestsQueue(): void {
     this.viewMode.set('admin');
-    this.activeTab.set('saml-oidc');
-    this.samlSubTab.set('access-requests');
+    this.activeTab.set('access-requests');
   }
 
   setAccessRequestStatusFilter(filter: 'all' | 'Pending Approval' | 'Approved' | 'Rejected'): void {
@@ -2893,6 +3178,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
 
+    // Persist status update to Supabase (SCRUM-158)
+    if (this.isBrowser) {
+      this.supabaseService
+        .updateAccessRequestStatus(requestId, 'Approved', notes, reviewer)
+        .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+    }
+
     // 2. Automatically assign the SaaS application to the user's active launchpad
     const appToAssign: SaaSApp = {
       id: 'app-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -2902,6 +3194,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       icon: request.icon || '🚀',
       protocol: request.protocol || 'SAML 2.0',
       launchUrl: request.launchUrl || 'https://vanguard.security',
+      targetDomain: request.targetDomain,
+      requestedUsername: request.requestedUsername,
       assigned: true,
       status: 'Approved',
     };
@@ -2909,6 +3203,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (!this.apps().some((a) => a.name.toLowerCase() === request.appName.toLowerCase())) {
       this.apps.update((prev) => [appToAssign, ...prev]);
       this.saveStored('vanguard_user_apps', this.apps());
+    }
+
+    // Persist app assignment to Supabase user_assigned_apps (SCRUM-158)
+    if (this.isBrowser && request.tenantId && request.userId && !request.tenantId.startsWith('org_')) {
+      this.supabaseService
+        .upsertUserAssignedApp({
+          id: appToAssign.id,
+          tenant_id: request.tenantId,
+          user_id: request.userId,
+          app_id: appToAssign.id,
+          name: appToAssign.name,
+          protocol: appToAssign.protocol,
+          launch_url: appToAssign.launchUrl,
+          category: appToAssign.category,
+          icon: appToAssign.icon,
+          assigned: true,
+        })
+        .catch((err) => console.warn('Supabase upsertUserAssignedApp notice:', err));
     }
 
     // 3. Log audit event in Tenant Audit Logs
@@ -2958,6 +3270,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       )
     );
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // Persist status update to Supabase (SCRUM-158)
+    if (this.isBrowser) {
+      this.supabaseService
+        .updateAccessRequestStatus(requestId, 'Rejected', notes, reviewer)
+        .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+    }
 
     // 2. Prevent application assignment and remove if previously assigned
     this.apps.update((prev) => prev.filter((a) => a.name.toLowerCase() !== request.appName.toLowerCase()));
@@ -4669,16 +4988,156 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.showRequestAppModal.set(true);
     this.requestedAppName = '';
     this.requestAppJustification = '';
+    this.requestAppDeliveryMode = 'extension';
+    this.requestAppCategory = 'cloud';
+    this.requestAppProtocol = 'Extension Autofill';
+    this.requestAppIcon = '🚀';
+    this.requestAppUrl = '';
+    this.requestTargetDomain = '';
+    this.requestedUsername = '';
+    this.requestAppUrgency = 'Standard';
+    this.requestAppDuration = 'Permanent';
+    this.requestAppError.set(null);
     this.requestAppSuccess.set(false);
   }
 
   closeRequestAppModal(): void {
     this.showRequestAppModal.set(false);
+    this.requestAppError.set(null);
   }
 
-  submitAppRequest(): void {
-    const name = this.requestedAppName.trim();
-    if (!name) return;
+  checkDuplicateAppRequest(appName: string): { isDuplicate: boolean; type?: 'assigned' | 'pending'; message?: string } {
+    const norm = appName.trim().toLowerCase();
+    if (!norm) return { isDuplicate: false };
+
+    // 1. Check if already active and assigned on launchpad
+    const activeApps = this.activeAppsList();
+    const existingApp = activeApps.find((a) => a.name.trim().toLowerCase() === norm) || this.apps().find((a) => a.name.trim().toLowerCase() === norm);
+    if (existingApp) {
+      return {
+        isDuplicate: true,
+        type: 'assigned',
+        message: `"${existingApp.name}" is already assigned and active on your application launchpad.`,
+      };
+    }
+
+    // 2. Check if a request is currently pending review
+    const myRequests = this.myAccessRequests();
+    const pendingRequest = myRequests.find(
+      (r) => r.status === 'Pending Approval' && r.appName.trim().toLowerCase() === norm
+    );
+    if (pendingRequest) {
+      return {
+        isDuplicate: true,
+        type: 'pending',
+        message: `A request for "${pendingRequest.appName}" is currently pending administrator review.`,
+      };
+    }
+
+    return { isDuplicate: false };
+  }
+
+  removeCompanyApp(appId: string): void {
+    const currentApps = this.apps();
+    const targetApp = currentApps.find((a) => a.id === appId) || this.activeAppsList().find((a) => a.id === appId);
+    const targetName = targetApp?.name?.toLowerCase().trim();
+
+    // 1. Remove from apps signal
+    this.apps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
+    this.saveStored('vanguard_user_apps', this.apps());
+
+    // 2. Clean up from appAccessRequests for current user so activeAppsList computed signal does not keep displaying it
+    const u = this.user();
+    const email = u?.email?.toLowerCase();
+    const uid = u?.id;
+
+    this.appAccessRequests.update((prev) =>
+      prev.filter((r) => {
+        const matchApp = r.id === appId || (targetName && r.appName.toLowerCase().trim() === targetName);
+        if (!matchApp) return true;
+        const isUserMatch =
+          (email && r.userEmail?.toLowerCase() === email) ||
+          (uid && r.userId === uid) ||
+          (!email && !uid);
+        return !isUserMatch;
+      })
+    );
+    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // 3. Persist unassign to Supabase if applicable
+    const activeTenant = this.activeOrganizationId();
+    const resolvedTenantId =
+      activeTenant && !activeTenant.startsWith('org_')
+        ? activeTenant
+        : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+
+    if (this.isBrowser && resolvedTenantId && uid) {
+      this.supabaseService
+        .deleteUserAssignedApp(resolvedTenantId, uid, appId)
+        .catch((err) => console.warn('Supabase deleteUserAssignedApp notice:', err));
+    }
+
+    this.logAuditEvent(
+      `Removed application: ${targetApp?.name || appId} from user launchpad`,
+      'User Application Portal',
+      'Application Removal',
+      'success',
+      'Low'
+    );
+    this.showAdminNotice(`Removed "${targetApp?.name || 'Application'}" from your launchpad. You can re-request it anytime.`);
+  }
+
+  withdrawAccessRequest(requestId: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request) return;
+
+    // 1. Remove from local signal
+    this.appAccessRequests.update((prev) => prev.filter((r) => r.id !== requestId));
+    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+
+    // 2. Persist to Supabase if applicable
+    if (this.isBrowser) {
+      this.supabaseService
+        .deleteAccessRequest(requestId)
+        .catch((err) => console.warn('Supabase deleteAccessRequest notice:', err));
+    }
+
+    // 3. Log audit event
+    this.logAuditEvent(
+      `Withdrew application access request for: ${request.appName}`,
+      'User Application Portal',
+      'Access Request',
+      'success',
+      'Low'
+    );
+    this.showAdminNotice(`Withdrew request for "${request.appName}".`);
+  }
+
+  submitAppRequest(options?: {
+    appName?: string;
+    category?: SaaSApp['category'];
+    protocol?: string;
+    icon?: string;
+    launchUrl?: string;
+    targetDomain?: string;
+    requestedUsername?: string;
+    urgency?: 'Low' | 'Standard' | 'Critical';
+    duration?: string;
+    justification?: string;
+  }): boolean {
+    const name = (options?.appName ?? this.requestedAppName).trim();
+    if (!name) {
+      this.requestAppError.set('Please provide an application name.');
+      return false;
+    }
+
+    const dup = this.checkDuplicateAppRequest(name);
+    if (dup.isDuplicate) {
+      this.requestAppError.set(dup.message || 'This application has already been requested or assigned.');
+      return false;
+    }
+
+    this.requestAppError.set(null);
 
     const u = this.user();
     const userEmail = u?.email || 'employee@vanguard.security';
@@ -4688,19 +5147,45 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const department = (u?.user_metadata as any)?.['department'] || 'General';
     const role = this.userRoleLabel() || 'Directory Member';
 
+    const activeTenant = this.activeOrganizationId();
+    const resolvedTenantId =
+      activeTenant && !activeTenant.startsWith('org_')
+        ? activeTenant
+        : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+
+    const protocol = options?.protocol ?? this.requestAppProtocol ?? 'Extension Autofill';
+    const launchUrl = (options?.launchUrl ?? this.requestAppUrl ?? '').trim() || 'https://vanguard.security';
+
+    // Auto-extract domain if not explicitly provided
+    let targetDomain = (options?.targetDomain ?? this.requestTargetDomain ?? '').trim();
+    if (!targetDomain && launchUrl) {
+      try {
+        const parsed = new URL(launchUrl.startsWith('http') ? launchUrl : `https://${launchUrl}`);
+        targetDomain = parsed.hostname;
+      } catch {
+        targetDomain = launchUrl.replace(/^https?:\/\//, '').split('/')[0];
+      }
+    }
+
     const newRequest: AppAccessRequest = {
       id: 'req-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      tenantId: resolvedTenantId || undefined,
       userId: u?.id || 'usr-current',
       userName,
       userEmail,
       department,
       role,
       appName: name,
-      protocol: 'SAML 2.0',
-      category: 'cloud',
-      icon: '🚀',
-      launchUrl: 'https://vanguard.security',
-      justification: this.requestAppJustification.trim() || 'General access',
+      protocol,
+      category: options?.category ?? this.requestAppCategory ?? 'cloud',
+      icon: options?.icon ?? this.requestAppIcon ?? '🚀',
+      launchUrl,
+      targetDomain: targetDomain || undefined,
+      requestedUsername: (options?.requestedUsername ?? this.requestedUsername ?? '').trim() || undefined,
+      urgency: options?.urgency ?? this.requestAppUrgency ?? 'Standard',
+      duration: options?.duration ?? this.requestAppDuration ?? 'Permanent',
+      zeroKnowledgeProtected: true,
+      justification: (options?.justification ?? this.requestAppJustification ?? '').trim() || 'General access',
       status: 'Pending Approval',
       submittedAt: new Date().toISOString(),
     };
@@ -4709,8 +5194,31 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.appAccessRequests.update((prev) => [newRequest, ...prev]);
     this.saveStored('vanguard_access_requests', this.appAccessRequests());
 
+    // Persist to live Supabase database (SCRUM-158)
+    if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
+      this.supabaseService
+        .createAccessRequest({
+          id: newRequest.id,
+          tenant_id: resolvedTenantId,
+          user_id: newRequest.userId,
+          user_name: newRequest.userName,
+          user_email: newRequest.userEmail,
+          department: newRequest.department,
+          role: newRequest.role,
+          app_name: newRequest.appName,
+          protocol: newRequest.protocol,
+          category: newRequest.category,
+          icon: newRequest.icon,
+          launch_url: newRequest.launchUrl,
+          justification: newRequest.justification,
+          status: newRequest.status,
+          submitted_at: newRequest.submittedAt,
+        })
+        .catch((err) => console.warn('Supabase createAccessRequest notice:', err));
+    }
+
     this.logAuditEvent(
-      `Requested access for SaaS application: ${name} (Status: Pending Approval)`,
+      `Requested access for SaaS application: ${name} (Protocol: ${protocol}, Status: Pending Approval)`,
       'User Application Portal',
       'Access Request',
       'success',
@@ -4723,10 +5231,16 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       this.requestAppSuccess.set(false);
       this.requestedAppName = '';
       this.requestAppJustification = '';
+      this.requestAppUrl = '';
+      this.requestTargetDomain = '';
+      this.requestedUsername = '';
+      this.requestAppError.set(null);
     }, 1800);
+
+    return true;
   }
 
-  // ==========================================
+    // ==========================================
   // TOTP Authenticator Enrollment (SCRUM-32 / RFC 6238)
   // ==========================================
   startEnrollTotp(): void {
@@ -4793,10 +5307,44 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   disableTotp(): void {
-    this.hasTotpEnrolled.set(false);
-    this.saveStored('vanguard_user_has_totp', false);
-    this.logAuditEvent('De-enrolled TOTP Authenticator App', 'MFA Vault', 'RFC 6238 TOTP', 'success', 'Low');
-    this.showAdminNotice('Authenticator App removed from account.');
+    // First fetch the TOTP factor ID from the backend
+    this.authService.listMfaFactors('totp').subscribe({
+      next: (res) => {
+        const totpFactor = res.factors?.find((f: any) => f.status === 'verified' && f.type === 'totp');
+        if (!totpFactor) {
+          this.showAdminNotice('No active TOTP authenticator found.');
+          return;
+        }
+
+        // Unenroll the factor from the backend
+        this.authService.unenrollTotp(totpFactor.id).subscribe({
+          next: () => {
+            this.hasTotpEnrolled.set(false);
+            this.saveStored('vanguard_user_has_totp', false);
+            this.logAuditEvent('De-enrolled TOTP Authenticator App', 'MFA Vault', 'RFC 6238 TOTP', 'success', 'Low');
+            this.showAdminNotice('Authenticator App removed from account.');
+          },
+          error: (err: Error) => {
+            const message = err.message || 'Failed to remove Authenticator';
+            // Check if it's a token expiration issue
+            if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+              this.showAdminNotice('Your session has expired. Please sign out and sign in again to de-enroll the authenticator.');
+            } else {
+              this.showAdminNotice(`Failed to remove Authenticator: ${message}`);
+            }
+          },
+        });
+      },
+      error: (err: Error) => {
+        const message = err.message || 'Failed to retrieve Authenticator status';
+        // Check if it's a token expiration issue
+        if (message.includes('expired') || message.includes('Invalid') || message.includes('Unauthorized')) {
+          this.showAdminNotice('Your session has expired. Please sign out and sign in again.');
+        } else {
+          this.showAdminNotice(`Failed to retrieve Authenticator status: ${message}`);
+        }
+      },
+    });
   }
 
   // ==========================================
@@ -5819,24 +6367,35 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   // SCRUM-52: Multi-Workspace Switcher (Personal Vault <-> Company Organization)
   // ==========================================
   switchWorkspace(workspaceId: string): void {
-    this.activeWorkspaceId.set(workspaceId);
-    this.saveStored('vanguard_active_workspace', workspaceId);
-
-    if (workspaceId === 'personal') {
+    if (this.isIndividual()) {
+      this.activeWorkspaceId.set('personal');
+      this.saveStored('vanguard_active_workspace', 'personal');
       this.viewMode.set('user');
       this.activeTab.set('personal-vault');
-      this.showAdminNotice('Switched to Personal Vault workspace.');
-      this.logAuditEvent('Switched context to Personal Vault workspace', 'Workspace Switcher', 'Context Switch', 'success', 'Low');
-    } else {
-      this.switchOrganization(workspaceId);
-      if (this.isAdmin()) {
-        this.viewMode.set('admin');
-        this.activeTab.set('overview');
-      } else {
-        this.viewMode.set('user');
-        this.activeTab.set('my-apps');
-      }
+      return;
     }
+
+    if (this.isAdmin()) {
+      if (workspaceId === 'personal') {
+        return; // Company accounts do not have access to personal vault
+      }
+      this.activeWorkspaceId.set(workspaceId);
+      this.saveStored('vanguard_active_workspace', workspaceId);
+      this.switchOrganization(workspaceId);
+      this.viewMode.set('admin');
+      this.activeTab.set('overview');
+      return;
+    }
+
+    // Managed Tenant directory member
+    if (workspaceId === 'personal') {
+      return; // Tenants do not have access to personal vault
+    }
+    this.activeWorkspaceId.set(workspaceId);
+    this.saveStored('vanguard_active_workspace', workspaceId);
+    this.switchOrganization(workspaceId);
+    this.viewMode.set('user');
+    this.activeTab.set('my-apps');
   }
 
   // ==========================================
@@ -5926,6 +6485,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // Apply active brand accent
     this.applyBrandAccent(this.tenantBranding().primaryAccentColor);
+    this.loadAccessRequests(true);
 
     this.logAuditEvent(
       `Switched active organization context to: ${org.name} (${org.tier})`,

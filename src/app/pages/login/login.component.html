@@ -68,8 +68,48 @@
         </div>
       }
 
-      <!-- Active SSO Session Option (if already logged in to Vanguard) -->
-      @if (authService.isLoggedIn() && ssoParams()) {
+      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice -->
+      @if (ssoApprovalRequired()) {
+        <div class="sso-approval-notice">
+          <div class="sso-approval-badge">
+            <span class="pulse-dot-amber"></span>
+            <span>Zero-Trust Access Governance</span>
+          </div>
+          
+          <div class="sso-approval-icon-box">
+            <span class="governance-icon">🛡️</span>
+          </div>
+
+          <h3 class="sso-approval-title">Administrative Approval Required</h3>
+          
+          <p class="sso-approval-text">
+            {{ ssoApprovalMessage() || 'Your corporate organization requires administrative approval before this application can access your account.' }}
+          </p>
+
+          <div class="sso-approval-status-card">
+            <div class="status-row">
+              <span class="status-label">Application:</span>
+              <span class="status-val">{{ clientDisplayName() }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Access Status:</span>
+              <span class="sso-approval-pill">Pending Approval</span>
+            </div>
+            <div class="status-desc">
+              An access request has been automatically submitted to your tenant administrator. You will be able to sign in once reviewed and approved.
+            </div>
+          </div>
+
+          <div class="sso-approval-actions">
+            <button type="button" class="sso-return-btn" (click)="onCancelSso()">
+              Return to {{ clientDisplayName() }}
+            </button>
+            <a routerLink="/dashboard" class="sso-dashboard-link">
+              Go to Vanguard Dashboard
+            </a>
+          </div>
+        </div>
+      } @else if (authService.isLoggedIn() && ssoParams()) {
         <div class="sso-active-session">
           @if (isAccountMismatch()) {
             <div class="account-mismatch-banner">

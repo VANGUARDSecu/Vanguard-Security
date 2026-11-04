@@ -147,6 +147,9 @@
                   <span class="group-inherited-tag" *ngIf="app.inheritedViaGroup" [title]="'Assigned via ' + app.inheritedViaGroup">
                     👥 {{ app.inheritedViaGroup }}
                   </span>
+                  <span class="app-approved-tag" *ngIf="app.status === 'Approved'" title="Access approved by administrator">
+                    ✓ Approved
+                  </span>
                   <span class="vault-matched-tag" *ngIf="isPersonalWorkspace() && getMatchingVaultCredentials(app).length > 0" title="Auto-fill credentials detected in personal vault">
                     ⚡ Auto-fill Ready
                   </span>
@@ -161,6 +164,15 @@
                     *ngIf="isPersonalWorkspace()"
                     (click)="deletePersonalApp(app.id, $event)"
                     title="Remove shortcut"
+                  >
+                    ✕
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-card-del btn-card-del-company"
+                    *ngIf="!isPersonalWorkspace()"
+                    (click)="removeCompanyApp(app, $event)"
+                    title="Remove application from your launchpad (can be re-requested anytime)"
                   >
                     ✕
                   </button>
@@ -301,6 +313,16 @@
                   <div class="request-denied-badge" *ngIf="req.status === 'Rejected'">
                     <span>🔒 Zero-Trust Guard: Assertion Blocked</span>
                   </div>
+                  <!-- Withdraw button for pending or rejected requests -->
+                  <button
+                    type="button"
+                    class="btn-withdraw-action"
+                    *ngIf="req.status === 'Pending Approval' || req.status === 'Rejected'"
+                    (click)="withdrawAccessRequest(req, $event)"
+                    title="Withdraw and clear this access request"
+                  >
+                    ✕ Withdraw
+                  </button>
                 </div>
               </div>
             </div>
@@ -401,45 +423,250 @@
        MODAL: REQUEST APPLICATION (ENTERPRISE ORG)
        ======================================================================== -->
   <div class="modal-backdrop" *ngIf="showRequestAppModal()">
-    <div class="modal-card">
+    <div class="modal-card modal-card-lg">
       <div class="modal-header">
-        <h3 class="modal-title">Request Application Access</h3>
+        <div>
+          <h3 class="modal-title">Request Application Access</h3>
+          <p class="modal-desc">
+            Submit a zero-trust SaaS request for administrator review, SSO provisioning, or browser extension autofill.
+          </p>
+        </div>
         <button type="button" class="modal-close-btn" (click)="closeRequestAppModal()">✕</button>
       </div>
 
       <div class="modal-body">
-        <p class="modal-desc">
-          Submit an application access request to your Vanguard Security Administrator.
-        </p>
-
-        <div class="form-group">
-          <label class="form-label">Application Name</label>
-          <input
-            type="text"
-            [(ngModel)]="requestedAppName"
-            placeholder="e.g. Figma Enterprise, Salesforce, Snowflake"
-            class="form-input"
-          />
+        <!-- Delivery Mode Segmented Tabs -->
+        <div class="delivery-mode-bar">
+          <button
+            type="button"
+            class="delivery-tab"
+            [class.active]="reqDeliveryMode() === 'extension'"
+            (click)="setDeliveryMode('extension')"
+          >
+            <span class="delivery-icon">🔐</span>
+            <div class="delivery-text">
+              <span class="delivery-title">Browser Extension Autofill</span>
+              <span class="delivery-subtitle">External Web Apps (GitHub, Figma, AWS, Datadog)</span>
+            </div>
+          </button>
+          <button
+            type="button"
+            class="delivery-tab"
+            [class.active]="reqDeliveryMode() === 'sso'"
+            (click)="setDeliveryMode('sso')"
+          >
+            <span class="delivery-icon">⚡</span>
+            <div class="delivery-text">
+              <span class="delivery-title">Single Sign-On (SSO)</span>
+              <span class="delivery-subtitle">Vanguard Dummy Ecosystem (Web 4201 / Mobile 8081)</span>
+            </div>
+          </button>
         </div>
 
+        <!-- Quick Presets -->
+        <div class="preset-section">
+          <label class="form-label">
+            <span>Quick Presets</span>
+            <span class="form-sublabel">Select a standard system to prepopulate details</span>
+          </label>
+          <div class="preset-pill-group" *ngIf="reqDeliveryMode() === 'sso'">
+            <button
+              type="button"
+              class="preset-pill"
+              *ngFor="let p of ssoPresets"
+              [class.is-duplicate]="isPresetActive(p.name)"
+              (click)="applyPresetRequest(p)"
+            >
+              <span>{{ p.icon }} {{ p.name }}</span>
+              <span class="preset-status-tag assigned" *ngIf="isPresetActive(p.name) === 'assigned'">✓ Active</span>
+              <span class="preset-status-tag pending" *ngIf="isPresetActive(p.name) === 'pending'">⏳ Pending</span>
+            </button>
+          </div>
+          <div class="preset-pill-group" *ngIf="reqDeliveryMode() === 'extension'">
+            <button
+              type="button"
+              class="preset-pill"
+              *ngFor="let p of extensionPresets"
+              [class.is-duplicate]="isPresetActive(p.name)"
+              (click)="applyPresetRequest(p)"
+            >
+              <span>{{ p.icon }} {{ p.name }}</span>
+              <span class="preset-status-tag assigned" *ngIf="isPresetActive(p.name) === 'assigned'">✓ Active</span>
+              <span class="preset-status-tag pending" *ngIf="isPresetActive(p.name) === 'pending'">⏳ Pending</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Realtime Duplicate Alert Warning Banner -->
+        <div class="duplicate-alert-banner" *ngIf="duplicateCheck().isDuplicate">
+          <span class="alert-icon">⚠️</span>
+          <div class="alert-body">
+            <strong>Duplicate Request Notice:</strong>
+            <span>{{ duplicateCheck().message }}</span>
+          </div>
+        </div>
+
+        <!-- App Name & Icon -->
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Application Name *</label>
+            <input
+              type="text"
+              [ngModel]="reqAppName()"
+              (ngModelChange)="requestedAppName = $event"
+              placeholder="e.g. Figma Enterprise, Acme Dummy Web, AWS Console"
+              class="form-input"
+              [class.input-invalid]="duplicateCheck().isDuplicate"
+            />
+          </div>
+          <div class="form-group form-group-icon">
+            <label class="form-label">Icon</label>
+            <input
+              type="text"
+              [ngModel]="reqIcon()"
+              (ngModelChange)="reqIcon.set($event)"
+              placeholder="🚀"
+              class="form-input text-center"
+            />
+          </div>
+        </div>
+
+        <!-- Protocol & Category -->
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Integration Protocol</label>
+            <select
+              [ngModel]="reqProtocol()"
+              (ngModelChange)="reqProtocol.set($event)"
+              class="form-select"
+            >
+              <option value="Extension Autofill">Extension Autofill (Zero-Knowledge)</option>
+              <option value="OIDC">OIDC (OpenID Connect / PKCE)</option>
+              <option value="SAML 2.0">SAML 2.0 Federation</option>
+              <option value="OAuth 2.0">OAuth 2.0 Mobile / API</option>
+              <option value="Web Auth">Web Authentication</option>
+            </select>
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">Category</label>
+            <select
+              [ngModel]="reqCategory()"
+              (ngModelChange)="reqCategory.set($event)"
+              class="form-select"
+            >
+              <option value="cloud">Cloud & Infrastructure</option>
+              <option value="developer">Developer Tools</option>
+              <option value="collaboration">Team Collaboration</option>
+              <option value="custom">Custom Internal Service</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Target Launch URL & Extracted Domain -->
         <div class="form-group">
-          <label class="form-label">Business Justification</label>
+          <label class="form-label flex-between">
+            <span>Login / Target URL *</span>
+            <span class="domain-tag" *ngIf="reqDomain()">Domain: {{ reqDomain() }}</span>
+          </label>
+          <input
+            type="url"
+            [ngModel]="reqUrl()"
+            (ngModelChange)="onUrlChange($event)"
+            placeholder="e.g. https://github.com/login or http://localhost:4201"
+            class="form-input"
+          />
+          <span class="form-helper">
+            The Vanguard web extension matches this exact domain to provide secure autofill overlays.
+          </span>
+        </div>
+
+        <!-- Requested Username / Account Identifier -->
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Requested Account Username / Email</label>
+            <input
+              type="text"
+              [ngModel]="reqUsername()"
+              (ngModelChange)="reqUsername.set($event)"
+              placeholder="e.g. your-name@company.com or employee-id"
+              class="form-input"
+            />
+            <span class="form-helper">The username or identity handle you intend to link with this application.</span>
+          </div>
+          <div class="form-group form-group-sm">
+            <label class="form-label">Urgency</label>
+            <select
+              [ngModel]="reqUrgency()"
+              (ngModelChange)="reqUrgency.set($event)"
+              class="form-select"
+            >
+              <option value="Low">Low</option>
+              <option value="Standard">Standard</option>
+              <option value="Critical">Critical</option>
+            </select>
+          </div>
+          <div class="form-group form-group-sm">
+            <label class="form-label">Duration</label>
+            <select
+              [ngModel]="reqDuration()"
+              (ngModelChange)="reqDuration.set($event)"
+              class="form-select"
+            >
+              <option value="Permanent">Permanent</option>
+              <option value="90 Days">90 Days</option>
+              <option value="30 Days">30 Days</option>
+              <option value="Temporary">Temporary</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Business Justification -->
+        <div class="form-group">
+          <label class="form-label">Business Justification *</label>
           <textarea
-            [(ngModel)]="requestAppJustification"
-            placeholder="Explain why you need access to this tool..."
+            [ngModel]="reqJustification()"
+            (ngModelChange)="requestAppJustification = $event"
+            placeholder="Explain the business need or project requirements justifying access..."
             rows="3"
             class="form-textarea"
           ></textarea>
         </div>
 
+        <!-- Zero-Knowledge Security Guarantee Box -->
+        <div class="zero-knowledge-banner">
+          <div class="zk-icon">🔒</div>
+          <div class="zk-text">
+            <strong>Zero-Knowledge Security Guarantee:</strong>
+            <span>
+              Plaintext passwords are never entered or transmitted in access requests. All credentials remain client-side
+              encrypted in your personal vault. Administrators can review governance metadata (URL, domain, username, justification)
+              without ever having access to your passwords.
+            </span>
+          </div>
+        </div>
+
+        <!-- Inline Error Alert -->
+        <div class="form-error-alert" *ngIf="requestAppError()">
+          ⚠️ {{ requestAppError() }}
+        </div>
+
+        <!-- Inline Success Feedback -->
         <div class="form-success-text" *ngIf="requestAppSuccess()">
-          ✓ Request submitted to administrator for approval!
+          ✓ Request successfully queued for administrator approval!
         </div>
       </div>
 
       <div class="modal-footer">
         <button type="button" class="btn-ghost" (click)="closeRequestAppModal()">Cancel</button>
-        <button type="button" class="btn-primary-action" (click)="submitAppRequest()">Submit Request</button>
+        <button
+          type="button"
+          class="btn-primary-action"
+          [disabled]="duplicateCheck().isDuplicate || isSubmittingRequest() || requestAppSuccess()"
+          (click)="submitAppRequest()"
+        >
+          <span *ngIf="!isSubmittingRequest()">Submit Access Request</span>
+          <span *ngIf="isSubmittingRequest()">Submitting...</span>
+        </button>
       </div>
     </div>
   </div>

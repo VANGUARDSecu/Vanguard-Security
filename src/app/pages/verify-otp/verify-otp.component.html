@@ -106,8 +106,48 @@
         </div>
       }
 
-      <!-- PUSH APPROVAL FLOW (SCRUM-85) -->
-      @if (method() === 'push_approval') {
+      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160) -->
+      @if (ssoApprovalRequired()) {
+        <div class="sso-approval-notice">
+          <div class="sso-approval-badge">
+            <span class="pulse-dot-amber"></span>
+            <span>Zero-Trust Access Governance</span>
+          </div>
+          
+          <div class="sso-approval-icon-box">
+            <span class="governance-icon">🛡️</span>
+          </div>
+
+          <h3 class="sso-approval-title">Administrative Approval Required</h3>
+          
+          <p class="sso-approval-text">
+            {{ ssoApprovalMessage() || 'Your corporate organization requires administrative approval before this application can access your account.' }}
+          </p>
+
+          <div class="sso-approval-status-card">
+            <div class="status-row">
+              <span class="status-label">Application:</span>
+              <span class="status-val">{{ clientDisplayName() }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Access Status:</span>
+              <span class="sso-approval-pill">Pending Approval</span>
+            </div>
+            <div class="status-desc">
+              An access request has been automatically submitted to your tenant administrator. You will be able to sign in once reviewed and approved.
+            </div>
+          </div>
+
+          <div class="sso-approval-actions">
+            <button type="button" class="sso-return-btn" (click)="onCancelSso()">
+              Return to {{ clientDisplayName() }}
+            </button>
+            <a routerLink="/dashboard" class="sso-dashboard-link">
+              Go to Vanguard Dashboard
+            </a>
+          </div>
+        </div>
+      } @else if (method() === 'push_approval') {
         <div class="push-approval-container">
           <!-- Client Target Banner -->
           <div class="push-client-card">
@@ -142,6 +182,31 @@
               <span class="push-status-label">{{ pushStatusText() }}</span>
               <span class="push-countdown-label">Expires in <strong>{{ pushSecondsRemaining() }}s</strong></span>
             </div>
+          </div>
+
+          <!-- Retry Button (max 3 retries) -->
+          <div class="push-retry-row">
+            @if (pushRetriesRemaining() > 0) {
+              <button
+                type="button"
+                class="retry-push-btn"
+                (click)="retryPushChallenge()"
+                [disabled]="isLoading()"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="retry-icon">
+                  <path d="M1 4v6h6"></path>
+                  <path d="M23 20v-6h-6"></path>
+                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64M3.51 15A9 9 0 0 0 18.36 18.36"></path>
+                </svg>
+                <span>Retry Challenge</span>
+                <span class="retry-count-badge">{{ pushRetriesRemaining() }}/3</span>
+              </button>
+            } @else {
+              <div class="retry-exhausted-notice">
+                <span class="exhausted-icon">⚠️</span>
+                <span>Maximum retries reached. Use Email OTP or try again later.</span>
+              </div>
+            }
           </div>
 
           <!-- Mobile App Switching Deep-Link Button -->

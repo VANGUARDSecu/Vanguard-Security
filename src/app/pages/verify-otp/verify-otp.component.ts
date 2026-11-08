@@ -27,6 +27,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly mode = signal<'signup' | 'signin' | 'recovery'>('signup');
   readonly method = signal<VerificationMethod>('email_otp');
   readonly hasTotp = signal<boolean>(false);
+  readonly provider = signal<string>('');
 
   // Zero-Trust SSO Access Governance Signals (SCRUM-160)
   readonly ssoApprovalRequired = signal<boolean>(false);
@@ -106,6 +107,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       this.mode.set(modeParam);
       this.hasTotp.set(hasTotpParam);
       this.method.set(methodParam);
+      this.provider.set(params['provider'] || '');
 
       if (params['numberCode']) {
         this.numberCode.set(params['numberCode']);

@@ -48,6 +48,8 @@
             Password Reset Verification
           } @else if (isSsoVerification()) {
             Single Sign-On MFA Verification
+          } @else if (provider() === 'google') {
+            Google Account 2-Step Verification
           } @else if (mode() === 'signup') {
             Verify Your Email
           } @else {
@@ -64,6 +66,8 @@
             Enter the 8-digit recovery code sent to <strong class="highlight-email">{{ email() }}</strong> to verify and authorize password reset.
           } @else if (isSsoVerification()) {
             Enter the 6-digit verification code sent to <strong class="highlight-email">{{ email() }}</strong> to authorize sign-in to <strong>{{ clientDisplayName() }}</strong>.
+          } @else if (provider() === 'google') {
+            For your security, enter the 8-digit verification code sent to your Google account email <strong class="highlight-email">{{ email() }}</strong> to complete sign in.
           } @else {
             Enter the 8-digit verification code sent to <strong class="highlight-email">{{ email() }}</strong>
           }

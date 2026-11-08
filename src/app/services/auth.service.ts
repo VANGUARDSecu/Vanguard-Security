@@ -296,6 +296,8 @@ export class AuthService {
     }
   }
 
+  private isOAuthChallenging = false;
+
   private checkForOAuthCallback(): void {
     if (!this.isBrowser) return;
 
@@ -313,11 +315,12 @@ export class AuthService {
           let userId = 'vanguard_user_' + Date.now();
           let firstName = '';
           let lastName = '';
+          let meta: Record<string, any> = {};
           try {
             const payload = JSON.parse(atob(accessToken.split('.')[1]));
             if (payload.email) email = payload.email;
             if (payload.sub) userId = payload.sub;
-            const meta = payload.user_metadata || {};
+            meta = payload.user_metadata || {};
             firstName =
               meta['full_name']?.split(' ')[0] ||
               meta['name']?.split(' ')[0] ||
@@ -330,27 +333,58 @@ export class AuthService {
               '';
           } catch {}
 
-          const userProfile: UserProfile = {
-            id: userId,
-            email,
-            firstName,
-            lastName,
-            role: 'user',
-            accountType: 'individual',
-          };
-          this.setSession(userProfile, {
-            access_token: accessToken,
-            refresh_token: refreshToken || undefined,
-          });
-
-          window.history.replaceState(null, '', window.location.pathname);
           if (type === 'recovery') {
+            const userProfile: UserProfile = {
+              id: userId,
+              email,
+              firstName,
+              lastName,
+              role: 'user',
+              accountType: 'individual',
+            };
+            this.setSession(userProfile, {
+              access_token: accessToken,
+              refresh_token: refreshToken || undefined,
+            });
+            window.history.replaceState(null, '', window.location.pathname);
             this.isPasswordResetRequired.set(true);
             if (this.isBrowser) localStorage.setItem('vanguard_reset_required', 'true');
             this.router.navigate(['/reset-password']);
-          } else {
-            this.router.navigate(['/dashboard']);
+            return;
           }
+
+          // SCRUM-163: Zero-Trust OAuth 2-Step Verification Challenge
+          this.isOAuthChallenging = true;
+          window.history.replaceState(null, '', window.location.pathname);
+          this.challengeOAuthOtp({
+            email,
+            provider: 'google',
+            session: {
+              access_token: accessToken,
+              refresh_token: refreshToken || undefined,
+            },
+            userMetadata: meta,
+          }).subscribe({
+            next: (res) => {
+              this.pendingEmail.set(res.email || email);
+              this.pendingMode.set('signin');
+              this.router.navigate(['/verify-otp'], {
+                queryParams: {
+                  email: res.email || email,
+                  mode: 'signin',
+                  hasTotp: res.hasTotp ? 'true' : 'false',
+                  provider: 'google',
+                },
+              });
+            },
+            error: (err) => {
+              this.isOAuthChallenging = false;
+              console.warn('OAuth challenge initiation failed:', err);
+              this.router.navigate(['/login'], {
+                queryParams: { error: 'Failed to initiate 2-Step Verification.' },
+              });
+            },
+          });
           return;
         }
       }
@@ -372,29 +406,70 @@ export class AuthService {
             if (data?.session) {
               const user = data.session.user;
               const meta = user.user_metadata || {};
-              const userProfile: UserProfile = {
-                id: user.id,
-                email: user.email || 'verified_user@vanguard.security',
-                firstName:
-                  meta['full_name']?.split(' ')[0] ||
-                  meta['name']?.split(' ')[0] ||
-                  meta['first_name'] ||
-                  'User',
-                lastName:
-                  meta['full_name']?.split(' ').slice(1).join(' ') ||
-                  meta['name']?.split(' ').slice(1).join(' ') ||
-                  meta['last_name'] ||
-                  '',
-                role: 'user',
-                accountType: 'individual',
-              };
-              this.setSession(userProfile, {
-                access_token: data.session.access_token,
-                refresh_token: data.session.refresh_token,
-                expires_at: data.session.expires_at,
-              });
+              const email = user.email || 'verified_user@vanguard.security';
+
+              if (type === 'recovery') {
+                const userProfile: UserProfile = {
+                  id: user.id,
+                  email,
+                  firstName:
+                    meta['full_name']?.split(' ')[0] ||
+                    meta['name']?.split(' ')[0] ||
+                    meta['first_name'] ||
+                    'User',
+                  lastName:
+                    meta['full_name']?.split(' ').slice(1).join(' ') ||
+                    meta['name']?.split(' ').slice(1).join(' ') ||
+                    meta['last_name'] ||
+                    '',
+                  role: 'user',
+                  accountType: 'individual',
+                };
+                this.setSession(userProfile, {
+                  access_token: data.session.access_token,
+                  refresh_token: data.session.refresh_token,
+                  expires_at: data.session.expires_at,
+                });
+                window.history.replaceState(null, '', window.location.pathname);
+                this.isPasswordResetRequired.set(true);
+                if (this.isBrowser) localStorage.setItem('vanguard_reset_required', 'true');
+                this.router.navigate(['/reset-password']);
+                return;
+              }
+
+              // SCRUM-163: Zero-Trust OAuth 2-Step Verification Challenge
+              this.isOAuthChallenging = true;
               window.history.replaceState(null, '', window.location.pathname);
-              this.router.navigate(['/dashboard']);
+              this.challengeOAuthOtp({
+                email,
+                provider: 'google',
+                session: {
+                  access_token: data.session.access_token,
+                  refresh_token: data.session.refresh_token,
+                  expires_at: data.session.expires_at,
+                },
+                userMetadata: meta,
+              }).subscribe({
+                next: (res) => {
+                  this.pendingEmail.set(res.email || email);
+                  this.pendingMode.set('signin');
+                  this.router.navigate(['/verify-otp'], {
+                    queryParams: {
+                      email: res.email || email,
+                      mode: 'signin',
+                      hasTotp: res.hasTotp ? 'true' : 'false',
+                      provider: 'google',
+                    },
+                  });
+                },
+                error: (err) => {
+                  this.isOAuthChallenging = false;
+                  console.warn('OAuth challenge initiation failed:', err);
+                  this.router.navigate(['/login'], {
+                    queryParams: { error: 'Failed to initiate 2-Step Verification.' },
+                  });
+                },
+              });
             }
           })
           .catch((e) => {
@@ -457,6 +532,35 @@ export class AuthService {
   /* ==========================================
      Auth Actions
      ========================================== */
+  /**
+   * SCRUM-163: Initiates 2-Step OTP challenge for OAuth-authenticated sessions
+   */
+  challengeOAuthOtp(payload: {
+    email: string;
+    provider?: string;
+    session?: {
+      access_token?: string;
+      refresh_token?: string;
+      expires_at?: number;
+      [key: string]: any;
+    };
+    userMetadata?: Record<string, any>;
+  }): Observable<{
+    success: boolean;
+    requireMfa: boolean;
+    hasTotp: boolean;
+    email: string;
+    message: string;
+  }> {
+    return this.http.post<{
+      success: boolean;
+      requireMfa: boolean;
+      hasTotp: boolean;
+      email: string;
+      message: string;
+    }>(`${this.API_URL}/oauth-challenge`, payload);
+  }
+
   login(credentials: { email: string; password: string; isSso?: boolean }): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.API_URL}/login`, credentials).pipe(
       tap((response) => {
@@ -680,6 +784,7 @@ export class AuthService {
   }
 
   setSession(user: UserProfile, session: AuthSession): void {
+    this.isOAuthChallenging = false;
     const meta = user.user_metadata || {};
     let resolvedRole: 'admin' | 'security_officer' | 'user' = 'user';
 
@@ -1302,6 +1407,15 @@ export class AuthService {
 
     try {
       this.supabaseService.client.auth.onAuthStateChange((event, session) => {
+        if (
+          this.isOAuthChallenging ||
+          (this.isBrowser && (
+            (window.location.hash.includes('access_token=') && !window.location.hash.includes('type=recovery')) ||
+            (window.location.search.includes('code=') && !window.location.search.includes('type=recovery'))
+          ))
+        ) {
+          return;
+        }
         if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
           if (!this.token() || event === 'SIGNED_IN') {
             const user = session.user;
@@ -1348,6 +1462,15 @@ export class AuthService {
       // Catch any existing active session from OAuth redirects
       if (!this.token()) {
         this.supabaseService.client.auth.getSession().then(({ data }) => {
+          if (
+            this.isOAuthChallenging ||
+            (this.isBrowser && (
+              (window.location.hash.includes('access_token=') && !window.location.hash.includes('type=recovery')) ||
+              (window.location.search.includes('code=') && !window.location.search.includes('type=recovery'))
+            ))
+          ) {
+            return;
+          }
           if (data?.session && !this.token()) {
             const user = data.session.user;
             const meta = user.user_metadata || {};

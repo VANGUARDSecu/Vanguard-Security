@@ -176,5 +176,15 @@ describe('VerifyOtpComponent', () => {
       expect(component.method()).toBe('email_otp');
       expect(component.challengeId()).toBe('sso_mfa_fallback_456');
     });
+
+    it('SCRUM-163: should display Google Account 2-Step Verification when provider is google', () => {
+      component.provider.set('google');
+      component.email.set('google.user@gmail.com');
+      fixture.detectChanges();
+
+      const el: HTMLElement = fixture.nativeElement;
+      expect(el.textContent).toContain('Google Account 2-Step Verification');
+      expect(el.textContent).toContain('google.user@gmail.com');
+    });
   });
 });

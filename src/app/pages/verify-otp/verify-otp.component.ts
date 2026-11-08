@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChildren, QueryList, ElementRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChildren, QueryList, ElementRef, PLATFORM_ID } from '@angular/core';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse } from '../../services/auth.service';
@@ -17,6 +17,8 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly platformId = inject(PLATFORM_ID);
+  private readonly isBrowser = isPlatformBrowser(this.platformId);
 
   @ViewChildren('otpInput') otpInputs!: QueryList<ElementRef<HTMLInputElement>>;
 
@@ -88,6 +90,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   private resendInterval: any = null;
 
   ngOnInit(): void {
+    if (!this.isBrowser) {
+      return;
+    }
     this.route.queryParams.subscribe((params) => {
       const emailParam = params['email'] || this.authService.pendingEmail() || 'user@vanguard.security';
       const modeParam = (params['mode'] || this.authService.pendingMode() || 'signup') as

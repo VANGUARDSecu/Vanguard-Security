@@ -4,6 +4,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay } from 'rxjs';
 import { SupabaseService } from './supabase.service';
+import { environment } from '../../environments/environment';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
 
 export interface UserProfile {
@@ -159,7 +160,7 @@ export class AuthService {
   private readonly router = inject(Router);
   private readonly platformId = inject(PLATFORM_ID);
 
-  private readonly API_URL = 'http://localhost:3000/auth';
+  private readonly API_URL = `${environment.apiUrl}/auth`;
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly supabaseService = inject(SupabaseService);
 
@@ -416,7 +417,7 @@ export class AuthService {
             ? error.error.message.join(', ')
             : error.error.message;
         } else if (error.status === 0) {
-          errorMessage = 'Unable to connect to the backend server. Is it running on http://localhost:3000?';
+          errorMessage = `Unable to connect to the backend server. Is it running on ${environment.apiUrl}?`;
         }
         return throwError(() => new Error(errorMessage));
       })
@@ -563,7 +564,7 @@ export class AuthService {
           let msg = error.error?.message;
           if (!msg) {
             if (error.status === 0 || error.message?.includes('Failed to fetch')) {
-              msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
+              msg = `Unable to connect to backend authentication service (${this.API_URL}). Please ensure the backend server is running.`;
             } else {
               msg = 'Could not dispatch credentials email to employee.';
             }

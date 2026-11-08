@@ -329,6 +329,21 @@ To preview the production SSR build locally:
 npm run serve:ssr:frontend-vanguard
 ```
 
+### Cloudflare Pages Deployment & Environment Configuration (SCRUM-162)
+
+Vanguard Frontend is configured for seamless deployment to **Cloudflare Pages** while fully preserving local development workflows:
+
+1. **Environment Separation**:
+   - `src/environments/environment.ts`: Default environment used during local testing (`npm start` / `ng serve`) pointing to `http://localhost:3000`.
+   - `src/environments/environment.prod.ts`: Production environment injected during `npm run build` (`ng build`) configured with your production backend URL (e.g. `https://backend-vanguard.onrender.com`).
+2. **Cloudflare Pages Build Settings**:
+   - **Framework preset**: `None` or `Angular`
+   - **Build command**: `npm run build`
+   - **Build output directory**: `dist/frontend-vanguard/browser`
+   - **Environment Variables**: Add `NODE_VERSION=20` (or `22`) in Cloudflare Settings -> Environment variables.
+3. **SPA Deep-Linking (`_redirects`)**:
+   - The static rule in `public/_redirects` (`/* /index.html 200`) is automatically published to `dist/frontend-vanguard/browser/_redirects` so deep routes (e.g. `/dashboard`, `/login`) resolve without 404s.
+
 ---
 
 ## Architecture & Project Structure

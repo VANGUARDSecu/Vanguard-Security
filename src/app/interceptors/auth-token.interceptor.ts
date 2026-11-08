@@ -2,9 +2,14 @@ import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from '../services/auth.service';
+import { environment } from '../../environments/environment';
 
 /** Backend API origin whose requests should carry the Vanguard bearer token. */
-const BACKEND_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const BACKEND_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  ...(environment.apiUrl ? [environment.apiUrl] : []),
+];
 
 /** Endpoints that should not attempt automatic 401 token refresh retry. */
 const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/verify-otp', '/auth/verify-totp', '/auth/signup'];

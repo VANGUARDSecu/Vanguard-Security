@@ -1,5 +1,6 @@
 import { Injectable, inject, signal, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
+import { environment } from '../../../../environments/environment';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -29,7 +30,7 @@ export class VaultCryptoService {
   private readonly http = inject(HttpClient);
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
-  private readonly apiBase = 'http://localhost:3000';
+  private readonly apiBase = environment.apiUrl;
 
   /** In-memory session key material. Null while locked. */
   private sessionKey: CryptoKey | null = null;

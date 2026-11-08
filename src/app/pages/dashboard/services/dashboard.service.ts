@@ -6,6 +6,7 @@ import { Observable, tap, catchError, throwError, of } from 'rxjs';
 import { AuthService } from '../../../services/auth.service';
 import { SupabaseService } from '../../../services/supabase.service';
 import { VaultCryptoService } from './vault-crypto.service';
+import { environment } from '../../../../environments/environment';
 import { generateTotp } from '../../../shared/crypto/totp';
 import {
   ProtocolStatus,
@@ -59,7 +60,7 @@ export class DashboardService {
   private readonly http = inject(HttpClient);
 
   // Backend API base (tenant-scoped apps endpoints live under /apps). SCRUM-94.
-  private readonly apiBase = 'http://localhost:3000';
+  private readonly apiBase = environment.apiUrl;
 
   // Helper methods for dynamic localStorage persistence
   private loadStored<T>(key: string, defaultVal: T): T {
@@ -5479,7 +5480,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // Sync to backend preferences endpoint if available
     if (this.isBrowser && this.user()?.email) {
-      fetch('http://localhost:3000/auth/security-preferences', {
+      fetch(`${this.apiBase}/auth/security-preferences`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

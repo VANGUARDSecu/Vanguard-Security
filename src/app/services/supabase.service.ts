@@ -1,9 +1,10 @@
 import { Injectable, inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { environment } from '../../environments/environment';
 
-export const SUPABASE_URL = 'https://jvvidkrwrqhlshnpufdd.supabase.co';
-export const SUPABASE_ANON_KEY = 'sb_publishable_M44OcaVK3zxBqdy1Sj4SzQ_0FHQCzU5';
+export const SUPABASE_URL = environment.supabaseUrl;
+export const SUPABASE_ANON_KEY = environment.supabaseAnonKey;
 
 let globalClient: SupabaseClient | null = null;
 

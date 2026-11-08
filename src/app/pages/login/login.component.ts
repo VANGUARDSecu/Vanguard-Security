@@ -98,10 +98,26 @@ export class LoginComponent implements OnInit {
           prompt: params['prompt'] || '',
         };
         this.ssoParams.set(ssoData);
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('vanguard_sso_pending', JSON.stringify(ssoData));
+        }
 
         // Pre-fill email from login_hint if provided and not yet authenticated
         if (!this.authService.isLoggedIn() && params['login_hint']) {
           this.loginForm.patchValue({ email: params['login_hint'] });
+        }
+      } else if (typeof sessionStorage !== 'undefined') {
+        const pending = sessionStorage.getItem('vanguard_sso_pending');
+        if (pending) {
+          try {
+            const ssoData = JSON.parse(pending);
+            if (ssoData?.client_id && ssoData?.redirect_uri) {
+              this.ssoParams.set(ssoData);
+              if (!this.authService.isLoggedIn() && ssoData.login_hint) {
+                this.loginForm.patchValue({ email: ssoData.login_hint });
+              }
+            }
+          } catch {}
         }
       }
 
@@ -225,7 +241,7 @@ export class LoginComponent implements OnInit {
   onContinueSso(): void {
     const user = this.currentUser();
     if (user) {
-      this.initiateSsoMfaForUser(user);
+      this.approveSsoForUser(user);
     }
   }
 
@@ -433,6 +449,9 @@ export class LoginComponent implements OnInit {
           localStorage.setItem('vanguard_connected_apps', JSON.stringify([newConn, ...filtered]));
         } catch {}
 
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('vanguard_sso_pending');
+        }
         if (res.redirectUrl) {
           window.location.href = res.redirectUrl;
         } else {
@@ -453,18 +472,19 @@ export class LoginComponent implements OnInit {
   switchAccount(): void {
     const sso = this.ssoParams();
     const hint = sso?.['login_hint'];
-    this.authService.logout();
+    this.authService.logout(true, false);
     if (sso) {
-      setTimeout(() => {
-        this.router.navigate(['/login'], { queryParams: sso });
-        if (hint) {
-          this.loginForm.patchValue({ email: hint });
-        }
-      }, 50);
+      this.router.navigate(['/login'], { queryParams: sso });
+      if (hint) {
+        this.loginForm.patchValue({ email: hint });
+      }
     }
   }
 
   onCancelSso(): void {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('vanguard_sso_pending');
+    }
     const sso = this.ssoParams();
     if (!sso) return;
 
@@ -487,6 +507,10 @@ export class LoginComponent implements OnInit {
   }
 
   onGoogleLogin(): void {
+    const sso = this.ssoParams();
+    if (sso && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('vanguard_sso_pending', JSON.stringify(sso));
+    }
     this.showNotification('success', 'Connecting to Google Authentication...', 6000);
     this.authService.getGoogleOAuthUrl().subscribe({
       next: (response) => {

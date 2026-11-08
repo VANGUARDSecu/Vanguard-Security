@@ -73,6 +73,13 @@ describe('authTokenInterceptor (SCRUM-131 & SCRUM-142)', () => {
     req.flush([]);
   });
 
+  it('does not attach Authorization header to pre-auth oauth-challenge requests (SCRUM-163)', () => {
+    http.post('http://localhost:3000/auth/oauth-challenge', { email: 'user@test.com' }).subscribe();
+    const req = httpMock.expectOne('http://localhost:3000/auth/oauth-challenge');
+    expect(req.request.headers.has('Authorization')).toBe(false);
+    req.flush({ success: true });
+  });
+
   it('catches 401 error, calls refreshSession(), and replays request with refreshed token (SCRUM-142)', () => {
     const refreshSpy = vi.spyOn(auth, 'refreshSession').mockReturnValue(
       of({

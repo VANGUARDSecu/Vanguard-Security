@@ -4,10 +4,11 @@ import { authGuard } from './auth.guard';
 import { AuthService } from '../services/auth.service';
 import { signal } from '@angular/core';
 
-describe('authGuard (SCRUM-155)', () => {
+describe('authGuard (SCRUM-155 & SCRUM-163)', () => {
   let mockAuthService: {
     isLoggedIn: ReturnType<typeof vi.fn>;
     isPasswordResetRequired: ReturnType<typeof signal<boolean>>;
+    isChallengingOAuth?: boolean;
   };
   let mockRouter: {
     navigate: ReturnType<typeof vi.fn>;
@@ -17,6 +18,7 @@ describe('authGuard (SCRUM-155)', () => {
     mockAuthService = {
       isLoggedIn: vi.fn(),
       isPasswordResetRequired: signal<boolean>(false),
+      isChallengingOAuth: false,
     };
     mockRouter = {
       navigate: vi.fn(),
@@ -37,6 +39,16 @@ describe('authGuard (SCRUM-155)', () => {
 
     expect(result).toBe(false);
     expect(mockRouter.navigate).toHaveBeenCalledWith(['/login']);
+  });
+
+  it('does NOT redirect to /login when isChallengingOAuth is true (SCRUM-163)', () => {
+    mockAuthService.isLoggedIn.mockReturnValue(false);
+    mockAuthService.isChallengingOAuth = true;
+
+    const result = TestBed.runInInjectionContext(() => authGuard({} as any, {} as any));
+
+    expect(result).toBe(false);
+    expect(mockRouter.navigate).not.toHaveBeenCalled();
   });
 
   it('redirects to /reset-password when isPasswordResetRequired is true', () => {

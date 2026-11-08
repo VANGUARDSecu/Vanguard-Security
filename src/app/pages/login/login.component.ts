@@ -75,8 +75,14 @@ export class LoginComponent implements OnInit {
   private notificationTimer: any = null;
 
   ngOnInit(): void {
-    // Check if URL contains SSO/OIDC parameters
+    // Check if URL contains query params like error, message, or SSO/OIDC parameters
     this.route.queryParams.subscribe((params) => {
+      if (params['error']) {
+        this.showNotification('error', params['error'], 8000);
+      }
+      if (params['message']) {
+        this.showNotification('success', params['message'], 6000);
+      }
       if (params['client_id'] && params['redirect_uri']) {
         const ssoData = {
           client_id: params['client_id'],

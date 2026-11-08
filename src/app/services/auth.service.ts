@@ -311,13 +311,33 @@ export class AuthService {
         if (accessToken) {
           let email = 'verified_user@vanguard.security';
           let userId = 'vanguard_user_' + Date.now();
+          let firstName = '';
+          let lastName = '';
           try {
             const payload = JSON.parse(atob(accessToken.split('.')[1]));
             if (payload.email) email = payload.email;
             if (payload.sub) userId = payload.sub;
+            const meta = payload.user_metadata || {};
+            firstName =
+              meta['full_name']?.split(' ')[0] ||
+              meta['name']?.split(' ')[0] ||
+              meta['first_name'] ||
+              '';
+            lastName =
+              meta['full_name']?.split(' ').slice(1).join(' ') ||
+              meta['name']?.split(' ').slice(1).join(' ') ||
+              meta['last_name'] ||
+              '';
           } catch {}
 
-          const userProfile: UserProfile = { id: userId, email };
+          const userProfile: UserProfile = {
+            id: userId,
+            email,
+            firstName,
+            lastName,
+            role: 'user',
+            accountType: 'individual',
+          };
           this.setSession(userProfile, {
             access_token: accessToken,
             refresh_token: refreshToken || undefined,
@@ -335,13 +355,55 @@ export class AuthService {
         }
       }
 
-      // 2. Check URL Search Query params (e.g. ?code=... or ?token_hash=...)
+      // 2. Check URL Search Query params (e.g. ?code=... from PKCE OAuth or ?token_hash=...)
       const queryParams = new URLSearchParams(window.location.search);
       const code = queryParams.get('code');
       const tokenHash = queryParams.get('token_hash');
       const type = queryParams.get('type');
 
-      if (code || tokenHash) {
+      if (code) {
+        this.supabaseService.client.auth
+          .exchangeCodeForSession(code)
+          .then(({ data, error }) => {
+            if (error) {
+              console.warn('Supabase exchangeCodeForSession notice:', error.message);
+              return;
+            }
+            if (data?.session) {
+              const user = data.session.user;
+              const meta = user.user_metadata || {};
+              const userProfile: UserProfile = {
+                id: user.id,
+                email: user.email || 'verified_user@vanguard.security',
+                firstName:
+                  meta['full_name']?.split(' ')[0] ||
+                  meta['name']?.split(' ')[0] ||
+                  meta['first_name'] ||
+                  'User',
+                lastName:
+                  meta['full_name']?.split(' ').slice(1).join(' ') ||
+                  meta['name']?.split(' ').slice(1).join(' ') ||
+                  meta['last_name'] ||
+                  '',
+                role: 'user',
+                accountType: 'individual',
+              };
+              this.setSession(userProfile, {
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token,
+                expires_at: data.session.expires_at,
+              });
+              window.history.replaceState(null, '', window.location.pathname);
+              this.router.navigate(['/dashboard']);
+            }
+          })
+          .catch((e) => {
+            console.warn('Supabase exchangeCodeForSession exception:', e);
+          });
+        return;
+      }
+
+      if (tokenHash) {
         let email = 'user@vanguard.security';
         const userProfile: UserProfile = { id: 'user_' + Date.now(), email };
         this.setSession(userProfile, {
@@ -963,7 +1025,14 @@ export class AuthService {
   }
 
   getGoogleOAuthUrl(): Observable<{ success: boolean; url: string }> {
-    return this.http.get<{ success: boolean; url: string }>(`${this.API_URL}/google`).pipe(
+    const redirectUri = this.isBrowser
+      ? `${window.location.origin}/dashboard`
+      : 'http://localhost:4200/dashboard';
+    return this.http
+      .get<{ success: boolean; url: string }>(
+        `${this.API_URL}/google?redirect_to=${encodeURIComponent(redirectUri)}`
+      )
+      .pipe(
       catchError((error: HttpErrorResponse) => {
         let errorMessage = 'Google Authentication is currently unavailable.';
         if (error.error && error.error.message) {
@@ -1233,7 +1302,35 @@ export class AuthService {
 
     try {
       this.supabaseService.client.auth.onAuthStateChange((event, session) => {
-        if (event === 'TOKEN_REFRESHED' && session) {
+        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+          if (!this.token() || event === 'SIGNED_IN') {
+            const user = session.user;
+            const meta = user.user_metadata || {};
+            const profile: UserProfile = {
+              id: user.id,
+              email: user.email || '',
+              firstName:
+                meta['full_name']?.split(' ')[0] ||
+                meta['name']?.split(' ')[0] ||
+                meta['first_name'] ||
+                'User',
+              lastName:
+                meta['full_name']?.split(' ').slice(1).join(' ') ||
+                meta['name']?.split(' ').slice(1).join(' ') ||
+                meta['last_name'] ||
+                '',
+              role: 'user',
+              accountType: 'individual',
+            };
+            this.setSession(profile, {
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              expires_at: session.expires_at,
+            });
+            if (this.isBrowser && (window.location.pathname === '/' || window.location.pathname === '/login')) {
+              this.router.navigate(['/dashboard']);
+            }
+          }
           this.token.set(session.access_token);
           this.refreshToken.set(session.refresh_token || null);
           this.tokenExpiresAt.set(session.expires_at || null);
@@ -1247,6 +1344,40 @@ export class AuthService {
           }
         }
       });
+
+      // Catch any existing active session from OAuth redirects
+      if (!this.token()) {
+        this.supabaseService.client.auth.getSession().then(({ data }) => {
+          if (data?.session && !this.token()) {
+            const user = data.session.user;
+            const meta = user.user_metadata || {};
+            const profile: UserProfile = {
+              id: user.id,
+              email: user.email || '',
+              firstName:
+                meta['full_name']?.split(' ')[0] ||
+                meta['name']?.split(' ')[0] ||
+                meta['first_name'] ||
+                'User',
+              lastName:
+                meta['full_name']?.split(' ').slice(1).join(' ') ||
+                meta['name']?.split(' ').slice(1).join(' ') ||
+                meta['last_name'] ||
+                '',
+              role: 'user',
+              accountType: 'individual',
+            };
+            this.setSession(profile, {
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token,
+              expires_at: data.session.expires_at,
+            });
+            if (this.isBrowser && (window.location.pathname === '/' || window.location.pathname === '/login')) {
+              this.router.navigate(['/dashboard']);
+            }
+          }
+        }).catch(() => {});
+      }
     } catch {}
 
     const tok = this.token();

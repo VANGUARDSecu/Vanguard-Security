@@ -340,7 +340,7 @@ Vanguard Frontend is configured for seamless deployment to **Cloudflare Pages** 
    - **Framework preset**: `None` or `Angular`
    - **Build command**: `npm run build`
    - **Build output directory**: `dist/frontend-vanguard/browser`
-   - **Environment Variables**: Add `NODE_VERSION=20` (or `22`) in Cloudflare Settings -> Environment variables.
+   - **Environment Variables**: Add `NODE_VERSION=24` (or `22.22.3`) in Cloudflare Settings -> Environment variables (or let Cloudflare detect the `.nvmrc` / `.node-version` file for Node 24).
 3. **SPA Deep-Linking (`_redirects`)**:
    - The static rule in `public/_redirects` (`/* /index.html 200`) is automatically published to `dist/frontend-vanguard/browser/_redirects` so deep routes (e.g. `/dashboard`, `/login`) resolve without 404s.
 

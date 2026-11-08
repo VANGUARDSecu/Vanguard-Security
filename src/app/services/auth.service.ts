@@ -1407,44 +1407,7 @@ export class AuthService {
 
     try {
       this.supabaseService.client.auth.onAuthStateChange((event, session) => {
-        if (
-          this.isOAuthChallenging ||
-          (this.isBrowser && (
-            (window.location.hash.includes('access_token=') && !window.location.hash.includes('type=recovery')) ||
-            (window.location.search.includes('code=') && !window.location.search.includes('type=recovery'))
-          ))
-        ) {
-          return;
-        }
-        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-          if (!this.token() || event === 'SIGNED_IN') {
-            const user = session.user;
-            const meta = user.user_metadata || {};
-            const profile: UserProfile = {
-              id: user.id,
-              email: user.email || '',
-              firstName:
-                meta['full_name']?.split(' ')[0] ||
-                meta['name']?.split(' ')[0] ||
-                meta['first_name'] ||
-                'User',
-              lastName:
-                meta['full_name']?.split(' ').slice(1).join(' ') ||
-                meta['name']?.split(' ').slice(1).join(' ') ||
-                meta['last_name'] ||
-                '',
-              role: 'user',
-              accountType: 'individual',
-            };
-            this.setSession(profile, {
-              access_token: session.access_token,
-              refresh_token: session.refresh_token,
-              expires_at: session.expires_at,
-            });
-            if (this.isBrowser && (window.location.pathname === '/' || window.location.pathname === '/login')) {
-              this.router.navigate(['/dashboard']);
-            }
-          }
+        if (event === 'TOKEN_REFRESHED' && session) {
           this.token.set(session.access_token);
           this.refreshToken.set(session.refresh_token || null);
           this.tokenExpiresAt.set(session.expires_at || null);
@@ -1458,49 +1421,6 @@ export class AuthService {
           }
         }
       });
-
-      // Catch any existing active session from OAuth redirects
-      if (!this.token()) {
-        this.supabaseService.client.auth.getSession().then(({ data }) => {
-          if (
-            this.isOAuthChallenging ||
-            (this.isBrowser && (
-              (window.location.hash.includes('access_token=') && !window.location.hash.includes('type=recovery')) ||
-              (window.location.search.includes('code=') && !window.location.search.includes('type=recovery'))
-            ))
-          ) {
-            return;
-          }
-          if (data?.session && !this.token()) {
-            const user = data.session.user;
-            const meta = user.user_metadata || {};
-            const profile: UserProfile = {
-              id: user.id,
-              email: user.email || '',
-              firstName:
-                meta['full_name']?.split(' ')[0] ||
-                meta['name']?.split(' ')[0] ||
-                meta['first_name'] ||
-                'User',
-              lastName:
-                meta['full_name']?.split(' ').slice(1).join(' ') ||
-                meta['name']?.split(' ').slice(1).join(' ') ||
-                meta['last_name'] ||
-                '',
-              role: 'user',
-              accountType: 'individual',
-            };
-            this.setSession(profile, {
-              access_token: data.session.access_token,
-              refresh_token: data.session.refresh_token,
-              expires_at: data.session.expires_at,
-            });
-            if (this.isBrowser && (window.location.pathname === '/' || window.location.pathname === '/login')) {
-              this.router.navigate(['/dashboard']);
-            }
-          }
-        }).catch(() => {});
-      }
     } catch {}
 
     const tok = this.token();
@@ -1534,6 +1454,11 @@ export class AuthService {
       this.http.post(`${this.API_URL}/logout`, {}).subscribe({
         error: () => {},
       });
+
+      try {
+        this.supabaseService.client.auth.signOut().catch(() => {});
+      } catch {}
+
       // SCRUM-153: Thoroughly purge all session, directory, tenant, devices, apps, and workspace state from storage
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -1547,9 +1472,6 @@ export class AuthService {
       keysToRemove.forEach((k) => localStorage.removeItem(k));
       sessionStorage.clear();
 
-      try {
-        this.supabaseService.client.auth.signOut().catch(() => {});
-      } catch {}
     }
     this.currentUser.set(null);
     this.token.set(null);

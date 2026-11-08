@@ -128,7 +128,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.serverClientName.set(params['clientName'] || params['client_name']);
       }
       if (params['client_id'] && params['redirect_uri']) {
-        this.ssoParams.set({
+        const ssoData = {
           client_id: params['client_id'],
           redirect_uri: params['redirect_uri'],
           response_type: params['response_type'] || 'code',
@@ -137,7 +137,11 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           code_challenge: params['code_challenge'] || '',
           code_challenge_method: params['code_challenge_method'] || 'S256',
           nonce: params['nonce'] || '',
-        });
+        };
+        this.ssoParams.set(ssoData);
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('vanguard_sso_pending', JSON.stringify(ssoData));
+        }
 
         // If SSO params are present but challengeId is missing, auto-initiate challenge
         if (!this.challengeId() && emailParam) {
@@ -161,6 +165,41 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
               this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
             },
           });
+        }
+      } else if (typeof sessionStorage !== 'undefined') {
+        const pending = sessionStorage.getItem('vanguard_sso_pending');
+        if (pending) {
+          try {
+            const ssoData = JSON.parse(pending);
+            if (ssoData?.client_id && ssoData?.redirect_uri) {
+              this.ssoParams.set(ssoData);
+              if (ssoData.client_name || ssoData.clientName) {
+                this.serverClientName.set(ssoData.client_name || ssoData.clientName);
+              }
+              if (!this.challengeId() && emailParam) {
+                this.authService.initiateSsoMfa({
+                  client_id: ssoData.client_id,
+                  redirect_uri: ssoData.redirect_uri,
+                  email: emailParam,
+                  response_type: ssoData.response_type || 'code',
+                  scope: ssoData.scope || 'openid profile email roles',
+                  state: ssoData.state || '',
+                  nonce: ssoData.nonce || '',
+                  code_challenge: ssoData.code_challenge || '',
+                  code_challenge_method: ssoData.code_challenge_method || 'S256',
+                }).subscribe({
+                  next: (res) => {
+                    this.challengeId.set(res.challengeId);
+                    this.serverClientName.set(res.clientName || null);
+                    this.startResendTimer(res.resendCooldownSeconds || 60);
+                  },
+                  error: (err: Error) => {
+                    this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
+                  },
+                });
+              }
+            }
+          } catch {}
         }
       }
 
@@ -606,6 +645,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   }
 
   private handleSsoRedirect(res: { code?: string; redirectUrl?: string; message?: string }): void {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('vanguard_sso_pending');
+    }
     const sso = this.ssoParams();
     this.isLoading.set(true);
     this.showNotification('success', 'Identity and 2FA verified! Authorizing access to client application...', 4000);
@@ -733,6 +775,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   }
 
   onCancelSso(): void {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('vanguard_sso_pending');
+    }
     const sso = this.ssoParams();
     if (!sso) return;
 

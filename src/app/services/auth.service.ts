@@ -395,13 +395,23 @@ export class AuthService {
                 const targetEmail = res.email || finalEmail;
                 this.pendingEmail.set(targetEmail);
                 this.pendingMode.set('signin');
+                let pendingSso: Record<string, string> | null = null;
+                try {
+                  const raw = sessionStorage.getItem('vanguard_sso_pending');
+                  if (raw) pendingSso = JSON.parse(raw);
+                } catch {}
+
+                const queryParams: Record<string, string> = {
+                  email: targetEmail,
+                  mode: 'signin',
+                  hasTotp: res.hasTotp ? 'true' : 'false',
+                  provider: 'google',
+                };
+                if (pendingSso) {
+                  Object.assign(queryParams, pendingSso);
+                }
                 this.router.navigate(['/verify-otp'], {
-                  queryParams: {
-                    email: targetEmail,
-                    mode: 'signin',
-                    hasTotp: res.hasTotp ? 'true' : 'false',
-                    provider: 'google',
-                  },
+                  queryParams,
                 });
               },
               error: (err) => {
@@ -409,8 +419,13 @@ export class AuthService {
                 console.warn('OAuth challenge initiation failed:', err);
                 const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
                 const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
+                let pendingSso: Record<string, string> | null = null;
+                try {
+                  const raw = sessionStorage.getItem('vanguard_sso_pending');
+                  if (raw) pendingSso = JSON.parse(raw);
+                } catch {}
                 this.router.navigate(['/login'], {
-                  queryParams: { error: errorMsg },
+                  queryParams: { error: errorMsg, ...(pendingSso || {}) },
                 });
               },
             });
@@ -495,13 +510,23 @@ export class AuthService {
                   const targetEmail = res.email || email;
                   this.pendingEmail.set(targetEmail);
                   this.pendingMode.set('signin');
+                  let pendingSso: Record<string, string> | null = null;
+                  try {
+                    const raw = sessionStorage.getItem('vanguard_sso_pending');
+                    if (raw) pendingSso = JSON.parse(raw);
+                  } catch {}
+
+                  const queryParams: Record<string, string> = {
+                    email: targetEmail,
+                    mode: 'signin',
+                    hasTotp: res.hasTotp ? 'true' : 'false',
+                    provider: 'google',
+                  };
+                  if (pendingSso) {
+                    Object.assign(queryParams, pendingSso);
+                  }
                   this.router.navigate(['/verify-otp'], {
-                    queryParams: {
-                      email: targetEmail,
-                      mode: 'signin',
-                      hasTotp: res.hasTotp ? 'true' : 'false',
-                      provider: 'google',
-                    },
+                    queryParams,
                   });
                 },
                 error: (err) => {
@@ -509,8 +534,13 @@ export class AuthService {
                   console.warn('OAuth challenge initiation failed:', err);
                   const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
                   const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
+                  let pendingSso: Record<string, string> | null = null;
+                  try {
+                    const raw = sessionStorage.getItem('vanguard_sso_pending');
+                    if (raw) pendingSso = JSON.parse(raw);
+                  } catch {}
                   this.router.navigate(['/login'], {
-                    queryParams: { error: errorMsg },
+                    queryParams: { error: errorMsg, ...(pendingSso || {}) },
                   });
                 },
               });
@@ -1489,7 +1519,7 @@ export class AuthService {
     return this.http.get<any[]>(`${this.API_URL}/directory-users`, { params });
   }
 
-  logout(): void {
+  logout(preserveSso = false, navigateToLogin = true): void {
     if (this.autoRefreshTimer) {
       clearTimeout(this.autoRefreshTimer);
       this.autoRefreshTimer = null;
@@ -1514,15 +1544,23 @@ export class AuthService {
         }
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k));
+      let ssoPending: string | null = null;
+      if (preserveSso) {
+        ssoPending = sessionStorage.getItem('vanguard_sso_pending');
+      }
       sessionStorage.clear();
-
+      if (preserveSso && ssoPending) {
+        sessionStorage.setItem('vanguard_sso_pending', ssoPending);
+      }
     }
     this.currentUser.set(null);
     this.token.set(null);
     this.refreshToken.set(null);
     this.tokenExpiresAt.set(null);
     this.isPasswordResetRequired.set(false);
-    this.router.navigate(['/login']);
+    if (navigateToLogin) {
+      this.router.navigate(['/login']);
+    }
   }
 
   isLoggedIn(): boolean {

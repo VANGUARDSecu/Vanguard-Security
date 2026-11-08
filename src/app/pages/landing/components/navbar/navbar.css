@@ -28,12 +28,16 @@ nav.scrolled {
 .shield-icon {
   width: 36px;
   height: 36px;
-  filter: drop-shadow(0 0 8px rgba(59,130,246,0.5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.shield-icon svg { 
-  width: 36px; 
-  height: 36px; 
+.nav-brand-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(59,130,246,0.5));
 }
 
 .logo-text {

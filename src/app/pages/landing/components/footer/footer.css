@@ -23,11 +23,15 @@ footer {
 .shield-icon-small {
   width: 24px;
   height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.shield-icon-small svg {
+.footer-brand-img {
   width: 24px;
   height: 24px;
+  object-fit: contain;
 }
 
 .footer-logo-text {

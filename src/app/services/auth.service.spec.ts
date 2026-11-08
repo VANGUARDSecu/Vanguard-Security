@@ -339,4 +339,36 @@ describe('AuthService', () => {
       expect(service.isAdmin()).toBe(false);
     });
   });
+
+  describe('Google OAuth 2-Step OTP Challenge (SCRUM-163)', () => {
+    it('challengeOAuthOtp dispatches POST /auth/oauth-challenge and returns OTP challenge metadata', () => {
+      let result: any = null;
+      service.challengeOAuthOtp({
+        email: 'google.dev@example.com',
+        provider: 'google',
+        session: { access_token: 'g_at_123', refresh_token: 'g_rt_123' },
+        userMetadata: { full_name: 'Google Dev' },
+      }).subscribe((res) => {
+        result = res;
+      });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/auth/oauth-challenge'));
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body.email).toBe('google.dev@example.com');
+      expect(req.request.body.provider).toBe('google');
+
+      req.flush({
+        success: true,
+        requireMfa: true,
+        hasTotp: false,
+        email: 'google.dev@example.com',
+        message: 'OAuth identity verified. Please complete 2-Step Verification.',
+      });
+
+      expect(result).toBeDefined();
+      expect(result.success).toBe(true);
+      expect(result.requireMfa).toBe(true);
+      expect(result.email).toBe('google.dev@example.com');
+    });
+  });
 });

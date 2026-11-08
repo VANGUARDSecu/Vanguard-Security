@@ -10,12 +10,12 @@ import { authGuard } from './guards/auth.guard';
 import { Landing } from './pages/landing';
 
 export const routes: Routes = [
-  { path: '', component: Landing },
-  { path: 'login', component: LoginComponent },
-  { path: 'register', component: RegisterComponent },
-  { path: 'verify-otp', component: VerifyOtpComponent },
-  { path: 'forgot-password', component: ForgotPasswordComponent },
-  { path: 'reset-password', component: ResetPasswordComponent },
-  { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard] },
+  { path: '', component: Landing, title: 'Vanguard Security - Zero-Trust IAM & Access Platform' },
+  { path: 'login', component: LoginComponent, title: 'Vanguard - Sign In' },
+  { path: 'register', component: RegisterComponent, title: 'Vanguard - Create Account' },
+  { path: 'verify-otp', component: VerifyOtpComponent, title: 'Vanguard - 2-Step Verification' },
+  { path: 'forgot-password', component: ForgotPasswordComponent, title: 'Vanguard - Forgot Password' },
+  { path: 'reset-password', component: ResetPasswordComponent, title: 'Vanguard - Reset Password' },
+  { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard], title: 'Vanguard - Security Dashboard' },
   { path: '**', redirectTo: '' },
 ];

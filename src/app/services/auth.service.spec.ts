@@ -370,5 +370,18 @@ describe('AuthService', () => {
       expect(result.requireMfa).toBe(true);
       expect(result.email).toBe('google.dev@example.com');
     });
+
+    it('parseJwtPayload handles base64url characters (- and _) and missing padding', () => {
+      // payload: { sub: '1234567890', name: 'John Doe', iat: 1516239022 }
+      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.xxx';
+      const parsed = service.parseJwtPayload(token);
+      expect(parsed['sub']).toBe('1234567890');
+      expect(parsed['name']).toBe('John Doe');
+    });
+
+    it('parseJwtPayload safely returns empty object on invalid token', () => {
+      expect(service.parseJwtPayload('')).toEqual({});
+      expect(service.parseJwtPayload('invalid')).toEqual({});
+    });
   });
 });

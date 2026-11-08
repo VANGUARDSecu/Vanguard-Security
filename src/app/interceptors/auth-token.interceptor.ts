@@ -12,7 +12,19 @@ const BACKEND_ORIGINS = [
 ];
 
 /** Endpoints that should not attempt automatic 401 token refresh retry. */
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/verify-otp', '/auth/verify-totp', '/auth/signup'];
+const NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/verify-otp',
+  '/auth/verify-totp',
+  '/auth/signup',
+  '/auth/oauth-challenge',
+];
+
+/** Pre-auth public endpoints that should never carry ambient bearer tokens from previous sessions. */
+const NO_AUTH_PATHS = [
+  '/auth/oauth-challenge',
+];
 
 /**
  * Attaches the Supabase access token as `Authorization: Bearer <token>` to
@@ -27,7 +39,8 @@ const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh', '/auth/verify-otp', '/
  */
 export const authTokenInterceptor: HttpInterceptorFn = (req, next) => {
   const isBackend = BACKEND_ORIGINS.some((o) => req.url.startsWith(o));
-  if (!isBackend || req.headers.has('Authorization')) {
+  const isNoAuth = NO_AUTH_PATHS.some((p) => req.url.includes(p));
+  if (!isBackend || isNoAuth || req.headers.has('Authorization')) {
     return next(req);
   }
   const authService = inject(AuthService);

@@ -298,6 +298,35 @@ export class AuthService {
 
   private isOAuthChallenging = false;
 
+  get isChallengingOAuth(): boolean {
+    return this.isOAuthChallenging;
+  }
+
+  /**
+   * Safely decodes base64url-encoded JWT payloads without throwing InvalidCharacterError
+   */
+  parseJwtPayload(token: string): Record<string, any> {
+    try {
+      if (!token) return {};
+      const parts = token.split('.');
+      if (parts.length < 2) return {};
+      let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4 !== 0) {
+        base64 += '=';
+      }
+      const jsonStr = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      return JSON.parse(jsonStr) || {};
+    } catch (e) {
+      console.warn('Failed to parse JWT payload:', e);
+      return {};
+    }
+  }
+
   private checkForOAuthCallback(): void {
     if (!this.isBrowser) return;
 
@@ -311,32 +340,25 @@ export class AuthService {
         const type = params.get('type');
 
         if (accessToken) {
-          let email = 'verified_user@vanguard.security';
-          let userId = 'vanguard_user_' + Date.now();
-          let firstName = '';
-          let lastName = '';
-          let meta: Record<string, any> = {};
-          try {
-            const payload = JSON.parse(atob(accessToken.split('.')[1]));
-            if (payload.email) email = payload.email;
-            if (payload.sub) userId = payload.sub;
-            meta = payload.user_metadata || {};
-            firstName =
-              meta['full_name']?.split(' ')[0] ||
-              meta['name']?.split(' ')[0] ||
-              meta['first_name'] ||
-              '';
-            lastName =
-              meta['full_name']?.split(' ').slice(1).join(' ') ||
-              meta['name']?.split(' ').slice(1).join(' ') ||
-              meta['last_name'] ||
-              '';
-          } catch {}
+          const payload = this.parseJwtPayload(accessToken);
+          let email = (payload['email'] || '').trim().toLowerCase();
+          let userId = payload['sub'] || ('vanguard_user_' + Date.now());
+          const meta: Record<string, any> = payload['user_metadata'] || {};
+          const firstName =
+            meta['full_name']?.split(' ')[0] ||
+            meta['name']?.split(' ')[0] ||
+            meta['first_name'] ||
+            '';
+          const lastName =
+            meta['full_name']?.split(' ').slice(1).join(' ') ||
+            meta['name']?.split(' ').slice(1).join(' ') ||
+            meta['last_name'] ||
+            '';
 
           if (type === 'recovery') {
             const userProfile: UserProfile = {
               id: userId,
-              email,
+              email: email || 'verified_user@vanguard.security',
               firstName,
               lastName,
               role: 'user',
@@ -356,35 +378,53 @@ export class AuthService {
           // SCRUM-163: Zero-Trust OAuth 2-Step Verification Challenge
           this.isOAuthChallenging = true;
           window.history.replaceState(null, '', window.location.pathname);
-          this.challengeOAuthOtp({
-            email,
-            provider: 'google',
-            session: {
-              access_token: accessToken,
-              refresh_token: refreshToken || undefined,
-            },
-            userMetadata: meta,
-          }).subscribe({
-            next: (res) => {
-              this.pendingEmail.set(res.email || email);
-              this.pendingMode.set('signin');
-              this.router.navigate(['/verify-otp'], {
-                queryParams: {
-                  email: res.email || email,
-                  mode: 'signin',
-                  hasTotp: res.hasTotp ? 'true' : 'false',
-                  provider: 'google',
-                },
-              });
-            },
-            error: (err) => {
-              this.isOAuthChallenging = false;
-              console.warn('OAuth challenge initiation failed:', err);
-              this.router.navigate(['/login'], {
-                queryParams: { error: 'Failed to initiate 2-Step Verification.' },
-              });
-            },
-          });
+
+          const initiateChallenge = (resolvedEmail: string) => {
+            const finalEmail = resolvedEmail || email || 'verified_user@vanguard.security';
+            this.challengeOAuthOtp({
+              email: finalEmail,
+              provider: 'google',
+              session: {
+                access_token: accessToken,
+                refresh_token: refreshToken || undefined,
+              },
+              userMetadata: meta,
+            }).subscribe({
+              next: (res) => {
+                this.isOAuthChallenging = false;
+                const targetEmail = res.email || finalEmail;
+                this.pendingEmail.set(targetEmail);
+                this.pendingMode.set('signin');
+                this.router.navigate(['/verify-otp'], {
+                  queryParams: {
+                    email: targetEmail,
+                    mode: 'signin',
+                    hasTotp: res.hasTotp ? 'true' : 'false',
+                    provider: 'google',
+                  },
+                });
+              },
+              error: (err) => {
+                this.isOAuthChallenging = false;
+                console.warn('OAuth challenge initiation failed:', err);
+                const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
+                const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
+                this.router.navigate(['/login'], {
+                  queryParams: { error: errorMsg },
+                });
+              },
+            });
+          };
+
+          if (!email && this.isBrowser) {
+            this.supabaseService.client.auth.getUser(accessToken).then(({ data }) => {
+              initiateChallenge(data?.user?.email || '');
+            }).catch(() => {
+              initiateChallenge('');
+            });
+          } else {
+            initiateChallenge(email);
+          }
           return;
         }
       }
@@ -451,11 +491,13 @@ export class AuthService {
                 userMetadata: meta,
               }).subscribe({
                 next: (res) => {
-                  this.pendingEmail.set(res.email || email);
+                  this.isOAuthChallenging = false;
+                  const targetEmail = res.email || email;
+                  this.pendingEmail.set(targetEmail);
                   this.pendingMode.set('signin');
                   this.router.navigate(['/verify-otp'], {
                     queryParams: {
-                      email: res.email || email,
+                      email: targetEmail,
                       mode: 'signin',
                       hasTotp: res.hasTotp ? 'true' : 'false',
                       provider: 'google',
@@ -465,8 +507,10 @@ export class AuthService {
                 error: (err) => {
                   this.isOAuthChallenging = false;
                   console.warn('OAuth challenge initiation failed:', err);
+                  const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
+                  const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
                   this.router.navigate(['/login'], {
-                    queryParams: { error: 'Failed to initiate 2-Step Verification.' },
+                    queryParams: { error: errorMsg },
                   });
                 },
               });

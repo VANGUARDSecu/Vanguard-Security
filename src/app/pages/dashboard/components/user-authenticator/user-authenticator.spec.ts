@@ -107,4 +107,49 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     expect(component.formErrorMessage()).toBeTruthy();
     expect(component.showAddModal()).toBe(true);
   });
+
+  it('SCRUM-166: should parse standard otpauth://totp/ URIs from 3rd-party apps and enroll account', async () => {
+    component.openAddModal('uri');
+    component.formOtpAuthUri =
+      'otpauth://totp/GitHub:alex@vanguard.dev?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&algorithm=SHA256&digits=6&period=30';
+
+    const parsedOk = component.applyOtpAuthUri();
+    expect(parsedOk).toBe(true);
+    expect(component.formIssuer).toBe('GitHub');
+    expect(component.formAccountName).toBe('alex@vanguard.dev');
+    expect(component.formSecret).toBe('JBSWY3DPEHPK3PXP');
+    expect(component.formAlgorithm).toBe('SHA256');
+
+    component.saveAccount();
+    await dashboardService.refreshTotpCodes();
+
+    const added = component.activeTotpAccounts().find((a) => a.issuer === 'GitHub');
+    expect(added).toBeDefined();
+    expect(added?.accountName).toBe('alex@vanguard.dev');
+    expect(added?.algorithm).toBe('SHA256');
+    expect(added?.currentCode).toMatch(/^\d{6}$/);
+  });
+
+  it('SCRUM-166: should filter 2FA accounts by search query and allow editing existing accounts', () => {
+    dashboardService.addTotpAccount({
+      issuer: 'Figma',
+      accountName: 'designer@vanguard.dev',
+      secret: 'JBSWY3DPEHPK3PXP',
+    });
+    dashboardService.addTotpAccount({
+      issuer: 'Facebook',
+      accountName: 'social@vanguard.dev',
+      secret: 'JBSWY3DPEHPK3PXP',
+    });
+
+    component.searchQuery.set('figma');
+    expect(component.filteredTotpAccounts().length).toBe(1);
+    expect(component.filteredTotpAccounts()[0].issuer).toBe('Figma');
+
+    component.openEditModal(component.filteredTotpAccounts()[0]);
+    component.formAccountName = 'lead.designer@vanguard.dev';
+    component.saveAccount();
+
+    expect(component.filteredTotpAccounts()[0].accountName).toBe('lead.designer@vanguard.dev');
+  });
 });

@@ -453,6 +453,10 @@ export interface TotpAccount {
   issuer: string;
   accountName: string;
   secret: string;
+  digits?: 6 | 8;
+  period?: 30 | 60;
+  algorithm?: 'SHA1' | 'SHA256' | 'SHA512';
+  icon?: string;
   currentCode?: string;
   remainingSeconds?: number;
 }

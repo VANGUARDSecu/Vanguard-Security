@@ -88,6 +88,19 @@ export class UserMyApps {
   readonly launchMarkLoggedIn = signal<boolean>(true);
   readonly activeAutofillToast = this.dashboardService.activeAutofillToast;
 
+  // SCRUM-173: Billing & Monthly Subscription State
+  readonly showPaywallModal = this.dashboardService.showPaywallModal;
+  readonly paywallFeatureMessage = this.dashboardService.paywallFeatureMessage;
+  readonly subscriptionPlanId = this.dashboardService.subscriptionPlanId;
+  readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly maxIntegratedAppsLimit = this.dashboardService.maxIntegratedAppsLimit;
+  readonly currentPlanDisplayName = this.dashboardService.currentPlanDisplayName;
+  readonly billingInvoices = this.dashboardService.billingInvoices;
+  readonly showGatewayConfigForm = signal<boolean>(false);
+  gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
+  gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
+  gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
+
   // Request Application Form Signals
   readonly reqDeliveryMode = signal<'sso' | 'extension'>('extension');
   readonly reqAppName = signal<string>('');
@@ -418,6 +431,14 @@ export class UserMyApps {
       return;
     }
 
+    // SCRUM-173: Enforce 1-application Free tier paywall restriction
+    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.activeAppsList().length);
+    if (!entitlement.allowed) {
+      this.dashboardService.requestAppError.set(entitlement.reason || 'Free tier limit reached.');
+      this.dashboardService.openPaywallModal(entitlement.reason);
+      return;
+    }
+
     this.isSubmittingRequest.set(true);
 
     const ok = this.dashboardService.submitAppRequest({
@@ -550,6 +571,14 @@ export class UserMyApps {
       return;
     }
 
+    // SCRUM-173: Enforce 1-application Free tier paywall restriction
+    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.personalApps().length);
+    if (!entitlement.allowed) {
+      this.addAppError.set(entitlement.reason || 'Free tier is limited to 1 integrated application.');
+      this.dashboardService.openPaywallModal(entitlement.reason);
+      return;
+    }
+
     let formattedUrl = this.newAppUrl.trim();
     if (!/^https?:\/\//i.test(formattedUrl)) {
       formattedUrl = 'https://' + formattedUrl;
@@ -586,5 +615,36 @@ export class UserMyApps {
 
   getMatchingVaultCredentials(app: SaaSApp): PersonalVaultItem[] {
     return this.dashboardService.findCredentialsForDomain(app.launchUrl || app.name);
+  }
+
+  // SCRUM-173: Billing & Monthly Subscription Modal Actions
+  openBillingModal(): void {
+    this.gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
+    this.gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
+    this.gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
+    this.dashboardService.openPaywallModal(
+      'Manage your monthly subscription plan, paywall limits, and Sandbox Payment Gateway API configuration.'
+    );
+  }
+
+  closeBillingModal(): void {
+    this.dashboardService.closePaywallModal();
+  }
+
+  upgradePlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.dashboardService.upgradeSubscriptionPlan(planId);
+  }
+
+  cancelPlan(): void {
+    this.dashboardService.cancelSubscriptionPlan();
+  }
+
+  saveGatewaySettings(): void {
+    this.dashboardService.saveSandboxGatewayConfig(
+      this.gatewayProviderInput,
+      this.gatewayUrlInput,
+      this.gatewayApiKeyInput,
+    );
+    this.showGatewayConfigForm.set(false);
   }
 }

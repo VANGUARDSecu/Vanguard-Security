@@ -10,13 +10,56 @@
                   : 'Launch your assigned enterprise SaaS apps with zero-trust credentials.' }}
               </p>
             </div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <button
+                type="button"
+                class="btn-ghost"
+                style="border: 1px solid rgba(139, 92, 246, 0.45); background: rgba(139, 92, 246, 0.12); color: #c4b5fd; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;"
+                (click)="openBillingModal()"
+              >
+                💳 Plan: {{ currentPlanDisplayName() }} • {{ activeAppsList().length }}/{{ isFreeTier() ? '1' : '∞' }} Apps
+              </button>
+              <button
+                type="button"
+                class="btn-primary-action"
+                (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
+              >
+                <span class="btn-plus">+</span>
+                <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SCRUM-173: Subscription Tier & Paywall Status Banner -->
+          <div
+            style="margin-bottom: 18px; padding: 12px 16px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
+            [style.background]="isFreeTier() ? 'rgba(245, 158, 11, 0.08)' : 'rgba(16, 185, 129, 0.08)'"
+            [style.border]="isFreeTier() ? '1px solid rgba(245, 158, 11, 0.32)' : '1px solid rgba(16, 185, 129, 0.32)'"
+          >
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span
+                style="font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;"
+                [style.background]="isFreeTier() ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'"
+                [style.color]="isFreeTier() ? '#fbbf24' : '#34d399'"
+              >
+                {{ isFreeTier() ? 'FREE TIER (1 APP LIMIT)' : 'PAID PLAN ACTIVE (UNLIMITED APPS)' }}
+              </span>
+              <span style="font-size: 13px; color: #e2e8f0;">
+                <strong>{{ currentPlanDisplayName() }}</strong> —
+                <span *ngIf="isFreeTier()">
+                  Free tier allows <strong>1 integrated application</strong> ({{ activeAppsList().length }}/1 used). Upgrade to unlock unlimited application integrations &amp; advanced zero-trust features.
+                </span>
+                <span *ngIf="!isFreeTier()">
+                  Unlimited application integrations, 3rd-party 2FA accounts, and movement audit exports are active.
+                </span>
+              </span>
+            </div>
             <button
               type="button"
-              class="btn-primary-action"
-              (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
+              style="padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.45); background: rgba(59, 130, 246, 0.18); color: #93c5fd; font-size: 12px; font-weight: 600; cursor: pointer;"
+              (click)="openBillingModal()"
             >
-              <span class="btn-plus">+</span>
-              <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
+              {{ isFreeTier() ? '⚡ Upgrade to Unlimited (Sandbox)' : '⚙️ Manage Subscription & Gateway' }}
             </button>
           </div>
 
@@ -895,6 +938,229 @@
         <button type="button" class="btn-primary-action" (click)="confirmSecureAppLaunch()">
           ✓ Verify &amp; Launch {{ targetApp.name }}
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SCRUM-173: Billing System / Monthly Subscription & Paywall Modal
+       ================================================================ -->
+  <div class="modal-backdrop" *ngIf="showPaywallModal()" (click)="closeBillingModal()">
+    <div
+      class="modal-card modal-card-wide"
+      style="max-width: 820px;"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <div class="modal-icon-badge" style="background: rgba(139, 92, 246, 0.18); border-color: rgba(139, 92, 246, 0.45);">
+            💳
+          </div>
+          <div>
+            <h3 class="modal-title">Vanguard Billing &amp; Monthly Subscription Plans</h3>
+            <p class="modal-subtitle">
+              Current Plan: <strong>{{ currentPlanDisplayName() }}</strong> • Sandbox Payment Gateway Mode
+            </p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" (click)="closeBillingModal()">✕</button>
+      </div>
+
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <!-- Paywall Trigger Banner -->
+        <div
+          *ngIf="paywallFeatureMessage()"
+          style="padding: 12px 14px; border-radius: 10px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); font-size: 13px; color: #fde68a; margin-bottom: 16px;"
+        >
+          🔒 <strong>Subscription Entitlement Notice:</strong> {{ paywallFeatureMessage() }}
+        </div>
+
+        <!-- Individual Plans Section -->
+        <div style="margin-bottom: 18px;">
+          <div style="font-size: 13px; font-weight: 700; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;">
+            Individual Account Plans
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+            <div
+              *ngFor="let plan of dashboardService.individualBillingPlans"
+              style="padding: 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.75); display: flex; flex-direction: column; justify-content: space-between;"
+              [style.border]="subscriptionPlanId() === plan.id ? '2px solid #10b981' : '1px solid rgba(148, 163, 184, 0.22)'"
+            >
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 15px; font-weight: 700; color: #f8fafc;">{{ plan.name }}</span>
+                  <span style="font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.2); color: #93c5fd;">
+                    {{ plan.limitLabel }}
+                  </span>
+                </div>
+                <div style="font-size: 22px; font-weight: 800; color: #38bdf8; margin-bottom: 10px;">
+                  ${{ plan.priceMonthlyUsd }}<span style="font-size: 12px; font-weight: 400; color: #94a3b8;">/month</span>
+                </div>
+                <ul style="margin: 0 0 12px 16px; padding: 0; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
+                  <li *ngFor="let feat of plan.features">{{ feat }}</li>
+                </ul>
+              </div>
+              <div>
+                <button
+                  *ngIf="plan.id === 'personal_pro' && subscriptionPlanId() !== 'personal_pro'"
+                  type="button"
+                  class="btn-primary-action"
+                  style="width: 100%; justify-content: center;"
+                  (click)="upgradePlan('personal_pro')"
+                >
+                  ⚡ Subscribe to Personal Pro ($5/mo Sandbox)
+                </button>
+                <button
+                  *ngIf="plan.id === 'free' && subscriptionPlanId() !== 'free'"
+                  type="button"
+                  class="btn-ghost"
+                  style="width: 100%;"
+                  (click)="cancelPlan()"
+                >
+                  Downgrade to Free Tier (1 App Limit)
+                </button>
+                <div
+                  *ngIf="subscriptionPlanId() === plan.id"
+                  style="text-align: center; padding: 8px; border-radius: 8px; background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 12px; font-weight: 700;"
+                >
+                  ✓ Active Plan
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Company / Organization Plans Section -->
+        <div style="margin-bottom: 18px;">
+          <div style="font-size: 13px; font-weight: 700; color: #c4b5fd; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;">
+            Company / Organization Account Plans
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px;">
+            <div
+              *ngFor="let plan of dashboardService.companyBillingPlans"
+              style="padding: 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.75); display: flex; flex-direction: column; justify-content: space-between;"
+              [style.border]="subscriptionPlanId() === plan.id ? '2px solid #8b5cf6' : '1px solid rgba(148, 163, 184, 0.22)'"
+            >
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 15px; font-weight: 700; color: #f8fafc;">{{ plan.name }}</span>
+                  <span style="font-size: 10px; padding: 2px 7px; border-radius: 999px; background: rgba(139, 92, 246, 0.2); color: #ddd6fe;">
+                    {{ plan.limitLabel }}
+                  </span>
+                </div>
+                <div style="font-size: 22px; font-weight: 800; color: #a78bfa; margin-bottom: 10px;">
+                  ${{ plan.priceMonthlyUsd }}<span style="font-size: 12px; font-weight: 400; color: #94a3b8;">/month</span>
+                </div>
+                <ul style="margin: 0 0 12px 16px; padding: 0; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
+                  <li *ngFor="let feat of plan.features">{{ feat }}</li>
+                </ul>
+              </div>
+              <div>
+                <button
+                  *ngIf="plan.id === 'business_pro' && subscriptionPlanId() !== 'business_pro'"
+                  type="button"
+                  class="btn-primary-action"
+                  style="width: 100%; justify-content: center;"
+                  (click)="upgradePlan('business_pro')"
+                >
+                  ⚡ Subscribe Business Pro ($29/mo)
+                </button>
+                <button
+                  *ngIf="plan.id === 'enterprise' && subscriptionPlanId() !== 'enterprise'"
+                  type="button"
+                  class="btn-primary-action"
+                  style="width: 100%; justify-content: center; background: linear-gradient(135deg, #7c3aed, #4f46e5);"
+                  (click)="upgradePlan('enterprise')"
+                >
+                  🚀 Subscribe Enterprise ($79/mo)
+                </button>
+                <div
+                  *ngIf="subscriptionPlanId() === plan.id"
+                  style="text-align: center; padding: 8px; border-radius: 8px; background: rgba(139, 92, 246, 0.2); color: #ddd6fe; font-size: 12px; font-weight: 700;"
+                >
+                  ✓ Active Plan
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sandbox Payment Gateway API Configuration -->
+        <div
+          style="padding: 12px 14px; border-radius: 10px; background: rgba(30, 41, 59, 0.65); border: 1px solid rgba(148, 163, 184, 0.2); margin-bottom: 14px;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #e2e8f0;">
+                🔌 Sandbox Payment Gateway API Configuration
+              </div>
+              <div style="font-size: 11px; color: #94a3b8;">
+                Endpoint: <code>{{ dashboardService.sandboxGatewayUrl() }}</code>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn-ghost"
+              style="font-size: 12px;"
+              (click)="showGatewayConfigForm.set(!showGatewayConfigForm())"
+            >
+              {{ showGatewayConfigForm() ? 'Hide API Settings' : 'Configure Sandbox API' }}
+            </button>
+          </div>
+
+          <div *ngIf="showGatewayConfigForm()" style="margin-top: 12px;">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label class="form-label">Gateway Provider Name</label>
+                <input
+                  type="text"
+                  [(ngModel)]="gatewayProviderInput"
+                  class="form-input"
+                  placeholder="e.g. Stripe / PayMongo / Custom Sandbox"
+                />
+              </div>
+              <div class="form-group flex-1">
+                <label class="form-label">Sandbox Gateway API URL</label>
+                <input
+                  type="text"
+                  [(ngModel)]="gatewayUrlInput"
+                  class="form-input"
+                  placeholder="https://sandbox-gateway.vanguard.local/v1"
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Sandbox API Secret / Publishable Key</label>
+              <input
+                type="password"
+                [(ngModel)]="gatewayApiKeyInput"
+                class="form-input"
+                placeholder="sk_sandbox_..."
+              />
+            </div>
+            <button type="button" class="btn-primary-action" (click)="saveGatewaySettings()">
+              Save Sandbox Gateway API
+            </button>
+          </div>
+        </div>
+
+        <!-- Sandbox Billing Invoices -->
+        <div *ngIf="billingInvoices().length > 0">
+          <div style="font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 6px;">
+            Recent Sandbox Invoices
+          </div>
+          <div
+            *ngFor="let inv of billingInvoices()"
+            style="display: flex; justify-content: space-between; font-size: 12px; color: #cbd5e1; padding: 6px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.12);"
+          >
+            <span>{{ inv.date }} • <strong>{{ inv.planName }}</strong> (<code>{{ inv.transactionId }}</code>)</span>
+            <span style="color: #34d399; font-weight: 700;">${{ inv.amountUsd }}.00 PAID</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost" (click)="closeBillingModal()">Close</button>
       </div>
     </div>
   </div>

@@ -29,6 +29,27 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### 3rd-Party 2FA Authenticator, Pre-Launch Security Verification, Employee App Provisioning, Movement Audit & Billing System (SCRUM-166 → SCRUM-173)
+- **3rd-Party 2FA Authenticator — Google Authenticator Parity (SCRUM-166)**:
+  - Full RFC 6238 / RFC 4226 TOTP generator supporting **SHA-1, SHA-256, and SHA-512**, **6 or 8 digits**, and **15s / 30s / 60s periods**.
+  - Add external accounts (Google, GitHub, Facebook, AWS, Figma, Discord, Microsoft, etc.) via **QR Code Image Upload / Camera Scan**, **`otpauth://totp/...` URI paste**, or **Manual Base32 Secret Key entry**, plus `otpauth://` URI backup export/import.
+- **Individual Account SSO Auto-Provisioning & Direct Browser Approval (SCRUM-167 & SCRUM-168)**:
+  - Added ** Option 1: Approve Directly in Browser** on `/verify-otp` during OIDC Single Sign-On flows alongside **Mobile Push MFA** and **6-Digit Email OTP**.
+  - Preserves OIDC query parameters across `/login` ↔ `/register` ↔ `/verify-otp` so Individual accounts seamlessly complete SSO into `dummy-web`.
+- **Pre-Launch Security Verification & Auto-Fill Credential Injection (SCRUM-169)**:
+  - Launching any application from **My Applications** opens a **Pre-Launch Security Verification Modal** (Master/Account Password, 6-Digit PIN/TOTP, or Active Session Approval) before opening the target app.
+  - Automatically injects the saved/assigned username and password via `#vg_autofill=1` hash parameters consumed by `extension-vanguard` (`tryVerifiedLaunchAutofill`) and displays a **Launch Auto-Fill Assistant Banner**.
+  - Includes an **Already Logged In** session toggle per application card; when already logged in, clicking Launch opens the application immediately without re-prompting.
+- **Admin Company Account Provisioning & Employee Visibility Isolation (SCRUM-171)**:
+  - Company Admins can click **🔑 Provision App** on any employee row in **Directory Users** to assign an application (Figma, GitHub, Facebook, Slack, AWS, Dummy Web, or Custom) along with the Admin-created username and password.
+  - Strict employee isolation ensures only that specific employee sees the provisioned app and credentials in their Vanguard dashboard.
+- **Comprehensive Account Movement Audit Trail (SCRUM-172)**:
+  - Company Admins can filter **Security Audit Logs** by **Employee** and **Movement Type** (`All Movements`, `Sign-In / SSO`, `Sign-Out / Revoke`, `App Launches`, `MFA & Verification`, `Vault & Security`).
+  - Individual accounts have matching movement filter pills in **Personal Activity History**.
+- **Billing System / Monthly Subscription & Paywall Restrictions (SCRUM-173)**:
+  - Free tier accounts (Individual and Company) are restricted to **1 integrated application** (`1/1 Apps`). Attempting to integrate a 2nd application opens the **Subscription & Paywall Modal**.
+  - Includes **Personal Pro ($5/mo)**, **Business Pro ($29/mo)**, and **Enterprise Zero-Trust ($79/mo)** plans with 1-click **Sandbox Payment Gateway Checkout** and runtime **Sandbox Gateway API URL & Secret Key** configuration.
+
 ### Functional Application Request Modal, Duplicate Prevention & Admin Governance (SCRUM-161)
 - **Interactive Multi-Protocol Request Modal**:
   - Replaced unstyled stub with an accessible modal supporting delivery mode selection:

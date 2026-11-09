@@ -641,7 +641,7 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(url).toContain('https://www.figma.com/login#');
       expect(url).toContain('vg_autofill=1');
       expect(url).toContain('vg_u=designer%40acme.com');
-      expect(url).toContain('vg_p=MyPass123!');
+      expect(url).toContain('vg_p=MyPass123');
     });
   });
 
@@ -698,6 +698,41 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
 
       const elenaApps = component.activeAppsList();
       expect(elenaApps.find((a) => a.name === 'Figma Enterprise')).toBeUndefined();
+    });
+  });
+
+  // ==========================================================================
+  // SCRUM-173: Billing System / Monthly Subscription & 1-App Free Tier Paywall
+  // ==========================================================================
+  describe('SCRUM-173 Billing System / Monthly Subscription & Paywall Restrictions', () => {
+    it('allows 1 integrated application on Free tier, blocks the 2nd with the Paywall Modal, and unlocks unlimited after Sandbox upgrade', () => {
+      dashboardService.cancelSubscriptionPlan();
+      dashboardService.personalApps.set([]);
+
+      // 1st application is allowed on Free tier
+      component.openAddPersonalAppModal();
+      component.newAppName = 'Figma';
+      component.newAppUrl = 'https://www.figma.com/login';
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(1);
+      expect(component.showPaywallModal()).toBe(false);
+
+      // 2nd application on Free tier is blocked by paywall
+      component.openAddPersonalAppModal();
+      component.newAppName = 'GitHub';
+      component.newAppUrl = 'https://github.com/login';
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(1);
+      expect(component.showPaywallModal()).toBe(true);
+      expect(component.addAppError()).toContain('Free tier is limited to 1 integrated application');
+
+      // Upgrade to Personal Pro ($5/mo Sandbox) unlocks unlimited apps
+      component.upgradePlan('personal_pro');
+      expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
+      expect(component.showPaywallModal()).toBe(false);
+
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(2);
     });
   });
   });

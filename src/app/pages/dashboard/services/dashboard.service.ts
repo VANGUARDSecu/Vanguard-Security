@@ -7173,5 +7173,256 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.authService.logout();
   }
 
+  // ==========================================
+  // SCRUM-173: Billing System / Monthly Subscription & Paywall Restrictions
+  // ==========================================
+  readonly subscriptionPlanId = signal<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>(
+    this.loadStored<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>('vanguard_billing_plan', 'free')
+  );
+  readonly subscriptionStatus = signal<'active' | 'past_due' | 'canceled'>(
+    this.loadStored<'active' | 'past_due' | 'canceled'>('vanguard_billing_status', 'active')
+  );
+  readonly showPaywallModal = signal<boolean>(false);
+  readonly paywallFeatureMessage = signal<string>('');
+
+  readonly sandboxGatewayProvider = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_provider', 'Vanguard Sandbox Payment Gateway')
+  );
+  readonly sandboxGatewayUrl = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_url', 'https://sandbox-gateway.vanguard.local/v1')
+  );
+  readonly sandboxGatewayApiKey = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_key', 'sk_sandbox_vanguard_default')
+  );
+  readonly billingInvoices = signal<Array<{
+    id: string;
+    date: string;
+    planName: string;
+    amountUsd: number;
+    status: 'paid' | 'open' | 'void';
+    transactionId: string;
+  }>>(this.loadStored('vanguard_billing_invoices', []));
+
+  readonly isFreeTier = computed<boolean>(() => {
+    return this.subscriptionPlanId() === 'free' || this.subscriptionStatus() !== 'active';
+  });
+
+  readonly maxIntegratedAppsLimit = computed<number>(() => {
+    return this.isFreeTier() ? 1 : -1;
+  });
+
+  readonly currentPlanDisplayName = computed<string>(() => {
+    const plan = this.subscriptionPlanId();
+    if (plan === 'personal_pro') return 'Personal Pro ($5/mo)';
+    if (plan === 'business_pro') return 'Business Pro ($29/mo)';
+    if (plan === 'enterprise') return 'Enterprise Zero-Trust ($79/mo)';
+    return this.isIndividual() ? 'Free Starter ($0/mo)' : 'Company Free ($0/mo)';
+  });
+
+  readonly individualBillingPlans = [
+    {
+      id: 'free' as const,
+      name: 'Free Starter',
+      priceMonthlyUsd: 0,
+      badge: 'Current Default',
+      limitLabel: 'Max 1 Integrated App',
+      features: [
+        'Up to 1 integrated SSO / Auto-Fill application',
+        'Up to 3 3rd-party 2FA Authenticator accounts',
+        'Up to 5 Zero-Knowledge Personal Vault items',
+        '7-day account movement audit history',
+        'Standard Email OTP & Browser SSO approval',
+      ],
+    },
+    {
+      id: 'personal_pro' as const,
+      name: 'Personal Pro',
+      priceMonthlyUsd: 5,
+      badge: 'Recommended',
+      limitLabel: 'Unlimited Integrated Apps',
+      features: [
+        'Unlimited integrated SSO & Auto-Fill applications',
+        'Unlimited 3rd-party 2FA Authenticator accounts (SHA1/256/512)',
+        'Unlimited Zero-Knowledge Personal Vault items & password health check',
+        'Pre-launch Verification + Instant Auto-Fill Credential Injection',
+        '90-day movement audit trail + CSV export',
+      ],
+    },
+  ];
+
+  readonly companyBillingPlans = [
+    {
+      id: 'free' as const,
+      name: 'Company Free Trial',
+      priceMonthlyUsd: 0,
+      badge: 'Starter',
+      limitLabel: 'Max 1 Integrated App',
+      features: [
+        'Max 1 integrated company application',
+        'Up to 3 directory employees',
+        '24-hour movement audit trail',
+        'Basic employee application assignment',
+      ],
+    },
+    {
+      id: 'business_pro' as const,
+      name: 'Business Pro',
+      priceMonthlyUsd: 29,
+      badge: 'Most Popular',
+      limitLabel: 'Unlimited Integrated Apps',
+      features: [
+        'Unlimited integrated SSO, OIDC, SAML & Auto-Fill applications',
+        'Up to 50 directory employees & User Group matrices',
+        'Admin Employee Application Provisioning & Dedicated Credential Vault',
+        '30-day Employee Movement Audit Trail (Login/Logout/App Launch) + CSV export',
+        'Emergency Session Revocation & Killswitch',
+      ],
+    },
+    {
+      id: 'enterprise' as const,
+      name: 'Enterprise Zero-Trust',
+      priceMonthlyUsd: 79,
+      badge: 'Full Suite',
+      limitLabel: 'Unlimited Apps & Employees',
+      features: [
+        'Everything in Business Pro + Unlimited directory employees',
+        'Cloud LDAPS (Port 636) & Cloud RADIUS 802.1X (Port 1812) Gateways',
+        '365-day cryptographic forensic audit retention & SIEM export',
+        'Hardware FIDO2 / Passkey enforcement & Tenant-wide Global Killswitch',
+      ],
+    },
+  ];
+
+  canIntegrateAnotherApp(currentAppCount?: number): {
+    allowed: boolean;
+    limit: number;
+    currentCount: number;
+    reason?: string;
+  } {
+    const count =
+      typeof currentAppCount === 'number'
+        ? currentAppCount
+        : this.activeAppsList().length;
+    const limit = this.maxIntegratedAppsLimit();
+    if (limit !== -1 && count >= limit) {
+      return {
+        allowed: false,
+        limit,
+        currentCount: count,
+        reason: `Free tier is limited to ${limit} integrated application (${count}/${limit} used). Upgrade to ${
+          this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
+        } to integrate unlimited applications.`,
+      };
+    }
+    return {
+      allowed: true,
+      limit,
+      currentCount: count,
+    };
+  }
+
+  openPaywallModal(reason?: string): void {
+    this.paywallFeatureMessage.set(
+      reason ||
+        `Your Free tier plan is limited to 1 integrated application. Upgrade to ${
+          this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
+        } for unlimited application integrations and advanced zero-trust features.`
+    );
+    this.showPaywallModal.set(true);
+  }
+
+  closePaywallModal(): void {
+    this.showPaywallModal.set(false);
+  }
+
+  saveSandboxGatewayConfig(provider: string, apiUrl: string, apiKey: string): void {
+    const cleanProvider = provider.trim() || 'Vanguard Sandbox Payment Gateway';
+    const cleanUrl = apiUrl.trim() || 'https://sandbox-gateway.vanguard.local/v1';
+    const cleanKey = apiKey.trim() || 'sk_sandbox_vanguard_default';
+
+    this.sandboxGatewayProvider.set(cleanProvider);
+    this.sandboxGatewayUrl.set(cleanUrl);
+    this.sandboxGatewayApiKey.set(cleanKey);
+
+    this.saveStored('vanguard_sandbox_gateway_provider', cleanProvider);
+    this.saveStored('vanguard_sandbox_gateway_url', cleanUrl);
+    this.saveStored('vanguard_sandbox_gateway_key', cleanKey);
+
+    this.http
+      .post(`${this.apiBase}/billing/configure-gateway`, {
+        provider: cleanProvider,
+        apiUrl: cleanUrl,
+        apiKey: cleanKey,
+      })
+      .subscribe({ error: () => {} });
+
+    this.showAdminNotice(`Sandbox Payment Gateway configured (${cleanUrl}).`);
+  }
+
+  upgradeSubscriptionPlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    const allPlans = [...this.individualBillingPlans, ...this.companyBillingPlans];
+    const targetPlan = allPlans.find((p) => p.id === planId);
+    const price = targetPlan?.priceMonthlyUsd ?? (planId === 'personal_pro' ? 5 : planId === 'business_pro' ? 29 : 79);
+    const name = targetPlan?.name ?? planId;
+
+    this.subscriptionPlanId.set(planId);
+    this.subscriptionStatus.set('active');
+    this.saveStored('vanguard_billing_plan', planId);
+    this.saveStored('vanguard_billing_status', 'active');
+
+    const invoice = {
+      id: `inv_sbx_${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      planName: name,
+      amountUsd: price,
+      status: 'paid' as const,
+      transactionId: `txn_sbx_${Math.random().toString(36).slice(2, 10)}`,
+    };
+    const nextInvoices = [invoice, ...this.billingInvoices()];
+    this.billingInvoices.set(nextInvoices);
+    this.saveStored('vanguard_billing_invoices', nextInvoices);
+
+    this.http
+      .post(`${this.apiBase}/billing/checkout`, {
+        accountType: this.accountType(),
+        planId,
+        gatewayApiUrl: this.sandboxGatewayUrl(),
+        gatewayApiKey: this.sandboxGatewayApiKey(),
+      })
+      .subscribe({ error: () => {} });
+
+    this.logAuditEvent(
+      `Upgraded monthly subscription to ${name} ($${price}/mo via Sandbox Payment Gateway)`,
+      'Vanguard Billing Gateway',
+      'Sandbox Checkout',
+      'success',
+      'Low',
+    );
+    this.showPaywallModal.set(false);
+    this.showAdminNotice(`Subscribed to ${name} ($${price}/mo). Unlimited application integrations unlocked!`);
+  }
+
+  cancelSubscriptionPlan(): void {
+    this.subscriptionPlanId.set('free');
+    this.subscriptionStatus.set('active');
+    this.saveStored('vanguard_billing_plan', 'free');
+    this.saveStored('vanguard_billing_status', 'active');
+
+    this.http
+      .post(`${this.apiBase}/billing/cancel`, {
+        accountType: this.accountType(),
+      })
+      .subscribe({ error: () => {} });
+
+    this.logAuditEvent(
+      'Downgraded monthly subscription to Free tier (1-application limit active)',
+      'Vanguard Billing Gateway',
+      'Subscription Manager',
+      'success',
+      'Low',
+    );
+    this.showAdminNotice('Subscription downgraded to Free tier (max 1 integrated application).');
+  }
+
 }
 

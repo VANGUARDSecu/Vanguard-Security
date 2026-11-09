@@ -12,6 +12,7 @@ describe('authGuard (SCRUM-155 & SCRUM-163)', () => {
   };
   let mockRouter: {
     navigate: ReturnType<typeof vi.fn>;
+    navigateByUrl: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -22,6 +23,7 @@ describe('authGuard (SCRUM-155 & SCRUM-163)', () => {
     };
     mockRouter = {
       navigate: vi.fn(),
+      navigateByUrl: vi.fn(),
     };
 
     TestBed.configureTestingModule({

@@ -128,7 +128,11 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         | 'signin'
         | 'recovery';
       const hasTotpParam = params['hasTotp'] === 'true';
-      const methodParam = (params['method'] || (hasTotpParam ? 'totp' : 'email_otp')) as VerificationMethod;
+      const isSso = !!(
+        (params['client_id'] && params['redirect_uri']) ||
+        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('vanguard_sso_pending'))
+      );
+      const methodParam = (params['method'] || (isSso ? 'push_approval' : (hasTotpParam ? 'totp' : 'email_otp'))) as VerificationMethod;
 
       this.email.set(emailParam);
       this.mode.set(modeParam);
@@ -172,26 +176,54 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
         // If SSO params are present but challengeId is missing, auto-initiate challenge
         if (!this.challengeId() && emailParam) {
-          this.authService.initiateSsoMfa({
-            client_id: params['client_id'],
-            redirect_uri: params['redirect_uri'],
-            email: emailParam,
-            response_type: params['response_type'] || 'code',
-            scope: params['scope'] || 'openid profile email roles',
-            state: params['state'] || '',
-            nonce: params['nonce'] || '',
-            code_challenge: params['code_challenge'] || '',
-            code_challenge_method: params['code_challenge_method'] || 'S256',
-          }).subscribe({
-            next: (res) => {
-              this.challengeId.set(res.challengeId);
-              this.serverClientName.set(res.clientName || null);
-              this.startResendTimer(res.resendCooldownSeconds || 60);
-            },
-            error: (err: Error) => {
-              this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
-            },
-          });
+          if (methodParam === 'push_approval') {
+            this.authService.initiatePushMfa({
+              client_id: params['client_id'],
+              redirect_uri: params['redirect_uri'],
+              email: emailParam,
+              response_type: params['response_type'] || 'code',
+              scope: params['scope'] || 'openid profile email roles',
+              state: params['state'] || '',
+              nonce: params['nonce'] || '',
+              code_challenge: params['code_challenge'] || '',
+              code_challenge_method: params['code_challenge_method'] || 'S256',
+            }).subscribe({
+              next: (res) => {
+                this.challengeId.set(res.challengeId);
+                this.serverClientName.set(res.clientName || null);
+                this.numberCode.set(String(res.numberMatching?.code || ''));
+                this.clientAppIcon.set(res.appIcon || '🛡️');
+                this.pushRetryCount.set(0);
+                this.pushRetriesRemaining.set(3);
+                this.startPushPolling(res.challengeId);
+              },
+              error: (err: Error) => {
+                this.showNotification('error', err.message || 'Failed to initiate Push challenge. Falling back to Email OTP.');
+                this.switchToEmailOtp();
+              },
+            });
+          } else {
+            this.authService.initiateSsoMfa({
+              client_id: params['client_id'],
+              redirect_uri: params['redirect_uri'],
+              email: emailParam,
+              response_type: params['response_type'] || 'code',
+              scope: params['scope'] || 'openid profile email roles',
+              state: params['state'] || '',
+              nonce: params['nonce'] || '',
+              code_challenge: params['code_challenge'] || '',
+              code_challenge_method: params['code_challenge_method'] || 'S256',
+            }).subscribe({
+              next: (res) => {
+                this.challengeId.set(res.challengeId);
+                this.serverClientName.set(res.clientName || null);
+                this.startResendTimer(res.resendCooldownSeconds || 60);
+              },
+              error: (err: Error) => {
+                this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
+              },
+            });
+          }
         }
       } else if (typeof sessionStorage !== 'undefined') {
         const pending = sessionStorage.getItem('vanguard_sso_pending');
@@ -204,26 +236,54 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
                 this.serverClientName.set(ssoData.client_name || ssoData.clientName);
               }
               if (!this.challengeId() && emailParam) {
-                this.authService.initiateSsoMfa({
-                  client_id: ssoData.client_id,
-                  redirect_uri: ssoData.redirect_uri,
-                  email: emailParam,
-                  response_type: ssoData.response_type || 'code',
-                  scope: ssoData.scope || 'openid profile email roles',
-                  state: ssoData.state || '',
-                  nonce: ssoData.nonce || '',
-                  code_challenge: ssoData.code_challenge || '',
-                  code_challenge_method: ssoData.code_challenge_method || 'S256',
-                }).subscribe({
-                  next: (res) => {
-                    this.challengeId.set(res.challengeId);
-                    this.serverClientName.set(res.clientName || null);
-                    this.startResendTimer(res.resendCooldownSeconds || 60);
-                  },
-                  error: (err: Error) => {
-                    this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
-                  },
-                });
+                if (methodParam === 'push_approval') {
+                  this.authService.initiatePushMfa({
+                    client_id: ssoData.client_id,
+                    redirect_uri: ssoData.redirect_uri,
+                    email: emailParam,
+                    response_type: ssoData.response_type || 'code',
+                    scope: ssoData.scope || 'openid profile email roles',
+                    state: ssoData.state || '',
+                    nonce: ssoData.nonce || '',
+                    code_challenge: ssoData.code_challenge || '',
+                    code_challenge_method: ssoData.code_challenge_method || 'S256',
+                  }).subscribe({
+                    next: (res) => {
+                      this.challengeId.set(res.challengeId);
+                      this.serverClientName.set(res.clientName || null);
+                      this.numberCode.set(String(res.numberMatching?.code || ''));
+                      this.clientAppIcon.set(res.appIcon || '🛡️');
+                      this.pushRetryCount.set(0);
+                      this.pushRetriesRemaining.set(3);
+                      this.startPushPolling(res.challengeId);
+                    },
+                    error: (err: Error) => {
+                      this.showNotification('error', err.message || 'Failed to initiate Push challenge. Falling back to Email OTP.');
+                      this.switchToEmailOtp();
+                    },
+                  });
+                } else {
+                  this.authService.initiateSsoMfa({
+                    client_id: ssoData.client_id,
+                    redirect_uri: ssoData.redirect_uri,
+                    email: emailParam,
+                    response_type: ssoData.response_type || 'code',
+                    scope: ssoData.scope || 'openid profile email roles',
+                    state: ssoData.state || '',
+                    nonce: ssoData.nonce || '',
+                    code_challenge: ssoData.code_challenge || '',
+                    code_challenge_method: ssoData.code_challenge_method || 'S256',
+                  }).subscribe({
+                    next: (res) => {
+                      this.challengeId.set(res.challengeId);
+                      this.serverClientName.set(res.clientName || null);
+                      this.startResendTimer(res.resendCooldownSeconds || 60);
+                    },
+                    error: (err: Error) => {
+                      this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
+                    },
+                  });
+                }
               }
             }
           } catch {}
@@ -356,6 +416,50 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.showNotification('error', err.message || 'Failed to dispatch Email OTP.');
       },
     });
+  }
+
+  switchToPushApproval(): void {
+    this.clearTimers();
+    const sso = this.ssoParams();
+    const email = this.email();
+    this.method.set('push_approval');
+
+    if (!sso || !email) return;
+
+    this.isLoading.set(true);
+    this.authService.initiatePushMfa({
+      client_id: sso['client_id'],
+      redirect_uri: sso['redirect_uri'],
+      email,
+      response_type: sso['response_type'] || 'code',
+      scope: sso['scope'] || 'openid profile email roles',
+      state: sso['state'] || '',
+      nonce: sso['nonce'] || '',
+      code_challenge: sso['code_challenge'] || '',
+      code_challenge_method: sso['code_challenge_method'] || 'S256',
+    }).subscribe({
+      next: (res) => {
+        this.isLoading.set(false);
+        this.challengeId.set(res.challengeId);
+        this.serverClientName.set(res.clientName || null);
+        this.numberCode.set(String(res.numberMatching?.code || ''));
+        this.clientAppIcon.set(res.appIcon || '🛡️');
+        this.pushRetryCount.set(0);
+        this.pushRetriesRemaining.set(3);
+        this.startPushPolling(res.challengeId);
+        this.showNotification('success', 'Switched to Mobile MFA / Dashboard Approval.', 4000);
+      },
+      error: (err: Error) => {
+        this.isLoading.set(false);
+        this.showNotification('error', err.message || 'Failed to initiate push challenge.');
+      },
+    });
+  }
+
+  openDashboardForApproval(): void {
+    if (typeof window !== 'undefined') {
+      window.open('/dashboard', '_blank');
+    }
   }
 
   /**

@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { LoginComponent } from './login.component';
 
 describe('LoginComponent', () => {
@@ -169,5 +169,51 @@ describe('LoginComponent', () => {
     (component as any).handleApprovalRequired(new Error('Zero-Trust Access Governance: Administrative approval is required before corporate account can access'));
     expect(component.ssoApprovalRequired()).toBe(true);
     expect(component.ssoApprovalMessage()).toContain('Zero-Trust Access Governance');
+  });
+
+  describe('SSO Authentication Flow (SCRUM-176)', () => {
+    it('should serialize pending SSO parameters to sessionStorage on onGoogleLogin', () => {
+      const ssoData = {
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+      };
+      component.ssoParams.set(ssoData);
+
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+      vi.spyOn(component.authService, 'getGoogleOAuthUrl').mockReturnValue({
+        subscribe: vi.fn(),
+      } as any);
+
+      component.onGoogleLogin();
+
+      expect(setItemSpy).toHaveBeenCalledWith('vanguard_sso_pending', JSON.stringify(ssoData));
+      setItemSpy.mockRestore();
+    });
+
+    it('should navigate to /verify-otp with method push_approval on onContinueSso', () => {
+      const router = TestBed.inject(Router);
+      const navSpy = vi.spyOn(router, 'navigate');
+
+      (component.authService as any).currentUser.set({
+        id: 'usr_sso_1',
+        email: 'user@example.com',
+      });
+
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+      });
+
+      component.onContinueSso();
+
+      expect(navSpy).toHaveBeenCalledWith(['/verify-otp'], {
+        queryParams: expect.objectContaining({
+          email: 'user@example.com',
+          mode: 'signin',
+          method: 'push_approval',
+          client_id: 'vanguard-dummy-portal',
+        }),
+      });
+    });
   });
 });

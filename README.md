@@ -29,6 +29,21 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### SSO Google OAuth Redirection, Dashboard Approval Challenge & Post-Auth MFA Method Selection (SCRUM-176)
+- **Google OAuth SSO Callback Preservation**:
+  - Google OAuth redirect URI defaults to `/login` rather than `/dashboard`, ensuring that OAuth tokens and codes are processed by `checkForOAuthCallback()` without route guard interruption.
+  - In `authGuard`, OAuth callbacks targeting protected routes are seamlessly forwarded to `/login` with full search and hash parameters, preventing unexpected navigation drops to the landing page (`/`).
+  - Active SSO query parameters (`client_id`, `redirect_uri`, `state`, etc.) are serialized to `sessionStorage` (`vanguard_sso_pending`) prior to Google authentication and restored when dispatching 2-Step Verification to `/verify-otp`.
+- **Interactive Vanguard Dashboard Approval Challenge**:
+  - Replaced the unverified frontend direct approval bypass button with an interactive number-matching challenge.
+  - When choosing browser approval, the SSO tab displays a 2-digit number challenge and starts real-time status polling against `/oauth/mfa/push/status`.
+  - The authenticated **Vanguard Dashboard** (`/dashboard`) polls `/oauth/mfa/push/pending` and surfaces a live interactive approval banner/modal showing the requesting client application, IP address, and device.
+  - The user selects the matching 2-digit number in their Vanguard Dashboard, sending `POST /oauth/mfa/push/respond` (`action: approved`, `selectedCode: number`). Once verified, the SSO tab automatically detects approval and redirects to the client application dashboard.
+  - Includes an **↗ Open Vanguard Dashboard to Approve** button in the SSO verification tab to easily open the dashboard in a new tab if not already open.
+- **Login-First Workflow & Default to Mobile MFA**:
+  - Removed the pre-login SSO verification method selector from `/login`. Users authenticate their identity first via credentials or Google OAuth.
+  - On `/verify-otp`, **Mobile MFA** (`push_approval`) is enforced as the primary default verification method for all SSO flows, with on-screen switches to **Vanguard Dashboard Approval** and **Email OTP**.
+
 ### Email Uniqueness & Recovery Hardening (SCRUM-174)
 - **Elimination of Duplicate Recovery OTP Dispatch (429 Rate-Limit Prevention)**:
   - On `/verify-otp`, removed the duplicate `authService.forgotPassword()` call on initial component mount during `mode: recovery`. The initial 8-digit recovery code dispatched during `/forgot-password` form submission is preserved, eliminating the instant Supabase `429 Too Many Requests: For security purposes, you can only request this once every 60 seconds` rate-limit error.

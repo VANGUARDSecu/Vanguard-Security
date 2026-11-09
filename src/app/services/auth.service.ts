@@ -409,6 +409,7 @@ export class AuthService {
                 };
                 if (pendingSso) {
                   Object.assign(queryParams, pendingSso);
+                  queryParams['method'] = 'push_approval';
                 }
                 this.router.navigate(['/verify-otp'], {
                   queryParams,
@@ -524,6 +525,7 @@ export class AuthService {
                   };
                   if (pendingSso) {
                     Object.assign(queryParams, pendingSso);
+                    queryParams['method'] = 'push_approval';
                   }
                   this.router.navigate(['/verify-otp'], {
                     queryParams,
@@ -1236,10 +1238,12 @@ export class AuthService {
       );
   }
 
-  getGoogleOAuthUrl(): Observable<{ success: boolean; url: string }> {
-    const redirectUri = this.isBrowser
-      ? `${window.location.origin}/dashboard`
-      : 'http://localhost:4200/dashboard';
+  getGoogleOAuthUrl(customRedirect?: string): Observable<{ success: boolean; url: string }> {
+    const redirectUri =
+      customRedirect ||
+      (this.isBrowser
+        ? `${window.location.origin}/login`
+        : 'http://localhost:4200/login');
     return this.http
       .get<{ success: boolean; url: string }>(
         `${this.API_URL}/google?redirect_to=${encodeURIComponent(redirectUri)}`
@@ -1361,6 +1365,30 @@ export class AuthService {
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/preference`;
     return this.http.post<{ success: boolean; enabled: boolean }>(url, { email, enabled }).pipe(
       catchError(() => of({ success: true, enabled }))
+    );
+  }
+
+  getPendingPushMfa(email: string): Observable<{ success: boolean; challenges: any[]; activeRequest: any | null }> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/pending?email=${encodeURIComponent(email)}`;
+    return this.http.get<{ success: boolean; challenges: any[]; activeRequest: any | null }>(url).pipe(
+      catchError(() => of({ success: true, challenges: [], activeRequest: null }))
+    );
+  }
+
+  respondPushMfa(payload: {
+    challengeId: string;
+    action: 'approved' | 'denied' | 'fraud_reported';
+    selectedCode?: number;
+  }): Observable<{ success: boolean; message: string; action?: string }> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/respond`;
+    return this.http.post<{ success: boolean; message: string; action?: string }>(url, payload).pipe(
+      catchError((error: HttpErrorResponse) => {
+        let msg = 'Failed to submit push MFA response.';
+        if (error.error && error.error.message) {
+          msg = Array.isArray(error.error.message) ? error.error.message.join(', ') : error.error.message;
+        }
+        return throwError(() => new Error(msg));
+      })
     );
   }
 

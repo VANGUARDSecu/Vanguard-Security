@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from './services/dashboard.service';
@@ -86,13 +86,17 @@ export type {
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.css'
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
 
   ngOnInit(): void {
     this.dashboardService.initDashboardForCurrentUser();
     // SCRUM-94: source company apps from the backend for company accounts.
     this.dashboardService.loadCompanyApps();
+  }
+
+  ngOnDestroy(): void {
+    this.dashboardService.stopLiveSsoChallengePolling();
   }
 
   // Authentication & Session
@@ -106,6 +110,19 @@ export class DashboardComponent implements OnInit {
   readonly copiedUserId = this.dashboardService.copiedUserId;
   readonly sessionRevoked = this.dashboardService.sessionRevoked;
   readonly adminActionNotice = this.dashboardService.adminActionNotice;
+
+  // Real-time SSO Interactive Push Approval (SCRUM-176)
+  readonly liveSsoChallenge = this.dashboardService.liveSsoChallenge;
+  readonly isSubmittingSsoApproval = this.dashboardService.isSubmittingSsoApproval;
+  readonly ssoApprovalSuccessNotice = this.dashboardService.ssoApprovalSuccessNotice;
+
+  approveLiveSsoChallenge(challengeId: string, selectedCode: number) {
+    return this.dashboardService.approveLiveSsoChallenge(challengeId, selectedCode);
+  }
+
+  denyLiveSsoChallenge(challengeId: string, isFraud = false) {
+    return this.dashboardService.denyLiveSsoChallenge(challengeId, isFraud);
+  }
 
   get searchQuery() { return this.dashboardService.searchQuery; }
   set searchQuery(v: string) { this.dashboardService.searchQuery = v; }

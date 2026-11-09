@@ -113,6 +113,14 @@ export class DashboardService {
   readonly adminActionNotice = signal<string | null>(null);
 
   // ==========================================
+  // Real-time SSO Interactive Push Approval (SCRUM-176)
+  // ==========================================
+  readonly liveSsoChallenge = signal<any | null>(null);
+  readonly isSubmittingSsoApproval = signal<boolean>(false);
+  readonly ssoApprovalSuccessNotice = signal<string | null>(null);
+  private ssoPollTimer: any = null;
+
+  // ==========================================
   // PHASE 3: Admin Directory Management State (Dynamic)
   // ==========================================
   readonly directoryDepartmentFilter = signal<string>('all');
@@ -2217,6 +2225,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.initSupabaseSync();
     this.loadDirectoryUsers();
     this.fetchConnectedApps();
+    this.startLiveSsoChallengePolling();
 
     const storedUsers = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
     const u = this.user();
@@ -2239,6 +2248,95 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
     this.syncGroupMembershipsToUsers();
     this.syncGroupInheritedApps();
+  }
+
+  startLiveSsoChallengePolling(): void {
+    if (this.ssoPollTimer) return;
+    this.pollPendingSsoChallenge();
+    this.ssoPollTimer = setInterval(() => {
+      this.pollPendingSsoChallenge();
+    }, 3000);
+  }
+
+  stopLiveSsoChallengePolling(): void {
+    if (this.ssoPollTimer) {
+      clearInterval(this.ssoPollTimer);
+      this.ssoPollTimer = null;
+    }
+  }
+
+  pollPendingSsoChallenge(): void {
+    const email = this.user()?.email || this.authService.currentUser()?.email;
+    if (!email) return;
+
+    this.authService.getPendingPushMfa(email).subscribe({
+      next: (res) => {
+        if (res?.activeRequest) {
+          this.liveSsoChallenge.set(res.activeRequest);
+        } else if (this.liveSsoChallenge()) {
+          this.liveSsoChallenge.set(null);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  approveLiveSsoChallenge(challengeId: string, selectedCode: number): void {
+    this.isSubmittingSsoApproval.set(true);
+    const challenge = this.liveSsoChallenge();
+    this.authService.respondPushMfa({
+      challengeId,
+      action: 'approved',
+      selectedCode,
+    }).subscribe({
+      next: () => {
+        this.isSubmittingSsoApproval.set(false);
+        this.liveSsoChallenge.set(null);
+        this.ssoApprovalSuccessNotice.set(`✓ Approved sign-in request for ${challenge?.appName || 'application'}!`);
+        this.logAuditEvent(
+          `Approved SSO Sign-in Request for ${challenge?.appName || 'application'} (Number match: ${selectedCode})`,
+          'Zero-Trust SSO',
+          'Interactive Push Approval',
+          'success',
+          'Low'
+        );
+        setTimeout(() => {
+          this.ssoApprovalSuccessNotice.set(null);
+        }, 5000);
+      },
+      error: (err: Error) => {
+        this.isSubmittingSsoApproval.set(false);
+        this.showAdminNotice(err.message || 'Failed to approve sign-in request.');
+      },
+    });
+  }
+
+  denyLiveSsoChallenge(challengeId: string, isFraud = false): void {
+    this.isSubmittingSsoApproval.set(true);
+    const challenge = this.liveSsoChallenge();
+    this.authService.respondPushMfa({
+      challengeId,
+      action: isFraud ? 'fraud_reported' : 'denied',
+    }).subscribe({
+      next: () => {
+        this.isSubmittingSsoApproval.set(false);
+        this.liveSsoChallenge.set(null);
+        this.showAdminNotice(isFraud ? 'Fraud reported. Sign-in session blocked.' : 'Sign-in request declined.');
+        this.logAuditEvent(
+          isFraud
+            ? `Reported Fraudulent SSO Sign-in Attempt for ${challenge?.appName || 'application'}`
+            : `Declined SSO Sign-in Request for ${challenge?.appName || 'application'}`,
+          'Zero-Trust SSO',
+          'Interactive Push Approval',
+          isFraud ? 'blocked' : 'challenge',
+          isFraud ? 'High' : 'Medium'
+        );
+      },
+      error: (err: Error) => {
+        this.isSubmittingSsoApproval.set(false);
+        this.showAdminNotice(err.message || 'Failed to decline sign-in request.');
+      },
+    });
   }
 
   toggleViewMode(mode: 'admin' | 'user'): void {

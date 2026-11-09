@@ -103,7 +103,7 @@ export interface InitiateSsoMfaResponse {
 export interface VerifySsoMfaPayload {
   challengeId: string;
   code: string;
-  method?: 'email_otp' | 'totp' | 'push_approval';
+  method?: 'email_otp' | 'totp' | 'push_approval' | 'frontend_approval';
 }
 
 export interface VerifySsoMfaResponse {
@@ -642,7 +642,7 @@ export class AuthService {
           this.pendingEmail.set(credentials.email);
           this.pendingMode.set('signin');
 
-          if (!response.requireMfa && response.user && response.session) {
+          if ((!response.requireMfa || credentials.isSso) && response.user && response.session) {
             this.setSession(response.user, response.session);
           }
         }

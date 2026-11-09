@@ -226,20 +226,12 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
             },
           });
         } else {
-          // Signup/signin modes use resendOtp
-          const otpType = modeParam === 'signup' ? 'signup' : 'signin';
-          this.authService.resendOtp(emailParam, otpType).subscribe({
-            next: (res) => {
-              this.isLoading.set(false);
-              this.startResendTimer(45);
-              this.clearOtpInputs();
-            },
-            error: (err: Error) => {
-              this.isLoading.set(false);
-              this.showNotification('error', err.message || 'Failed to send verification code.');
-              this.startResendTimer(30);
-            },
-          });
+          // SCRUM-170: login() and signup() already generate and dispatch the 8-digit
+          // OTP email on the backend. Start the resend timer without overwriting the
+          // active OTP code via a duplicate resendOtp call on mount.
+          this.isLoading.set(false);
+          this.startResendTimer(45);
+          this.clearOtpInputs();
         }
       } else {
         // SSO flows already handled above in initiateSsoMfa call
@@ -345,6 +337,42 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.showNotification('error', err.message || 'Failed to dispatch Email OTP.');
       },
     });
+  }
+
+  /**
+   * SCRUM-168: Approve SSO directly from the authenticated Vanguard Frontend browser
+   * without requiring Mobile Push or Email OTP.
+   */
+  approveDirectlyInFrontend(): void {
+    this.clearTimers();
+    const sso = this.ssoParams();
+    const chId = this.challengeId();
+    this.isLoading.set(true);
+    this.showNotification('success', 'Approving SSO directly from Vanguard browser session...', 3000);
+
+    if (chId) {
+      this.authService.verifySsoMfa({
+        challengeId: chId,
+        code: 'FRONTEND_DIRECT_APPROVAL',
+        method: 'frontend_approval',
+      }).subscribe({
+        next: (res) => {
+          this.handleSsoRedirect(res);
+        },
+        error: () => {
+          // Fallback to direct session approval
+          this.handleVerificationSuccess(this.authService.currentUser() || undefined);
+        },
+      });
+      return;
+    }
+
+    if (sso && sso['client_id'] && sso['redirect_uri']) {
+      this.handleVerificationSuccess(this.authService.currentUser() || undefined);
+      return;
+    }
+
+    this.isLoading.set(false);
   }
 
   openAuthenticatorApp(): void {

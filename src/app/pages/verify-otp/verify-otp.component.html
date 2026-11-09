@@ -232,8 +232,14 @@
             <div class="divider-line"></div>
           </div>
 
-          <!-- Fallback to Email OTP -->
-          <div class="push-fallback-row">
+          <!-- Fallback to Email OTP & Direct Frontend Approval (SCRUM-168) -->
+          <div class="push-fallback-row" style="display: flex; flex-direction: column; gap: 10px;">
+            <button type="button" class="fallback-email-btn" (click)="approveDirectlyInFrontend()" style="background: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="method-icon">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span>Approve Directly in Frontend (Browser)</span>
+            </button>
             <button type="button" class="fallback-email-btn" (click)="switchToEmailOtp()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="method-icon">
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
@@ -307,6 +313,20 @@
             <span>{{ ssoParams() ? 'Verify & Authorize SSO' : 'Verify & Continue' }}</span>
           }
         </button>
+
+        @if (ssoParams()) {
+          <div style="margin-top: 10px;">
+            <button
+              type="button"
+              class="method-toggle-btn"
+              (click)="approveDirectlyInFrontend()"
+              [disabled]="isLoading()"
+              style="width: 100%; justify-content: center; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; padding: 10px 14px; border-radius: 10px; font-weight: 600; cursor: pointer;"
+            >
+              <span>✓ Approve SSO Directly in Frontend (Skip OTP)</span>
+            </button>
+          </div>
+        }
 
         <!-- Dynamic Alternative Authentication (Only shown if user has enrolled Authenticator App) -->
         @if (mode() === 'signin' && hasTotp()) {

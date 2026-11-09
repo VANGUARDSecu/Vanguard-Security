@@ -186,5 +186,32 @@ describe('VerifyOtpComponent', () => {
       expect(el.textContent).toContain('Google Account 2-Step Verification');
       expect(el.textContent).toContain('google.user@gmail.com');
     });
+
+    it('SCRUM-168: should support direct frontend browser SSO approval without requiring Mobile MFA or Email OTP', () => {
+      const verifySpy = vi.spyOn(authService, 'verifySsoMfa').mockReturnValue(
+        of({
+          success: true,
+          message: 'Approved in browser',
+          code: 'vg_code_direct_browser',
+          redirectUrl: 'http://localhost:4201/auth/callback?code=vg_code_direct_browser',
+        })
+      );
+
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      component.challengeId.set('sso_mfa_direct_168');
+      component.approveDirectlyInFrontend();
+
+      expect(verifySpy).toHaveBeenCalledWith({
+        challengeId: 'sso_mfa_direct_168',
+        code: 'FRONTEND_DIRECT_APPROVAL',
+        method: 'frontend_approval',
+      });
+      expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_code_direct_browser');
+
+      (window as any).location = originalLocation;
+    });
   });
 });

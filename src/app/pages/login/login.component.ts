@@ -31,6 +31,7 @@ export class LoginComponent implements OnInit {
 
   // SSO state signals
   readonly ssoParams = signal<Record<string, string> | null>(null);
+  readonly ssoApprovalMethod = signal<'frontend' | 'email_otp' | 'push'>('frontend');
   readonly currentUser = this.authService.currentUser;
 
   readonly clientDisplayName = computed<string>(() => {
@@ -204,8 +205,21 @@ export class LoginComponent implements OnInit {
         }
 
         if (sso) {
-          // Mandatory SSO MFA Enforcement (SCRUM-61)
-          this.initiateSsoMfaForUser(response.user, response.hasTotp);
+          // SCRUM-168: Support Frontend Direct Approval, Email OTP, or Mobile Push MFA
+          const chosenMethod = this.ssoApprovalMethod();
+          if (chosenMethod === 'frontend') {
+            this.approveSsoForUser(response.user);
+          } else if (chosenMethod === 'email_otp') {
+            const currentUser = response.user || this.authService.currentUser();
+            const targetEmail = currentUser?.email || email.trim();
+            const fullName = this.resolveUserFullName(currentUser, targetEmail);
+            const role = currentUser?.role || 'user';
+            const dept = currentUser?.user_metadata?.['department'] || 'Corporate Security';
+            this.fallbackToEmailOtp(sso, targetEmail, currentUser, fullName, role, dept, !!response.hasTotp);
+          } else {
+            // Mandatory SSO MFA Enforcement (SCRUM-61 / Mobile Push)
+            this.initiateSsoMfaForUser(response.user, response.hasTotp);
+          }
         } else if (response.requireMfa) {
           this.showNotification('success', 'Credentials verified! Redirecting to 2-Step Verification...', 3000);
           setTimeout(() => {

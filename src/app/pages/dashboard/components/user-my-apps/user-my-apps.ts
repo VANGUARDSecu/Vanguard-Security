@@ -73,6 +73,33 @@ export class UserMyApps {
   newAppCategory: 'cloud' | 'developer' | 'collaboration' = 'collaboration';
   newAppDescription = '';
   newAppIcon = '🌐';
+  newAppUsername = '';
+  newAppPassword = '';
+
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill State
+  readonly showLaunchVerifyModal = signal<boolean>(false);
+  readonly pendingLaunchApp = signal<SaaSApp | null>(null);
+  readonly launchVerifyMethod = signal<'password' | 'pin' | 'quick'>('password');
+  readonly launchVerifySecret = signal<string>('');
+  readonly launchVerifyError = signal<string | null>(null);
+  readonly launchCustomUsername = signal<string>('');
+  readonly launchCustomPassword = signal<string>('');
+  readonly launchSaveToVault = signal<boolean>(true);
+  readonly launchMarkLoggedIn = signal<boolean>(true);
+  readonly activeAutofillToast = this.dashboardService.activeAutofillToast;
+
+  // SCRUM-173: Billing & Monthly Subscription State
+  readonly showPaywallModal = this.dashboardService.showPaywallModal;
+  readonly paywallFeatureMessage = this.dashboardService.paywallFeatureMessage;
+  readonly subscriptionPlanId = this.dashboardService.subscriptionPlanId;
+  readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly maxIntegratedAppsLimit = this.dashboardService.maxIntegratedAppsLimit;
+  readonly currentPlanDisplayName = this.dashboardService.currentPlanDisplayName;
+  readonly billingInvoices = this.dashboardService.billingInvoices;
+  readonly showGatewayConfigForm = signal<boolean>(false);
+  gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
+  gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
+  gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
 
   // Request Application Form Signals
   readonly reqDeliveryMode = signal<'sso' | 'extension'>('extension');
@@ -206,6 +233,103 @@ export class UserMyApps {
     this.dashboardService.launchApp(app);
   }
 
+  /**
+   * SCRUM-169: Initiates secure app launch from "My Applications".
+   * - If the app is already marked as logged in on this session, launches immediately.
+   * - Otherwise, opens the Security Verification Modal before launching and auto-filling credentials.
+   */
+  initiateSecureAppLaunch(app: SaaSApp): void {
+    if (!app.assigned || app.status === 'Pending Approval') {
+      this.dashboardService.launchApp(app);
+      return;
+    }
+
+    if (this.dashboardService.isAppSessionLoggedIn(app.id)) {
+      this.dashboardService.launchApp(app, { skipAutofill: true });
+      return;
+    }
+
+    const resolved = this.dashboardService.resolveAppCredentials(app);
+    this.pendingLaunchApp.set(app);
+    this.launchVerifyMethod.set('password');
+    this.launchVerifySecret.set('');
+    this.launchVerifyError.set(null);
+    this.launchCustomUsername.set(resolved?.username || '');
+    this.launchCustomPassword.set(resolved?.password || '');
+    this.launchSaveToVault.set(!resolved?.password);
+    this.launchMarkLoggedIn.set(true);
+    this.showLaunchVerifyModal.set(true);
+  }
+
+  confirmSecureAppLaunch(): void {
+    const app = this.pendingLaunchApp();
+    if (!app) return;
+
+    const check = this.dashboardService.verifyLaunchIdentity(
+      this.launchVerifyMethod(),
+      this.launchVerifySecret(),
+    );
+    if (!check.verified) {
+      this.launchVerifyError.set(check.error || 'Identity verification failed.');
+      return;
+    }
+
+    const username = this.launchCustomUsername().trim();
+    const password = this.launchCustomPassword();
+
+    if (this.launchSaveToVault() && username && password) {
+      const existing = this.dashboardService.findCredentialsForDomain(app.launchUrl || app.name);
+      if (existing.length === 0) {
+        this.dashboardService.addVaultItem({
+          title: app.name,
+          category: 'Login',
+          username,
+          password,
+          url: app.launchUrl,
+          notes: `Saved during verified launch of ${app.name}`,
+        });
+      }
+    }
+
+    this.showLaunchVerifyModal.set(false);
+    this.pendingLaunchApp.set(null);
+    this.launchVerifyError.set(null);
+
+    this.dashboardService.launchApp(app, {
+      customUsername: username,
+      customPassword: password,
+      markAlreadyLoggedIn: this.launchMarkLoggedIn(),
+    });
+  }
+
+  closeLaunchVerifyModal(): void {
+    this.showLaunchVerifyModal.set(false);
+    this.pendingLaunchApp.set(null);
+    this.launchVerifyError.set(null);
+  }
+
+  isAppLoggedIn(appId: string): boolean {
+    return this.dashboardService.isAppSessionLoggedIn(appId);
+  }
+
+  toggleAppLoggedInState(app: SaaSApp, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    const next = !this.dashboardService.isAppSessionLoggedIn(app.id);
+    this.dashboardService.markAppSessionLoggedIn(app.id, next);
+  }
+
+  dismissAutofillToast(): void {
+    this.dashboardService.activeAutofillToast.set(null);
+  }
+
+  copyAutofillValue(val?: string): void {
+    if (val && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(val).catch(() => {});
+    }
+  }
+
   launchConnectedApp(app: UserConnectedApp) {
     this.dashboardService.launchConnectedApp(app);
   }
@@ -307,6 +431,14 @@ export class UserMyApps {
       return;
     }
 
+    // SCRUM-173: Enforce 1-application Free tier paywall restriction
+    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.activeAppsList().length);
+    if (!entitlement.allowed) {
+      this.dashboardService.requestAppError.set(entitlement.reason || 'Free tier limit reached.');
+      this.dashboardService.openPaywallModal(entitlement.reason);
+      return;
+    }
+
     this.isSubmittingRequest.set(true);
 
     const ok = this.dashboardService.submitAppRequest({
@@ -370,6 +502,8 @@ export class UserMyApps {
     this.newAppCategory = 'collaboration';
     this.newAppDescription = '';
     this.newAppIcon = '🌐';
+    this.newAppUsername = '';
+    this.newAppPassword = '';
     this.addAppError.set(null);
     this.showAddPersonalAppModal.set(true);
   }
@@ -437,6 +571,14 @@ export class UserMyApps {
       return;
     }
 
+    // SCRUM-173: Enforce 1-application Free tier paywall restriction
+    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.personalApps().length);
+    if (!entitlement.allowed) {
+      this.addAppError.set(entitlement.reason || 'Free tier is limited to 1 integrated application.');
+      this.dashboardService.openPaywallModal(entitlement.reason);
+      return;
+    }
+
     let formattedUrl = this.newAppUrl.trim();
     if (!/^https?:\/\//i.test(formattedUrl)) {
       formattedUrl = 'https://' + formattedUrl;
@@ -450,6 +592,17 @@ export class UserMyApps {
       icon: this.newAppIcon || '🌐',
     });
 
+    if (this.newAppUsername.trim() || this.newAppPassword) {
+      this.dashboardService.addVaultItem({
+        title: this.newAppName.trim(),
+        category: 'Login',
+        username: this.newAppUsername.trim(),
+        password: this.newAppPassword,
+        url: formattedUrl,
+        notes: `Linked auto-fill credentials for ${this.newAppName.trim()}`,
+      });
+    }
+
     this.closeAddPersonalAppModal();
   }
 
@@ -462,5 +615,36 @@ export class UserMyApps {
 
   getMatchingVaultCredentials(app: SaaSApp): PersonalVaultItem[] {
     return this.dashboardService.findCredentialsForDomain(app.launchUrl || app.name);
+  }
+
+  // SCRUM-173: Billing & Monthly Subscription Modal Actions
+  openBillingModal(): void {
+    this.gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
+    this.gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
+    this.gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
+    this.dashboardService.openPaywallModal(
+      'Manage your monthly subscription plan, paywall limits, and Sandbox Payment Gateway API configuration.'
+    );
+  }
+
+  closeBillingModal(): void {
+    this.dashboardService.closePaywallModal();
+  }
+
+  upgradePlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.dashboardService.upgradeSubscriptionPlan(planId);
+  }
+
+  cancelPlan(): void {
+    this.dashboardService.cancelSubscriptionPlan();
+  }
+
+  saveGatewaySettings(): void {
+    this.dashboardService.saveSandboxGatewayConfig(
+      this.gatewayProviderInput,
+      this.gatewayUrlInput,
+      this.gatewayApiKeyInput,
+    );
+    this.showGatewayConfigForm.set(false);
   }
 }

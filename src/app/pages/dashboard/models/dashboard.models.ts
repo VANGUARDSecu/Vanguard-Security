@@ -24,6 +24,11 @@ export interface SaaSApp {
   connectionStatus?: string;
   targetDomain?: string;
   requestedUsername?: string;
+  assignedUsername?: string;
+  assignedPassword?: string;
+  targetUserId?: string;
+  targetUserEmail?: string;
+  alreadyLoggedIn?: boolean;
 }
 
 export interface UserConnectedApp {
@@ -78,7 +83,10 @@ export interface SignInEvent {
   device: string;
   ip: string;
   location: string;
-  status: 'success' | 'mfa_required' | 'blocked';
+  status: 'success' | 'mfa_required' | 'blocked' | 'logout';
+  movementType?: 'LOGIN' | 'LOGOUT' | 'APP_LAUNCH' | 'PASSWORD_CHANGE' | 'MFA_CHANGE' | 'VAULT_ACCESS' | string;
+  action?: string;
+  actorEmail?: string;
 }
 
 export interface UserSecurityAlertPreferences {
@@ -453,6 +461,10 @@ export interface TotpAccount {
   issuer: string;
   accountName: string;
   secret: string;
+  digits?: 6 | 8;
+  period?: 30 | 60;
+  algorithm?: 'SHA1' | 'SHA256' | 'SHA512';
+  icon?: string;
   currentCode?: string;
   remainingSeconds?: number;
 }

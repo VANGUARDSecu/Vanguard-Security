@@ -103,7 +103,7 @@ export interface InitiateSsoMfaResponse {
 export interface VerifySsoMfaPayload {
   challengeId: string;
   code: string;
-  method?: 'email_otp' | 'totp' | 'push_approval';
+  method?: 'email_otp' | 'totp' | 'push_approval' | 'frontend_approval';
 }
 
 export interface VerifySsoMfaResponse {
@@ -642,7 +642,7 @@ export class AuthService {
           this.pendingEmail.set(credentials.email);
           this.pendingMode.set('signin');
 
-          if (!response.requireMfa && response.user && response.session) {
+          if ((!response.requireMfa || credentials.isSso) && response.user && response.session) {
             this.setSession(response.user, response.session);
           }
         }
@@ -980,15 +980,48 @@ export class AuthService {
           const isDifferent = (prev?.id && user.id && prev.id !== user.id) ||
                               (prev?.email && user.email && prev.email.toLowerCase().trim() !== user.email.toLowerCase().trim());
           if (isDifferent) {
+            const preservedKeys = new Set([
+              'vanguard_remembered_email',
+              'vanguard_audit_events',
+              'vanguard_employee_provisioned_apps',
+            ]);
             const keysToRemove: string[] = [];
             for (let i = 0; i < localStorage.length; i++) {
               const k = localStorage.key(i);
-              if (k && (k.startsWith('vanguard_') || k.startsWith('sb-')) && k !== 'vanguard_remembered_email') {
+              if (k && (k.startsWith('vanguard_') || k.startsWith('sb-')) && !preservedKeys.has(k)) {
                 keysToRemove.push(k);
               }
             }
             keysToRemove.forEach((k) => localStorage.removeItem(k));
           }
+        } catch {}
+      }
+
+      // SCRUM-172: Record LOGIN movement in local audit trail
+      if (normalizedUser.email) {
+        try {
+          const now = new Date();
+          const existing = JSON.parse(localStorage.getItem('vanguard_audit_events') || '[]');
+          const loginEvt = {
+            id: 'log-login-' + Date.now(),
+            action: `User signed in to Vanguard Portal (${normalizedUser.email})`,
+            timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            isoTimestamp: now.toISOString(),
+            actor: normalizedUser.email,
+            source: 'client-ui',
+            authoritative: false,
+            target: 'Vanguard Identity Portal',
+            protocol: 'OIDC / JWT',
+            clientIp: '127.0.0.1 (Local)',
+            location: 'Local Workstation',
+            device: typeof navigator !== 'undefined' ? navigator.userAgent : 'Web Browser',
+            status: 'success',
+            riskScore: 'Low',
+            eventType: 'SSO_LOGIN',
+            severity: 'INFO',
+            requestId: 'req-login-' + Date.now().toString(36),
+          };
+          localStorage.setItem('vanguard_audit_events', JSON.stringify([loginEvt, ...existing].slice(0, 500)));
         } catch {}
       }
 
@@ -1524,21 +1557,57 @@ export class AuthService {
       clearTimeout(this.autoRefreshTimer);
       this.autoRefreshTimer = null;
     }
+    const loggingOutEmail = this.currentUser()?.email;
     if (this.isBrowser) {
-      this.http.post(`${this.API_URL}/logout`, {}).subscribe({
-        error: () => {},
-      });
+      this.http
+        .post(`${this.API_URL}/logout`, loggingOutEmail ? { email: loggingOutEmail } : {})
+        .subscribe({
+          error: () => {},
+        });
+
+      // SCRUM-172: Record LOGOUT movement event in local audit trail before clearing session
+      if (loggingOutEmail) {
+        try {
+          const now = new Date();
+          const existing = JSON.parse(localStorage.getItem('vanguard_audit_events') || '[]');
+          const logoutEvt = {
+            id: 'log-logout-' + Date.now(),
+            action: `User signed out of Vanguard session (${loggingOutEmail})`,
+            timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            isoTimestamp: now.toISOString(),
+            actor: loggingOutEmail,
+            source: 'client-ui',
+            authoritative: false,
+            target: 'Vanguard Identity Portal',
+            protocol: 'Web Portal',
+            clientIp: '127.0.0.1 (Local)',
+            location: 'Local Workstation',
+            device: typeof navigator !== 'undefined' ? navigator.userAgent : 'Web Browser',
+            status: 'success',
+            riskScore: 'Low',
+            eventType: 'USER_LOGOUT',
+            severity: 'INFO',
+            requestId: 'req-logout-' + Date.now().toString(36),
+          };
+          localStorage.setItem('vanguard_audit_events', JSON.stringify([logoutEvt, ...existing].slice(0, 500)));
+        } catch {}
+      }
 
       try {
         this.supabaseService.client.auth.signOut().catch(() => {});
       } catch {}
 
-      // SCRUM-153: Thoroughly purge all session, directory, tenant, devices, apps, and workspace state from storage
+      // SCRUM-153 & SCRUM-172: Purge session/directory/org state while preserving remembered email, audit trail, & provisioned employee apps
+      const preservedKeys = new Set([
+        'vanguard_remembered_email',
+        'vanguard_audit_events',
+        'vanguard_employee_provisioned_apps',
+      ]);
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && (key.startsWith('vanguard_') || key.startsWith('sb-'))) {
-          if (key !== 'vanguard_remembered_email') {
+          if (!preservedKeys.has(key)) {
             keysToRemove.push(key);
           }
         }

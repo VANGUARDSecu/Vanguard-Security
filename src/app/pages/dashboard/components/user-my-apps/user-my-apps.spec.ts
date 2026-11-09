@@ -573,5 +573,167 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.reqDomain()).toBe('analytics.google.com');
     });
   });
+
+  // ==========================================================================
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill Credential Injection
+  // ==========================================================================
+  describe('SCRUM-169 Security Verification Before Launching Apps & Auto-Fill Injection', () => {
+    it('requires security verification before launching an application that is not yet logged in', () => {
+      const figmaApp = {
+        id: 'app-figma-sec',
+        name: 'Figma',
+        category: 'collaboration' as const,
+        description: 'Design platform',
+        icon: '🎨',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://www.figma.com/login',
+        assigned: true,
+        assignedUsername: 'designer@acme.com',
+        assignedPassword: 'FigmaSecretPassword!',
+      };
+
+      component.initiateSecureAppLaunch(figmaApp);
+      expect(component.showLaunchVerifyModal()).toBe(true);
+      expect(component.pendingLaunchApp()?.id).toBe('app-figma-sec');
+      expect(component.launchCustomUsername()).toBe('designer@acme.com');
+      expect(component.launchCustomPassword()).toBe('FigmaSecretPassword!');
+
+      // Empty password should fail verification
+      component.launchVerifyMethod.set('password');
+      component.launchVerifySecret.set('');
+      component.confirmSecureAppLaunch();
+      expect(component.launchVerifyError()).toContain('password');
+      expect(component.showLaunchVerifyModal()).toBe(true);
+
+      // Valid password verifies, launches with auto-fill payload, and marks app as logged in
+      component.launchVerifySecret.set('MasterPass123!');
+      component.confirmSecureAppLaunch();
+      expect(component.showLaunchVerifyModal()).toBe(false);
+      expect(dashboardService.activeAutofillToast()?.username).toBe('designer@acme.com');
+      expect(dashboardService.isAppSessionLoggedIn('app-figma-sec')).toBe(true);
+    });
+
+    it('skips verification modal and launches directly when application is already logged in', () => {
+      const fbApp = {
+        id: 'app-fb-sec',
+        name: 'Facebook',
+        category: 'collaboration' as const,
+        description: 'Social suite',
+        icon: '📘',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://www.facebook.com/login',
+        assigned: true,
+      };
+
+      dashboardService.markAppSessionLoggedIn('app-fb-sec', true);
+      component.initiateSecureAppLaunch(fbApp);
+
+      expect(component.showLaunchVerifyModal()).toBe(false);
+      expect(dashboardService.ssoLaunchingNotice()).toContain('Session active for Facebook');
+    });
+
+    it('builds #vg_autofill=1 hash payload URL for extension auto-fill injection', () => {
+      const url = dashboardService.buildAutofillLaunchUrl(
+        'https://www.figma.com/login',
+        'designer@acme.com',
+        'MyPass123!',
+      );
+      expect(url).toContain('https://www.figma.com/login#');
+      expect(url).toContain('vg_autofill=1');
+      expect(url).toContain('vg_u=designer%40acme.com');
+      expect(url).toContain('vg_p=MyPass123');
+    });
+  });
+
+  // ==========================================================================
+  // SCRUM-171: Admin Employee Application Account Provisioning & Isolation
+  // ==========================================================================
+  describe('SCRUM-171 Admin Employee Application Account Provisioning & Visibility Isolation', () => {
+    it('shows Admin-provisioned application accounts ONLY to the targeted employee', () => {
+      // Admin provisions a Figma account specifically for Marcus (emp-1)
+      dashboardService.provisionEmployeeAppAccount({
+        targetUserId: 'emp-marcus-1',
+        targetUserEmail: 'marcus@acme.com',
+        targetUserName: 'Marcus Vance',
+        appName: 'Figma Enterprise',
+        launchUrl: 'https://www.figma.com/login',
+        category: 'collaboration',
+        protocol: 'Extension Autofill',
+        icon: '🎨',
+        assignedUsername: 'marcus.design@acme.com',
+        assignedPassword: 'FigmaAdminCreatedPass#1',
+      });
+
+      // When Marcus logs in, he sees the provisioned Figma account & credentials
+      authService.currentUser.set({
+        id: 'emp-marcus-1',
+        email: 'marcus@acme.com',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.switchWorkspace('org_root');
+      fixture.detectChanges();
+
+      const marcusApps = component.activeAppsList();
+      const marcusFigma = marcusApps.find((a) => a.name === 'Figma Enterprise');
+      expect(marcusFigma).toBeDefined();
+      expect(marcusFigma?.assignedUsername).toBe('marcus.design@acme.com');
+      expect(marcusFigma?.assignedPassword).toBe('FigmaAdminCreatedPass#1');
+
+      // When another employee (Elena) logs in, she does NOT see Marcus's Figma account
+      authService.currentUser.set({
+        id: 'emp-elena-2',
+        email: 'elena@acme.com',
+        firstName: 'Elena',
+        lastName: 'Rostova',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.apps.set([]);
+      fixture.detectChanges();
+
+      const elenaApps = component.activeAppsList();
+      expect(elenaApps.find((a) => a.name === 'Figma Enterprise')).toBeUndefined();
+    });
+  });
+
+  // ==========================================================================
+  // SCRUM-173: Billing System / Monthly Subscription & 1-App Free Tier Paywall
+  // ==========================================================================
+  describe('SCRUM-173 Billing System / Monthly Subscription & Paywall Restrictions', () => {
+    it('allows 1 integrated application on Free tier, blocks the 2nd with the Paywall Modal, and unlocks unlimited after Sandbox upgrade', () => {
+      dashboardService.cancelSubscriptionPlan();
+      dashboardService.personalApps.set([]);
+
+      // 1st application is allowed on Free tier
+      component.openAddPersonalAppModal();
+      component.newAppName = 'Figma';
+      component.newAppUrl = 'https://www.figma.com/login';
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(1);
+      expect(component.showPaywallModal()).toBe(false);
+
+      // 2nd application on Free tier is blocked by paywall
+      component.openAddPersonalAppModal();
+      component.newAppName = 'GitHub';
+      component.newAppUrl = 'https://github.com/login';
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(1);
+      expect(component.showPaywallModal()).toBe(true);
+      expect(component.addAppError()).toContain('Free tier is limited to 1 integrated application');
+
+      // Upgrade to Personal Pro ($5/mo Sandbox) unlocks unlimited apps
+      component.upgradePlan('personal_pro');
+      expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
+      expect(component.showPaywallModal()).toBe(false);
+
+      component.submitAddPersonalApp();
+      expect(dashboardService.personalApps().length).toBe(2);
+    });
+  });
   });
 });

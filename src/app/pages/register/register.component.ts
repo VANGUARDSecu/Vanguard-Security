@@ -225,8 +225,17 @@ export class RegisterComponent {
         );
 
         setTimeout(() => {
+          const queryParams: Record<string, string> = { email: payload.email, mode: 'signup' };
+          if (typeof sessionStorage !== 'undefined') {
+            try {
+              const rawSso = sessionStorage.getItem('vanguard_sso_pending');
+              if (rawSso) {
+                Object.assign(queryParams, JSON.parse(rawSso));
+              }
+            } catch {}
+          }
           this.router.navigate(['/verify-otp'], {
-            queryParams: { email: payload.email, mode: 'signup' },
+            queryParams,
           });
         }, 1000);
       },

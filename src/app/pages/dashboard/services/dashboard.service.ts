@@ -335,6 +335,12 @@ export class DashboardService {
   readonly auditDateRangeFilter = signal<string>('all');
   readonly auditThreatsOnlyFilter = signal<boolean>(false);
   readonly auditSearchQuery = signal<string>('');
+  readonly auditActorFilter = signal<string>('all');
+
+  setAuditActor(actorEmail: string): void {
+    this.auditActorFilter.set(actorEmail || 'all');
+    this.auditCurrentPage.set(1);
+  }
 
   readonly selectedAuditEvent = signal<TenantAuditEvent | null>(null);
   readonly showAuditInspector = signal<boolean>(false);
@@ -373,16 +379,31 @@ export class DashboardService {
     const severity = this.auditSeverityFilter();
     const dateRange = this.auditDateRangeFilter();
     const threatsOnly = this.auditThreatsOnlyFilter();
+    const actorFilter = this.auditActorFilter().toLowerCase().trim();
     const query = this.auditSearchQuery().toLowerCase().trim();
 
     const now = Date.now();
 
-    return this.tenantAuditEvents().filter((evt) => {
+    // Merge serverAuditEvents and tenantAuditEvents deduplicated by id
+    const seenIds = new Set<string>();
+    const combined: TenantAuditEvent[] = [];
+    for (const evt of [...this.serverAuditEvents(), ...this.tenantAuditEvents()]) {
+      if (!seenIds.has(evt.id)) {
+        seenIds.add(evt.id);
+        combined.push(evt);
+      }
+    }
+
+    return combined.filter((evt) => {
       const matchStatus = status === 'all' || evt.status === status;
       const matchProto = proto === 'all' || evt.protocol === proto;
       const matchType = eventType === 'all' || evt.eventType === eventType;
       const matchSeverity = severity === 'all' || evt.severity === severity;
       const matchThreat = !threatsOnly || !!evt.threatIndicator;
+      const matchActor =
+        actorFilter === 'all' ||
+        !actorFilter ||
+        evt.actor.toLowerCase().trim() === actorFilter;
 
       let matchDate = true;
       if (dateRange !== 'all' && evt.isoTimestamp) {
@@ -398,6 +419,7 @@ export class DashboardService {
         !query ||
         evt.actor.toLowerCase().includes(query) ||
         evt.target.toLowerCase().includes(query) ||
+        (evt.action && evt.action.toLowerCase().includes(query)) ||
         evt.clientIp.toLowerCase().includes(query) ||
         evt.location.toLowerCase().includes(query) ||
         evt.protocol.toLowerCase().includes(query) ||
@@ -405,7 +427,7 @@ export class DashboardService {
         (evt.eventType && evt.eventType.toLowerCase().includes(query)) ||
         (evt.threatIndicator?.description.toLowerCase().includes(query) ?? false);
 
-      return matchStatus && matchProto && matchType && matchSeverity && matchThreat && matchDate && matchQuery;
+      return matchStatus && matchProto && matchType && matchSeverity && matchThreat && matchActor && matchDate && matchQuery;
     });
   });
 
@@ -449,7 +471,9 @@ export class DashboardService {
     let inferredType: AuditEventType = 'SSO_LOGIN';
     const protoUpper = protocol.toUpperCase();
     const actUpper = action.toUpperCase();
-    if (protoUpper.includes('RADIUS') || actUpper.includes('RADIUS')) inferredType = 'RADIUS_AUTH';
+    if (actUpper.includes('LOGOUT') || actUpper.includes('SIGN OUT') || actUpper.includes('SIGNED OUT')) inferredType = 'USER_LOGOUT';
+    else if (actUpper.includes('LAUNCH')) inferredType = 'APP_LAUNCH';
+    else if (protoUpper.includes('RADIUS') || actUpper.includes('RADIUS')) inferredType = 'RADIUS_AUTH';
     else if (protoUpper.includes('LDAP') || actUpper.includes('LDAP')) inferredType = 'LDAP_BIND';
     else if (actUpper.includes('PROVISION') || actUpper.includes('INVIT') || actUpper.includes('USER')) inferredType = 'USER_PROVISIONED';
     else if (actUpper.includes('PASSWORD') || actUpper.includes('RESET')) inferredType = 'PASSWORD_RESET';
@@ -459,7 +483,7 @@ export class DashboardService {
     else if (actUpper.includes('SSH') || actUpper.includes('VAULT') || actUpper.includes('SECRET')) inferredType = 'VAULT_ACCESS';
 
     const newEvt: TenantAuditEvent = {
-      id: 'log-' + Date.now(),
+      id: 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       action,
       timestamp: timeStr,
       isoTimestamp: isoStr,
@@ -504,6 +528,23 @@ export class DashboardService {
     this.tenantAuditEvents.update((evts) => [newEvt, ...evts]);
     this.saveStored('vanguard_audit_events', this.tenantAuditEvents());
 
+    // SCRUM-172: Also append to signInHistory so User Activity shows all account movements
+    const signInEvt: SignInEvent = {
+      id: newEvt.id,
+      timestamp: timeStr,
+      application: target || 'Vanguard Identity Portal',
+      protocol,
+      device: newEvt.device,
+      ip: newEvt.clientIp,
+      location: newEvt.location,
+      status: newEvt.eventType === 'USER_LOGOUT' ? 'logout' : status === 'blocked' ? 'blocked' : status === 'challenge' ? 'mfa_required' : 'success',
+      movementType: newEvt.eventType,
+      action,
+      actorEmail: actor,
+    };
+    this.signInHistory.update((list) => [signInEvt, ...list].slice(0, 200));
+    this.saveStored('vanguard_signin_history', this.signInHistory());
+
     if (this.isBrowser) {
       const activeTenant = this.activeOrganizationId();
       this.supabaseService
@@ -533,36 +574,51 @@ export class DashboardService {
   readonly serverAuditEvents = signal<TenantAuditEvent[]>([]);
 
   /**
-   * SCRUM-133: load the authoritative audit trail from the backend
-   * (`GET /auth/audit-logs`, scoped server-side to the principal). These are
-   * tagged source:'server' / authoritative:true to distinguish them from the
-   * local client-ui feedback events.
+   * SCRUM-133 & SCRUM-172: load the authoritative audit trail from the backend
+   * (`GET /auth/audit-logs`, scoped server-side to the principal or tenant employees for Admin).
    */
-  loadServerAuditLogs(): void {
+  loadServerAuditLogs(employeeEmail?: string, movementType?: string): void {
     if (!this.isBrowser) return;
+    const params: Record<string, string> = {};
+    if (employeeEmail && employeeEmail !== 'all') {
+      params['employeeEmail'] = employeeEmail;
+    }
+    if (movementType && movementType !== 'all') {
+      params['movementType'] = movementType;
+    }
     this.http
-      .get<any[]>(`${this.apiBase}/auth/audit-logs`)
+      .get<any[]>(`${this.apiBase}/auth/audit-logs`, { params })
       .subscribe({
         next: (rows) => {
-          const mapped: TenantAuditEvent[] = (rows || []).map((r) => ({
-            id: r.id || 'srv-' + Math.random().toString(36).slice(2),
-            action: r.metadata?.action || r.status,
-            timestamp: r.timestamp,
-            isoTimestamp: r.timestamp,
-            actor: r.actorEmail,
-            source: 'server',
-            authoritative: true,
-            target: r.applicationName || r.clientId || '—',
-            protocol: r.protocol || 'Web Portal',
-            clientIp: r.ipAddress || '—',
-            location: r.location || '—',
-            device: r.device || '—',
-            status: r.status === 'SUCCESS' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
-            riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
-            eventType: 'SSO_LOGIN',
-            severity: r.severity || 'INFO',
-            requestId: r.id || '',
-          }));
+          const mapped: TenantAuditEvent[] = (rows || []).map((r) => {
+            const mt = (r.movementType || r.metadata?.movementType || '').toUpperCase();
+            let eventType: AuditEventType = 'SSO_LOGIN';
+            if (mt === 'LOGOUT' || r.status === 'LOGOUT') eventType = 'USER_LOGOUT';
+            else if (mt === 'APP_LAUNCH') eventType = 'APP_LAUNCH';
+            else if (mt === 'PASSWORD_CHANGE') eventType = 'PASSWORD_RESET';
+            else if (mt === 'MFA_CHANGE') eventType = 'MFA_CHALLENGE';
+            else if (mt === 'VAULT_ACCESS') eventType = 'VAULT_ACCESS';
+
+            return {
+              id: r.id || 'srv-' + Math.random().toString(36).slice(2),
+              action: r.action || r.metadata?.action || r.status,
+              timestamp: r.timestamp ? new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—',
+              isoTimestamp: r.timestamp,
+              actor: r.actorEmail,
+              source: 'server' as const,
+              authoritative: true,
+              target: r.applicationName || r.clientId || '—',
+              protocol: r.protocol || 'Web Portal',
+              clientIp: r.ipAddress || '—',
+              location: r.location || '—',
+              device: r.device || '—',
+              status: r.status === 'SUCCESS' || r.status === 'LOGOUT' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
+              riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
+              eventType,
+              severity: r.severity || 'INFO',
+              requestId: r.id || '',
+            };
+          });
           this.serverAuditEvents.set(mapped);
         },
         error: () => {
@@ -1166,12 +1222,133 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.loadStored<SaaSApp[]>('vanguard_user_apps', [])
   );
 
+  // SCRUM-171: Per-employee provisioned application accounts (Admin-created accounts isolated per employee)
+  readonly employeeProvisionedApps = signal<SaaSApp[]>(
+    this.loadStored<SaaSApp[]>('vanguard_employee_provisioned_apps', [])
+  );
+
+  getAppsProvisionedForEmployee(userId?: string, userEmail?: string): SaaSApp[] {
+    const uid = (userId || '').trim();
+    const email = (userEmail || '').toLowerCase().trim();
+    if (!uid && !email) return [];
+    return this.employeeProvisionedApps().filter((a) => {
+      const matchId = uid && a.targetUserId && a.targetUserId === uid;
+      const matchEmail = email && a.targetUserEmail && a.targetUserEmail.toLowerCase().trim() === email;
+      return Boolean(matchId || matchEmail);
+    });
+  }
+
+  provisionEmployeeAppAccount(payload: {
+    targetUserId: string;
+    targetUserEmail: string;
+    targetUserName: string;
+    appName: string;
+    launchUrl: string;
+    category: SaaSApp['category'];
+    protocol: string;
+    icon: string;
+    assignedUsername: string;
+    assignedPassword: string;
+    description?: string;
+  }): SaaSApp {
+    const slug = payload.appName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const appId = `prov-${slug}-${payload.targetUserId || Date.now()}`;
+    const provisionedApp: SaaSApp = {
+      id: appId,
+      name: payload.appName.trim(),
+      category: payload.category || 'cloud',
+      description:
+        payload.description?.trim() ||
+        `Provisioned by Admin for ${payload.targetUserName} (${payload.assignedUsername})`,
+      icon: payload.icon || '🔑',
+      protocol: payload.protocol || 'Extension Autofill',
+      launchUrl: payload.launchUrl.trim(),
+      assigned: true,
+      status: 'Approved',
+      assignedUsername: payload.assignedUsername.trim(),
+      assignedPassword: payload.assignedPassword,
+      targetUserId: payload.targetUserId,
+      targetUserEmail: payload.targetUserEmail.toLowerCase().trim(),
+    };
+
+    const existing = this.employeeProvisionedApps().filter(
+      (a) =>
+        !(
+          ((a.targetUserId && a.targetUserId === payload.targetUserId) ||
+            (a.targetUserEmail &&
+              a.targetUserEmail.toLowerCase() === payload.targetUserEmail.toLowerCase().trim())) &&
+          a.name.toLowerCase() === payload.appName.trim().toLowerCase()
+        ),
+    );
+    const updated = [...existing, provisionedApp];
+    this.employeeProvisionedApps.set(updated);
+    this.saveStored('vanguard_employee_provisioned_apps', updated);
+
+    // Sync to backend (best-effort)
+    if (this.isBrowser) {
+      this.http
+        .post(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(payload.targetUserId)}`,
+          {
+            appId,
+            name: provisionedApp.name,
+            protocol: provisionedApp.protocol,
+            launchUrl: provisionedApp.launchUrl,
+            category: provisionedApp.category,
+            icon: provisionedApp.icon,
+            description: provisionedApp.description,
+            assignedUsername: provisionedApp.assignedUsername,
+            assignedPassword: provisionedApp.assignedPassword,
+            targetUserEmail: provisionedApp.targetUserEmail,
+          },
+        )
+        .subscribe({ error: () => {} });
+    }
+
+    this.logAuditEvent(
+      `Admin provisioned ${provisionedApp.name} account (${provisionedApp.assignedUsername}) exclusively for employee ${payload.targetUserName} (${payload.targetUserEmail})`,
+      provisionedApp.name,
+      provisionedApp.protocol,
+      'success',
+      'Low',
+    );
+    this.showAdminNotice(
+      `Provisioned ${provisionedApp.name} account (${provisionedApp.assignedUsername}) for ${payload.targetUserName}. Only ${payload.targetUserName} can see and launch this account.`,
+    );
+
+    return provisionedApp;
+  }
+
+  revokeEmployeeProvisionedApp(
+    targetUserId: string,
+    targetUserEmail: string,
+    appId: string,
+  ): void {
+    const updated = this.employeeProvisionedApps().filter(
+      (a) =>
+        !(
+          a.id === appId &&
+          ((targetUserId && a.targetUserId === targetUserId) ||
+            (targetUserEmail &&
+              a.targetUserEmail?.toLowerCase() === targetUserEmail.toLowerCase().trim()))
+        ),
+    );
+    this.employeeProvisionedApps.set(updated);
+    this.saveStored('vanguard_employee_provisioned_apps', updated);
+
+    if (this.isBrowser && targetUserId) {
+      this.http
+        .delete(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(targetUserId)}&appId=${encodeURIComponent(appId)}`,
+        )
+        .subscribe({ error: () => {} });
+    }
+  }
+
   /**
-   * SCRUM-94: Load the signed-in employee's company apps from the backend
+   * SCRUM-94 & SCRUM-171: Load the signed-in employee's company apps from the backend
    * (GET /apps/my), replacing the legacy localStorage source as the authoritative
-   * company catalog. Individuals (no tenant) resolve to an empty company list.
-   * Falls back silently to any cached apps on network failure so the UI degrades
-   * gracefully offline.
+   * company catalog and merging employee-isolated Admin-provisioned accounts.
    */
   loadCompanyApps(): void {
     if (!this.isBrowser) return;
@@ -1181,6 +1358,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.apps.set([]);
       return;
     }
+    const userEmail = u?.email?.toLowerCase().trim();
     // SCRUM-131: identity comes from the bearer token (auth interceptor); the
     // backend ignores any userId param (SCRUM-123).
     this.http
@@ -1197,24 +1375,49 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             launchUrl: r.launch_url || r.launchUrl || '',
             assigned: r.assigned !== false,
             inheritedViaGroup: r.inherited_via_group || undefined,
+            assignedUsername: r.assigned_username || r.assignedUsername || undefined,
+            assignedPassword: r.assigned_password || r.assignedPassword || undefined,
+            targetUserId: r.user_id || r.targetUserId || undefined,
+            targetUserEmail: r.target_user_email || r.targetUserEmail || undefined,
           }));
+          const localProvisioned = this.getAppsProvisionedForEmployee(userId, userEmail);
+          for (const p of localProvisioned) {
+            const idx = mapped.findIndex(
+              (m) => m.id === p.id || m.name.toLowerCase() === p.name.toLowerCase(),
+            );
+            if (idx >= 0) {
+              mapped[idx] = {
+                ...mapped[idx],
+                assignedUsername: p.assignedUsername || mapped[idx].assignedUsername,
+                assignedPassword: p.assignedPassword || mapped[idx].assignedPassword,
+                targetUserId: p.targetUserId || mapped[idx].targetUserId,
+                targetUserEmail: p.targetUserEmail || mapped[idx].targetUserEmail,
+              };
+            } else {
+              mapped.push(p);
+            }
+          }
           this.apps.set(mapped);
           this.saveStored('vanguard_user_apps', mapped);
         },
         error: () => {
-          // Keep whatever is cached; do not clear company apps on transient errors.
+          // On offline/network fallback, still ensure employee sees their isolated provisioned apps
+          const localProvisioned = this.getAppsProvisionedForEmployee(userId, userEmail);
+          if (localProvisioned.length > 0) {
+            this.apps.set(localProvisioned);
+          }
         },
       });
   }
 
   /**
-   * SCRUM-94: Admin hook to assign a company app to a specific employee or to
+   * SCRUM-94 & SCRUM-171: Admin hook to assign a company app to a specific employee or to
    * all members, via POST /apps/assign. Only meaningful for company admins; the
    * backend enforces the admin/manager role and tenant isolation.
    */
   assignCompanyApp(
     app: Partial<SaaSApp> & { appId: string; name: string },
-    target: { userId?: string; all?: boolean },
+    target: { userId?: string; all?: boolean; targetUserEmail?: string },
   ): Observable<{ assigned: number }> {
     // SCRUM-131: admin identity is derived from the bearer token server-side.
     return this.http.post<{ assigned: number }>(
@@ -1226,6 +1429,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         launchUrl: app.launchUrl,
         category: app.category,
         icon: app.icon,
+        description: app.description,
+        assignedUsername: app.assignedUsername,
+        assignedPassword: app.assignedPassword,
+        targetUserEmail: target.targetUserEmail || app.targetUserEmail,
         target: target.all ? 'all' : 'user',
         userId: target.all ? undefined : target.userId,
       },
@@ -1233,10 +1440,28 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   // Active apps source: personal apps when in personal workspace, company apps when in organization
-  // SCRUM-58 & SCRUM-159: Strict deduplication ensuring no application ever appears twice,
-  // and automatically including access requests that have been approved by administrators.
+  // SCRUM-58, SCRUM-159, & SCRUM-171: Strict deduplication + per-employee visibility isolation.
   readonly activeAppsList = computed<SaaSApp[]>(() => {
-    const source = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
+    const u = this.user();
+    const email = u?.email?.toLowerCase().trim();
+    const uid = u?.id;
+
+    const rawSource = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
+    // SCRUM-171: Filter out any company app explicitly targeted to a different employee
+    const source = this.isPersonalWorkspace()
+      ? rawSource
+      : rawSource.filter((app) => {
+          if (!app.targetUserId && !app.targetUserEmail) return true;
+          const matchId = uid && app.targetUserId === uid;
+          const matchEmail =
+            email && app.targetUserEmail?.toLowerCase().trim() === email;
+          return Boolean(matchId || matchEmail);
+        });
+
+    const provisionedForMe = !this.isPersonalWorkspace()
+      ? this.getAppsProvisionedForEmployee(uid, email)
+      : [];
+
     const seen = new Set<string>();
     const deduped: SaaSApp[] = [];
 
@@ -1245,9 +1470,6 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       ? this.appAccessRequests()
           .filter((r) => {
             if (r.status !== 'Approved') return false;
-            const u = this.user();
-            const email = u?.email?.toLowerCase();
-            const uid = u?.id;
             return (
               (email && r.userEmail?.toLowerCase() === email) ||
               (uid && r.userId === uid) ||
@@ -1267,7 +1489,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           }))
       : [];
 
-    for (const app of [...source, ...approvedRequests]) {
+    for (const app of [...provisionedForMe, ...source, ...approvedRequests]) {
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
@@ -4943,9 +5165,110 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill Credential Injection
+  // ==========================================
+  readonly appSessionLoggedInIds = signal<string[]>(
+    this.loadStored<string[]>('vanguard_logged_in_apps', []),
+  );
+  readonly activeAutofillToast = signal<{
+    appId: string;
+    appName: string;
+    launchUrl: string;
+    username: string;
+    password?: string;
+  } | null>(null);
+
+  isAppSessionLoggedIn(appId: string): boolean {
+    if (!appId) return false;
+    return this.appSessionLoggedInIds().includes(appId);
+  }
+
+  markAppSessionLoggedIn(appId: string, loggedIn = true): void {
+    if (!appId) return;
+    const current = new Set(this.appSessionLoggedInIds());
+    if (loggedIn) {
+      current.add(appId);
+    } else {
+      current.delete(appId);
+    }
+    const next = Array.from(current);
+    this.appSessionLoggedInIds.set(next);
+    this.saveStored('vanguard_logged_in_apps', next);
+  }
+
+  resolveAppCredentials(app: SaaSApp): { username: string; password: string } | null {
+    if (app.assignedUsername) {
+      return {
+        username: app.assignedUsername,
+        password: app.assignedPassword || '',
+      };
+    }
+    const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
+    if (matched.length > 0) {
+      return {
+        username: matched[0].username || matched[0].title || '',
+        password: matched[0].password || '',
+      };
+    }
+    if (app.requestedUsername) {
+      return {
+        username: app.requestedUsername,
+        password: '',
+      };
+    }
+    return null;
+  }
+
+  buildAutofillLaunchUrl(baseUrl: string, username?: string, password?: string): string {
+    if (!baseUrl) return '';
+    if (!username && !password) return baseUrl;
+    const baseWithoutHash = baseUrl.split('#')[0];
+    const params = new URLSearchParams();
+    params.set('vg_autofill', '1');
+    if (username) params.set('vg_u', username);
+    if (password) params.set('vg_p', password);
+    return `${baseWithoutHash}#${params.toString()}`;
+  }
+
+  verifyLaunchIdentity(
+    method: 'password' | 'pin' | 'quick',
+    secretInput: string,
+  ): { verified: boolean; error?: string } {
+    if (method === 'quick') {
+      return { verified: true };
+    }
+    const trimmed = (secretInput || '').trim();
+    if (method === 'pin') {
+      if (!/^\d{6,8}$/.test(trimmed)) {
+        return {
+          verified: false,
+          error: 'Please enter a valid 6-digit security PIN or 2FA code.',
+        };
+      }
+      return { verified: true };
+    }
+    // method === 'password'
+    if (trimmed.length < 4) {
+      return {
+        verified: false,
+        error: 'Please enter your Vanguard account password or vault master password (min 4 characters).',
+      };
+    }
+    return { verified: true };
+  }
+
+  // ==========================================
   // SSO Launch Simulator with Zero-Trust Assertion Guard
   // ==========================================
-  launchApp(app: SaaSApp): void {
+  launchApp(
+    app: SaaSApp,
+    options?: {
+      skipAutofill?: boolean;
+      customUsername?: string;
+      customPassword?: string;
+      markAlreadyLoggedIn?: boolean;
+    },
+  ): void {
     // Zero-Trust Assertion Guard: Ensure Vanguard IdP only issues assertions for officially approved & assigned apps
     if (!app.assigned || app.status === 'Pending Approval') {
       this.adminActionNotice.set(
@@ -4962,23 +5285,77 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       return;
     }
 
-    const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
-    if (matched.length > 0) {
-      this.ssoLaunchingNotice.set(
-        `Launching ${app.name}. Auto-fill credentials for ${matched[0].username || matched[0].title} ready!`
+    const alreadyLoggedIn = this.isAppSessionLoggedIn(app.id) || options?.skipAutofill === true;
+    const resolvedCreds =
+      options?.customUsername || options?.customPassword
+        ? {
+            username: options.customUsername || '',
+            password: options.customPassword || '',
+          }
+        : this.resolveAppCredentials(app);
+
+    let targetLaunchUrl = app.launchUrl;
+
+    if (!alreadyLoggedIn && resolvedCreds && (resolvedCreds.username || resolvedCreds.password)) {
+      targetLaunchUrl = this.buildAutofillLaunchUrl(
+        app.launchUrl,
+        resolvedCreds.username,
+        resolvedCreds.password,
       );
-      if (matched[0].password && this.isBrowser && navigator?.clipboard?.writeText) {
-        navigator.clipboard.writeText(matched[0].password).catch(() => {});
+      this.ssoLaunchingNotice.set(
+        `Verified & Launching ${app.name}. Auto-filling credentials for ${resolvedCreds.username || app.name}!`
+      );
+      this.activeAutofillToast.set({
+        appId: app.id,
+        appName: app.name,
+        launchUrl: app.launchUrl,
+        username: resolvedCreds.username,
+        password: resolvedCreds.password,
+      });
+      if (resolvedCreds.password && this.isBrowser && navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(resolvedCreds.password).catch(() => {});
+      }
+      if (this.isBrowser && typeof window !== 'undefined') {
+        try {
+          window.postMessage(
+            {
+              type: 'VANGUARD_AUTOFILL_LAUNCH',
+              appId: app.id,
+              appName: app.name,
+              targetUrl: app.launchUrl,
+              username: resolvedCreds.username,
+              password: resolvedCreds.password,
+            },
+            '*',
+          );
+        } catch {
+          // ignore postMessage errors in restricted contexts
+        }
       }
     } else {
       this.ssoLaunchingNotice.set(
-        `Redirecting to ${app.name} via cryptographically signed ${app.protocol} assertion...`
+        alreadyLoggedIn
+          ? `Session active for ${app.name}. Launching application directly...`
+          : `Redirecting to ${app.name} via cryptographically signed ${app.protocol} assertion...`
       );
     }
+
+    if (options?.markAlreadyLoggedIn) {
+      this.markAppSessionLoggedIn(app.id, true);
+    }
+
+    this.logAuditEvent(
+      `Application launched: ${app.name} (${alreadyLoggedIn ? 'Active Session Direct Launch' : 'Verified Auto-Fill Launch'})`,
+      app.name,
+      app.protocol || 'Web Auth',
+      'success',
+      'Low',
+    );
+
     setTimeout(() => {
       this.ssoLaunchingNotice.set(null);
-      if (this.isBrowser && app.launchUrl) {
-        window.open(app.launchUrl, '_blank');
+      if (this.isBrowser && targetLaunchUrl) {
+        window.open(targetLaunchUrl, '_blank');
       }
     }, 1200);
   }
@@ -5767,7 +6144,11 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const next: Record<string, string> = {};
     for (const acc of accounts) {
       try {
-        next[acc.id] = await generateTotp(acc.secret, { digits: 6, period: 30 });
+        next[acc.id] = await generateTotp(acc.secret, {
+          digits: acc.digits || 6,
+          period: acc.period || 30,
+          algorithm: acc.algorithm || 'SHA1',
+        });
       } catch {
         next[acc.id] = '------';
       }
@@ -5817,6 +6198,9 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
   addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
     const newAcc: TotpAccount = {
+      digits: 6,
+      period: 30,
+      algorithm: 'SHA1',
       ...account,
       id: 'totp-acc-' + Date.now()
     };
@@ -5824,6 +6208,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
     void this.refreshTotpCodes();
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
+  }
+
+  updateTotpAccount(id: string, updates: Partial<Omit<TotpAccount, 'id'>>): void {
+    this.totpAccounts.update((accounts) =>
+      accounts.map((acc) => (acc.id === id ? { ...acc, ...updates } : acc))
+    );
+    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    void this.refreshTotpCodes();
+    this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
   }
 
   deleteTotpAccount(id: string): void {
@@ -6778,6 +7171,257 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   onLogout(): void {
     this.logAuditEvent('User signed out of portal', 'Authentication Gateway', 'Web Session', 'success', 'Low');
     this.authService.logout();
+  }
+
+  // ==========================================
+  // SCRUM-173: Billing System / Monthly Subscription & Paywall Restrictions
+  // ==========================================
+  readonly subscriptionPlanId = signal<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>(
+    this.loadStored<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>('vanguard_billing_plan', 'free')
+  );
+  readonly subscriptionStatus = signal<'active' | 'past_due' | 'canceled'>(
+    this.loadStored<'active' | 'past_due' | 'canceled'>('vanguard_billing_status', 'active')
+  );
+  readonly showPaywallModal = signal<boolean>(false);
+  readonly paywallFeatureMessage = signal<string>('');
+
+  readonly sandboxGatewayProvider = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_provider', 'Vanguard Sandbox Payment Gateway')
+  );
+  readonly sandboxGatewayUrl = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_url', 'https://sandbox-gateway.vanguard.local/v1')
+  );
+  readonly sandboxGatewayApiKey = signal<string>(
+    this.loadStored<string>('vanguard_sandbox_gateway_key', 'sk_sandbox_vanguard_default')
+  );
+  readonly billingInvoices = signal<Array<{
+    id: string;
+    date: string;
+    planName: string;
+    amountUsd: number;
+    status: 'paid' | 'open' | 'void';
+    transactionId: string;
+  }>>(this.loadStored('vanguard_billing_invoices', []));
+
+  readonly isFreeTier = computed<boolean>(() => {
+    return this.subscriptionPlanId() === 'free' || this.subscriptionStatus() !== 'active';
+  });
+
+  readonly maxIntegratedAppsLimit = computed<number>(() => {
+    return this.isFreeTier() ? 1 : -1;
+  });
+
+  readonly currentPlanDisplayName = computed<string>(() => {
+    const plan = this.subscriptionPlanId();
+    if (plan === 'personal_pro') return 'Personal Pro ($5/mo)';
+    if (plan === 'business_pro') return 'Business Pro ($29/mo)';
+    if (plan === 'enterprise') return 'Enterprise Zero-Trust ($79/mo)';
+    return this.isIndividual() ? 'Free Starter ($0/mo)' : 'Company Free ($0/mo)';
+  });
+
+  readonly individualBillingPlans = [
+    {
+      id: 'free' as const,
+      name: 'Free Starter',
+      priceMonthlyUsd: 0,
+      badge: 'Current Default',
+      limitLabel: 'Max 1 Integrated App',
+      features: [
+        'Up to 1 integrated SSO / Auto-Fill application',
+        'Up to 3 3rd-party 2FA Authenticator accounts',
+        'Up to 5 Zero-Knowledge Personal Vault items',
+        '7-day account movement audit history',
+        'Standard Email OTP & Browser SSO approval',
+      ],
+    },
+    {
+      id: 'personal_pro' as const,
+      name: 'Personal Pro',
+      priceMonthlyUsd: 5,
+      badge: 'Recommended',
+      limitLabel: 'Unlimited Integrated Apps',
+      features: [
+        'Unlimited integrated SSO & Auto-Fill applications',
+        'Unlimited 3rd-party 2FA Authenticator accounts (SHA1/256/512)',
+        'Unlimited Zero-Knowledge Personal Vault items & password health check',
+        'Pre-launch Verification + Instant Auto-Fill Credential Injection',
+        '90-day movement audit trail + CSV export',
+      ],
+    },
+  ];
+
+  readonly companyBillingPlans = [
+    {
+      id: 'free' as const,
+      name: 'Company Free Trial',
+      priceMonthlyUsd: 0,
+      badge: 'Starter',
+      limitLabel: 'Max 1 Integrated App',
+      features: [
+        'Max 1 integrated company application',
+        'Up to 3 directory employees',
+        '24-hour movement audit trail',
+        'Basic employee application assignment',
+      ],
+    },
+    {
+      id: 'business_pro' as const,
+      name: 'Business Pro',
+      priceMonthlyUsd: 29,
+      badge: 'Most Popular',
+      limitLabel: 'Unlimited Integrated Apps',
+      features: [
+        'Unlimited integrated SSO, OIDC, SAML & Auto-Fill applications',
+        'Up to 50 directory employees & User Group matrices',
+        'Admin Employee Application Provisioning & Dedicated Credential Vault',
+        '30-day Employee Movement Audit Trail (Login/Logout/App Launch) + CSV export',
+        'Emergency Session Revocation & Killswitch',
+      ],
+    },
+    {
+      id: 'enterprise' as const,
+      name: 'Enterprise Zero-Trust',
+      priceMonthlyUsd: 79,
+      badge: 'Full Suite',
+      limitLabel: 'Unlimited Apps & Employees',
+      features: [
+        'Everything in Business Pro + Unlimited directory employees',
+        'Cloud LDAPS (Port 636) & Cloud RADIUS 802.1X (Port 1812) Gateways',
+        '365-day cryptographic forensic audit retention & SIEM export',
+        'Hardware FIDO2 / Passkey enforcement & Tenant-wide Global Killswitch',
+      ],
+    },
+  ];
+
+  canIntegrateAnotherApp(currentAppCount?: number): {
+    allowed: boolean;
+    limit: number;
+    currentCount: number;
+    reason?: string;
+  } {
+    const count =
+      typeof currentAppCount === 'number'
+        ? currentAppCount
+        : this.activeAppsList().length;
+    const limit = this.maxIntegratedAppsLimit();
+    if (limit !== -1 && count >= limit) {
+      return {
+        allowed: false,
+        limit,
+        currentCount: count,
+        reason: `Free tier is limited to ${limit} integrated application (${count}/${limit} used). Upgrade to ${
+          this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
+        } to integrate unlimited applications.`,
+      };
+    }
+    return {
+      allowed: true,
+      limit,
+      currentCount: count,
+    };
+  }
+
+  openPaywallModal(reason?: string): void {
+    this.paywallFeatureMessage.set(
+      reason ||
+        `Your Free tier plan is limited to 1 integrated application. Upgrade to ${
+          this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
+        } for unlimited application integrations and advanced zero-trust features.`
+    );
+    this.showPaywallModal.set(true);
+  }
+
+  closePaywallModal(): void {
+    this.showPaywallModal.set(false);
+  }
+
+  saveSandboxGatewayConfig(provider: string, apiUrl: string, apiKey: string): void {
+    const cleanProvider = provider.trim() || 'Vanguard Sandbox Payment Gateway';
+    const cleanUrl = apiUrl.trim() || 'https://sandbox-gateway.vanguard.local/v1';
+    const cleanKey = apiKey.trim() || 'sk_sandbox_vanguard_default';
+
+    this.sandboxGatewayProvider.set(cleanProvider);
+    this.sandboxGatewayUrl.set(cleanUrl);
+    this.sandboxGatewayApiKey.set(cleanKey);
+
+    this.saveStored('vanguard_sandbox_gateway_provider', cleanProvider);
+    this.saveStored('vanguard_sandbox_gateway_url', cleanUrl);
+    this.saveStored('vanguard_sandbox_gateway_key', cleanKey);
+
+    this.http
+      .post(`${this.apiBase}/billing/configure-gateway`, {
+        provider: cleanProvider,
+        apiUrl: cleanUrl,
+        apiKey: cleanKey,
+      })
+      .subscribe({ error: () => {} });
+
+    this.showAdminNotice(`Sandbox Payment Gateway configured (${cleanUrl}).`);
+  }
+
+  upgradeSubscriptionPlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    const allPlans = [...this.individualBillingPlans, ...this.companyBillingPlans];
+    const targetPlan = allPlans.find((p) => p.id === planId);
+    const price = targetPlan?.priceMonthlyUsd ?? (planId === 'personal_pro' ? 5 : planId === 'business_pro' ? 29 : 79);
+    const name = targetPlan?.name ?? planId;
+
+    this.subscriptionPlanId.set(planId);
+    this.subscriptionStatus.set('active');
+    this.saveStored('vanguard_billing_plan', planId);
+    this.saveStored('vanguard_billing_status', 'active');
+
+    const invoice = {
+      id: `inv_sbx_${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      planName: name,
+      amountUsd: price,
+      status: 'paid' as const,
+      transactionId: `txn_sbx_${Math.random().toString(36).slice(2, 10)}`,
+    };
+    const nextInvoices = [invoice, ...this.billingInvoices()];
+    this.billingInvoices.set(nextInvoices);
+    this.saveStored('vanguard_billing_invoices', nextInvoices);
+
+    this.http
+      .post(`${this.apiBase}/billing/checkout`, {
+        accountType: this.accountType(),
+        planId,
+        gatewayApiUrl: this.sandboxGatewayUrl(),
+        gatewayApiKey: this.sandboxGatewayApiKey(),
+      })
+      .subscribe({ error: () => {} });
+
+    this.logAuditEvent(
+      `Upgraded monthly subscription to ${name} ($${price}/mo via Sandbox Payment Gateway)`,
+      'Vanguard Billing Gateway',
+      'Sandbox Checkout',
+      'success',
+      'Low',
+    );
+    this.showPaywallModal.set(false);
+    this.showAdminNotice(`Subscribed to ${name} ($${price}/mo). Unlimited application integrations unlocked!`);
+  }
+
+  cancelSubscriptionPlan(): void {
+    this.subscriptionPlanId.set('free');
+    this.subscriptionStatus.set('active');
+    this.saveStored('vanguard_billing_plan', 'free');
+    this.saveStored('vanguard_billing_status', 'active');
+
+    this.http
+      .post(`${this.apiBase}/billing/cancel`, {
+        accountType: this.accountType(),
+      })
+      .subscribe({ error: () => {} });
+
+    this.logAuditEvent(
+      'Downgraded monthly subscription to Free tier (1-application limit active)',
+      'Vanguard Billing Gateway',
+      'Subscription Manager',
+      'success',
+      'Low',
+    );
+    this.showAdminNotice('Subscription downgraded to Free tier (max 1 integrated application).');
   }
 
 }

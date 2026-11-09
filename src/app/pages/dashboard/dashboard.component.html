@@ -60,7 +60,7 @@
         <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
         <app-user-network *ngIf="!isIndividual() && activeTab() === 'user-network'"></app-user-network>
         <app-user-ssh *ngIf="activeTab() === 'user-ssh'"></app-user-ssh>
-        <app-user-activity *ngIf="!isIndividual() && activeTab() === 'user-activity'"></app-user-activity>
+        <app-user-activity *ngIf="activeTab() === 'user-activity'"></app-user-activity>
         <app-user-devices *ngIf="activeTab() === 'user-devices'"></app-user-devices>
       </div>
     </main>

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
@@ -11,7 +11,7 @@ import { AuthService, ApproveSsoPayload, UserProfile } from '../../services/auth
   templateUrl: './login.component.html',
   styleUrl: './login.component.css',
 })
-export class LoginComponent implements OnInit {
+export class LoginComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
   readonly authService = inject(AuthService);
   private readonly router = inject(Router);
@@ -48,9 +48,11 @@ export class LoginComponent implements OnInit {
     return user.email.toLowerCase().trim() !== hint.toLowerCase().trim();
   });
 
-  // Zero-Trust SSO Access Governance Signals (SCRUM-160)
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160 & SCRUM-167)
   readonly ssoApprovalRequired = signal<boolean>(false);
   readonly ssoApprovalMessage = signal<string>('');
+  readonly isCheckingApproval = signal<boolean>(false);
+  private approvalPollTimer: any = null;
 
   private isApprovalRequiredError(err: any): boolean {
     const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
@@ -63,12 +65,46 @@ export class LoginComponent implements OnInit {
 
   private handleApprovalRequired(err: any): void {
     this.isLoading.set(false);
+    this.isCheckingApproval.set(false);
     this.ssoApprovalRequired.set(true);
     const msg =
       err?.message ||
       'Zero-Trust Access Governance: Administrative approval is required before corporate account can access this application.';
     this.ssoApprovalMessage.set(msg);
-    this.showNotification('error', msg, 8000);
+    this.startApprovalPolling();
+  }
+
+  startApprovalPolling(): void {
+    this.stopApprovalPolling();
+    this.approvalPollTimer = setInterval(() => {
+      if (this.ssoApprovalRequired() && this.ssoParams()) {
+        const u = this.currentUser();
+        this.checkApprovalAndProceed(true);
+      }
+    }, 3000);
+  }
+
+  stopApprovalPolling(): void {
+    if (this.approvalPollTimer) {
+      clearInterval(this.approvalPollTimer);
+      this.approvalPollTimer = null;
+    }
+  }
+
+  checkApprovalAndProceed(silent = false): void {
+    if (!this.ssoParams()) return;
+    if (!silent) {
+      this.isCheckingApproval.set(true);
+    }
+    const user = this.currentUser();
+    this.approveSsoForUser(user || undefined, silent);
+  }
+
+  ngOnDestroy(): void {
+    this.stopApprovalPolling();
+    if (this.notificationTimer) {
+      clearTimeout(this.notificationTimer);
+    }
   }
 
   // Single timed notification state with auto-dismiss
@@ -405,12 +441,14 @@ export class LoginComponent implements OnInit {
     });
   }
 
-  approveSsoForUser(user?: UserProfile): void {
+  approveSsoForUser(user?: UserProfile, silent = false): void {
     const sso = this.ssoParams();
     if (!sso) return;
 
-    this.isLoading.set(true);
-    this.showNotification('success', 'Authorizing SSO access to application...', 4000);
+    if (!silent) {
+      this.isLoading.set(true);
+      this.showNotification('success', 'Authorizing SSO access to application...', 4000);
+    }
 
     const currentUser = user || this.authService.currentUser();
     const email = currentUser?.email || this.loginForm.get('email')?.value?.trim();
@@ -437,6 +475,9 @@ export class LoginComponent implements OnInit {
 
     this.authService.approveSsoAuthorization(payload).subscribe({
       next: (res) => {
+        this.stopApprovalPolling();
+        this.isCheckingApproval.set(false);
+        this.ssoApprovalRequired.set(false);
         try {
           const originUrl = new URL(sso['redirect_uri']).origin;
           const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
@@ -474,11 +515,16 @@ export class LoginComponent implements OnInit {
       },
       error: (err: Error) => {
         this.isLoading.set(false);
+        this.isCheckingApproval.set(false);
         if (this.isApprovalRequiredError(err)) {
-          this.handleApprovalRequired(err);
+          if (!silent) {
+            this.handleApprovalRequired(err);
+          }
           return;
         }
-        this.showNotification('error', err.message || 'Failed to authorize SSO session.');
+        if (!silent) {
+          this.showNotification('error', err.message || 'Failed to authorize SSO session.');
+        }
       },
     });
   }

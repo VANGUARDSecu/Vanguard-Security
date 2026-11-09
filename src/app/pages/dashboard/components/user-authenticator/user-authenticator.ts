@@ -62,8 +62,11 @@ export class UserAuthenticator implements OnDestroy {
 
   // Add / Edit Account Modal
   readonly showAddModal = signal<boolean>(false);
-  readonly enrollMode = signal<'manual' | 'uri' | 'qr'>('manual');
+  readonly enrollMode = signal<'manual' | 'uri' | 'qr'>('qr');
   readonly editingAccountId = signal<string | null>(null);
+
+  // QR Code Inspector Modal State
+  readonly activeQrViewAccount = signal<TotpAccount | null>(null);
 
   formIssuer = '';
   formAccountName = '';
@@ -85,7 +88,7 @@ export class UserAuthenticator implements OnDestroy {
     this.stopCameraScan();
   }
 
-  openAddModal(mode: 'manual' | 'uri' | 'qr' = 'manual'): void {
+  openAddModal(mode: 'manual' | 'uri' | 'qr' = 'qr'): void {
     this.editingAccountId.set(null);
     this.enrollMode.set(mode);
     this.formIssuer = '';
@@ -123,9 +126,56 @@ export class UserAuthenticator implements OnDestroy {
     this.formSuccessMessage.set(null);
   }
 
+  openQrView(acc: TotpAccount): void {
+    this.activeQrViewAccount.set(acc);
+  }
+
+  closeQrView(): void {
+    this.activeQrViewAccount.set(null);
+  }
+
+  getQrCodeUrl(acc: TotpAccount): string {
+    const uri = buildOtpAuthUri(acc);
+    return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(uri)}`;
+  }
+
+  getOtpAuthUri(acc: TotpAccount): string {
+    return buildOtpAuthUri(acc);
+  }
+
+  generateInstantTestAccount(serviceName = 'Google'): void {
+    const service = serviceName.trim() || 'Google';
+    const email = `${service.toLowerCase()}.user@vanguard.security`;
+    const secret = 'JBSWY3DPEHPK3PXP'; // RFC 6238 Base32 test secret ("Hello!\xDE\xAD\xBE\xEF")
+    this.dashboardService.addTotpAccount({
+      issuer: service,
+      accountName: email,
+      secret,
+      digits: 6,
+      period: 30,
+      algorithm: 'SHA1',
+    });
+    this.searchQuery.set('');
+  }
+
+  loadSampleQrUri(): void {
+    const sampleUri =
+      'otpauth://totp/Google:user@gmail.com?secret=JBSWY3DPEHPK3PXP&issuer=Google&algorithm=SHA1&digits=6&period=30';
+    this.formOtpAuthUri = sampleUri;
+    this.applyOtpAuthUri(sampleUri);
+  }
+
   selectPreset(preset: AuthenticatorPreset): void {
     this.formIssuer = preset.issuer;
+    this.formAccountName = `${preset.issuer.toLowerCase()}.user@example.com`;
+    this.formSecret = 'JBSWY3DPEHPK3PXP';
+    this.formDigits = 6;
+    this.formPeriod = 30;
+    this.formAlgorithm = 'SHA1';
     this.formErrorMessage.set(null);
+    this.formSuccessMessage.set(
+      `Selected ${preset.issuer}! Sample Base32 secret pre-filled. Click "Enroll Authenticator" to add immediately.`
+    );
   }
 
   applyOtpAuthUri(uriInput?: string): boolean {

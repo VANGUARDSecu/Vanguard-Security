@@ -3407,6 +3407,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.supabaseService
         .updateAccessRequestStatus(requestId, 'Approved', notes, reviewer)
         .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+
+      // Also persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
+      this.http
+        .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
+        .subscribe({
+          error: (err) => console.warn('Backend approveAccessRequest notice:', err),
+        });
     }
 
     // 2. Automatically assign the SaaS application to the user's active launchpad
@@ -3500,6 +3507,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.supabaseService
         .updateAccessRequestStatus(requestId, 'Rejected', notes, reviewer)
         .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
+
+      // Also persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
+      this.http
+        .post(`${this.apiBase}/apps/access-requests/${requestId}/reject`, { adminNotes: notes })
+        .subscribe({
+          error: (err) => console.warn('Backend rejectAccessRequest notice:', err),
+        });
     }
 
     // 2. Prevent application assignment and remove if previously assigned

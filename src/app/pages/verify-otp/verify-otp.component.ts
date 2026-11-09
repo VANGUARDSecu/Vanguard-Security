@@ -29,9 +29,11 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly hasTotp = signal<boolean>(false);
   readonly provider = signal<string>('');
 
-  // Zero-Trust SSO Access Governance Signals (SCRUM-160)
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160 & SCRUM-167)
   readonly ssoApprovalRequired = signal<boolean>(false);
   readonly ssoApprovalMessage = signal<string>('');
+  readonly isCheckingApproval = signal<boolean>(false);
+  private approvalPollTimer: any = null;
 
   private isApprovalRequiredError(err: any): boolean {
     const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
@@ -44,12 +46,37 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
   private handleApprovalRequired(err: any): void {
     this.isLoading.set(false);
+    this.isCheckingApproval.set(false);
     this.ssoApprovalRequired.set(true);
     const msg =
       err?.message ||
       'Zero-Trust Access Governance: Administrative approval is required before corporate account can access this application.';
     this.ssoApprovalMessage.set(msg);
-    this.showNotification('error', msg, 8000);
+    this.startApprovalPolling();
+  }
+
+  startApprovalPolling(): void {
+    this.stopApprovalPolling();
+    this.approvalPollTimer = setInterval(() => {
+      if (this.ssoApprovalRequired() && this.ssoParams()) {
+        this.checkApprovalAndProceed(true);
+      }
+    }, 3000);
+  }
+
+  stopApprovalPolling(): void {
+    if (this.approvalPollTimer) {
+      clearInterval(this.approvalPollTimer);
+      this.approvalPollTimer = null;
+    }
+  }
+
+  checkApprovalAndProceed(silent = false): void {
+    if (!this.ssoParams()) return;
+    if (!silent) {
+      this.isCheckingApproval.set(true);
+    }
+    this.approveDirectlyInFrontend(silent);
   }
 
   // Push MFA state signals (SCRUM-85)
@@ -232,6 +259,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     if (this.resendInterval) clearInterval(this.resendInterval);
     if (this.pushPollInterval) clearInterval(this.pushPollInterval);
     if (this.pushCountdownInterval) clearInterval(this.pushCountdownInterval);
+    this.stopApprovalPolling();
   }
 
   startPushPolling(challengeId: string): void {
@@ -293,11 +321,16 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       return;
     }
 
+    const currentUser = this.authService.currentUser();
     this.isLoading.set(true);
     this.authService.initiateSsoMfa({
       client_id: sso['client_id'],
       redirect_uri: sso['redirect_uri'],
       email,
+      userId: currentUser?.id,
+      name: currentUser?.firstName ? `${currentUser.firstName} ${currentUser.lastName || ''}`.trim() : currentUser?.email,
+      role: currentUser?.role || 'user',
+      department: (currentUser?.user_metadata as any)?.['department'],
       response_type: sso['response_type'] || 'code',
       scope: sso['scope'] || 'openid profile email roles',
       state: sso['state'] || '',
@@ -316,6 +349,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       },
       error: (err: Error) => {
         this.isLoading.set(false);
+        if (this.isApprovalRequiredError(err)) {
+          this.handleApprovalRequired(err);
+          return;
+        }
         this.showNotification('error', err.message || 'Failed to dispatch Email OTP.');
       },
     });
@@ -325,12 +362,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
    * SCRUM-168: Approve SSO directly from the authenticated Vanguard Frontend browser
    * without requiring Mobile Push or Email OTP.
    */
-  approveDirectlyInFrontend(): void {
+  approveDirectlyInFrontend(silent = false): void {
     this.clearTimers();
     const sso = this.ssoParams();
     const chId = this.challengeId();
-    this.isLoading.set(true);
-    this.showNotification('success', 'Approving SSO directly from Vanguard browser session...', 3000);
+
+    if (!silent) {
+      this.isLoading.set(true);
+      this.showNotification('success', 'Approving SSO directly from Vanguard browser session...', 3000);
+    }
 
     if (chId) {
       this.authService.verifySsoMfa({
@@ -339,9 +379,18 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         method: 'frontend_approval',
       }).subscribe({
         next: (res) => {
+          this.stopApprovalPolling();
+          this.isCheckingApproval.set(false);
+          this.ssoApprovalRequired.set(false);
           this.handleSsoRedirect(res);
         },
-        error: () => {
+        error: (err: any) => {
+          if (this.isApprovalRequiredError(err)) {
+            if (!silent) {
+              this.handleApprovalRequired(err);
+            }
+            return;
+          }
           // Fallback to direct session approval
           this.handleVerificationSuccess(this.authService.currentUser() || undefined);
         },
@@ -355,6 +404,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
 
     this.isLoading.set(false);
+    this.isCheckingApproval.set(false);
   }
 
   openAuthenticatorApp(): void {

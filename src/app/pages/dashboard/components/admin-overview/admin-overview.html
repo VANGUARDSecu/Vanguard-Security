@@ -31,6 +31,45 @@
             </div>
           </section>
 
+          <!-- Administrative Quick Actions -->
+          <section class="dash-section" style="margin-bottom: 24px;">
+            <div class="section-header">
+              <div class="section-title-wrap">
+                <h2 class="section-title">⚡ Administrative Quick Actions</h2>
+                <p class="section-subtitle">Direct shortcuts to provision employee application accounts, manage identities, and audit movements.</p>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 14px; flex-wrap: wrap;">
+              <button
+                type="button"
+                (click)="setActiveTab('directory')"
+                style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #fff; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);"
+              >
+                <span style="font-size: 18px;">🔑</span>
+                <span>Provision Employee App Account</span>
+              </button>
+
+              <button
+                type="button"
+                (click)="setActiveTab('directory')"
+                style="background: #2563eb; border: none; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #fff;"
+              >
+                <span style="font-size: 18px;">👤</span>
+                <span>Invite New Employee</span>
+              </button>
+
+              <button
+                type="button"
+                (click)="setActiveTab('audit-logs')"
+                style="background: #334155; border: 1px solid #475569; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #e2e8f0;"
+              >
+                <span style="font-size: 18px;">📋</span>
+                <span>Audit Logs & Employee Movements</span>
+              </button>
+            </div>
+          </section>
+
           <!-- Directory Identity & Organization Profile -->
           <section class="dash-section">
             <div class="section-header">

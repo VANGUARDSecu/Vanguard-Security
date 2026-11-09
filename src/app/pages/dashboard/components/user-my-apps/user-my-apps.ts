@@ -522,6 +522,8 @@ export class UserMyApps {
         this.newAppCategory = 'collaboration';
         this.newAppIcon = '🎨';
         this.newAppDescription = 'Collaborative interface design & prototyping suite';
+        this.newAppUsername = 'designer@acme.corp';
+        this.newAppPassword = 'P@sswordFigma2026!';
         break;
       case 'facebook':
         this.newAppName = 'Facebook';
@@ -529,6 +531,8 @@ export class UserMyApps {
         this.newAppCategory = 'collaboration';
         this.newAppIcon = '📘';
         this.newAppDescription = 'Social network & Meta business suite';
+        this.newAppUsername = 'social.lead@acme.corp';
+        this.newAppPassword = 'MetaSecure#2026';
         break;
       case 'github':
         this.newAppName = 'GitHub';
@@ -536,6 +540,8 @@ export class UserMyApps {
         this.newAppCategory = 'developer';
         this.newAppIcon = '🐙';
         this.newAppDescription = 'Git repository hosting & developer platform';
+        this.newAppUsername = 'dev.lead@acme.corp';
+        this.newAppPassword = 'GitVault#Secure99';
         break;
       case 'notion':
         this.newAppName = 'Notion';
@@ -543,6 +549,8 @@ export class UserMyApps {
         this.newAppCategory = 'collaboration';
         this.newAppIcon = '📝';
         this.newAppDescription = 'Connected workspace for wiki, docs & project notes';
+        this.newAppUsername = 'product@acme.corp';
+        this.newAppPassword = 'Notion#Workspace88';
         break;
       case 'google':
         this.newAppName = 'Google Account';
@@ -550,6 +558,8 @@ export class UserMyApps {
         this.newAppCategory = 'cloud';
         this.newAppIcon = '🔍';
         this.newAppDescription = 'Google workspace, Drive, and identity authentication';
+        this.newAppUsername = 'employee@acme.corp';
+        this.newAppPassword = 'Google#CloudPass77';
         break;
       case 'custom':
         this.newAppName = '';
@@ -557,7 +567,79 @@ export class UserMyApps {
         this.newAppCategory = 'cloud';
         this.newAppIcon = '🌐';
         this.newAppDescription = '';
+        this.newAppUsername = '';
+        this.newAppPassword = '';
         break;
+    }
+  }
+
+  quickAddDemoApps(): void {
+    const demos: Array<{ name: string; url: string; icon: string; category: any; username: string; pass: string }> = [
+      {
+        name: 'Figma',
+        url: 'https://www.figma.com/login',
+        icon: '🎨',
+        category: 'collaboration',
+        username: 'designer@acme.corp',
+        pass: 'P@sswordFigma2026!',
+      },
+      {
+        name: 'Facebook',
+        url: 'https://www.facebook.com/login',
+        icon: '📘',
+        category: 'collaboration',
+        username: 'social.lead@acme.corp',
+        pass: 'MetaSecure#2026',
+      },
+      {
+        name: 'GitHub',
+        url: 'https://github.com/login',
+        icon: '🐙',
+        category: 'developer',
+        username: 'dev.lead@acme.corp',
+        pass: 'GitVault#Secure99',
+      },
+    ];
+
+    for (const demo of demos) {
+      if (this.isPersonalWorkspace()) {
+        this.dashboardService.addPersonalApp({
+          name: demo.name,
+          launchUrl: demo.url,
+          icon: demo.icon,
+          category: demo.category,
+          description: `${demo.name} Workspace with Pre-Launch Verification`,
+        });
+      } else {
+        this.dashboardService.apps.update((list) => {
+          if (list.some((a) => a.name.toLowerCase() === demo.name.toLowerCase())) return list;
+          return [
+            {
+              id: 'app-demo-' + demo.name.toLowerCase(),
+              name: demo.name,
+              category: demo.category,
+              description: `${demo.name} Enterprise Workspace with Pre-Launch Verification`,
+              icon: demo.icon,
+              protocol: 'Extension Autofill',
+              launchUrl: demo.url,
+              assigned: true,
+              assignedUsername: demo.username,
+              status: 'Approved',
+            },
+            ...list,
+          ];
+        });
+        (this.dashboardService as any).saveStored?.('vanguard_user_apps', this.dashboardService.apps());
+      }
+
+      this.dashboardService.addVaultItem({
+        title: demo.name,
+        category: 'Login',
+        username: demo.username,
+        password: demo.pass,
+        url: demo.url,
+        notes: `Demo credentials for ${demo.name} pre-launch security auto-fill test.`,
+      });
     }
   }
 

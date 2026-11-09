@@ -27,6 +27,10 @@
         <span class="timer-label">Rolling Refresh</span>
       </div>
 
+      <button type="button" class="btn-cyber-primary" (click)="generateInstantTestAccount('Google')" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
+        <span>⚡ Instant Test 2FA Account</span>
+      </button>
+
       <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')" style="padding: 10px 14px; border-radius: 10px;">
         <span>📷 Scan QR / URI</span>
       </button>
@@ -89,11 +93,14 @@
         Use Vanguard as your 3rd-party authenticator (just like Google Authenticator) for Google, GitHub, Facebook, Figma, AWS, or any TOTP-enabled application. Scan a QR code, paste an <code>otpauth://</code> URI, or enter a Base32 secret key.
       </p>
       <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-        <button type="button" class="btn-cyber-primary" (click)="openAddModal('manual')">
-          + Enter Secret Key
+        <button type="button" class="btn-cyber-primary" (click)="generateInstantTestAccount('Google')" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
+          ⚡ Generate Instant Test 2FA Account
         </button>
         <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')">
-          📷 Scan QR / Paste otpauth:// URI
+          📷 Scan / Upload QR Code
+        </button>
+        <button type="button" class="btn-cyber-secondary" (click)="openAddModal('manual')">
+          ⌨️ Enter Secret Key
         </button>
       </div>
     </div>
@@ -112,6 +119,15 @@
           </div>
 
           <div style="display: flex; gap: 6px; align-items: center;">
+            <button
+              type="button"
+              class="btn-revoke-acc"
+              (click)="openQrView(acc)"
+              title="View QR Code for this 2FA account"
+              style="font-size: 11px; padding: 4px 8px; color: #60a5fa;"
+            >
+              📷 QR
+            </button>
             <button
               type="button"
               class="btn-revoke-acc"
@@ -260,12 +276,15 @@
             class="cyber-input"
             style="width: 100%; margin-bottom: 10px;"
           />
-          <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
             <button type="button" class="btn-cyber-secondary" (click)="startCameraScan(qrVideo)" *ngIf="!isCameraActive()">
               📷 Start Webcam QR Scanner
             </button>
             <button type="button" class="btn-cyber-secondary" (click)="stopCameraScan()" *ngIf="isCameraActive()">
               ⏹ Stop Webcam
+            </button>
+            <button type="button" class="btn-cyber-secondary" (click)="loadSampleQrUri()" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
+              ⚡ Load Sample 2FA QR Data
             </button>
           </div>
           <video
@@ -279,7 +298,7 @@
 
         <!-- Preset Pills -->
         <div class="form-group" style="margin-bottom: 12px;">
-          <label class="form-label">Popular 3rd-Party Services</label>
+          <label class="form-label">Popular 3rd-Party Services (Click to Auto-Fill Preset & Sample Key)</label>
           <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button
               *ngFor="let preset of servicePresets"
@@ -359,4 +378,47 @@
       </div>
     </div>
   </div>
+
+  <!-- QR CODE INSPECTOR MODAL (SCRUM-166) -->
+  @if (activeQrViewAccount(); as acc) {
+    <div class="modal-backdrop">
+      <div class="modal-box cyber-modal" style="max-width: 460px; text-align: center;">
+        <div class="modal-header">
+          <h2 class="modal-heading">{{ acc.issuer }} 2FA QR Code</h2>
+          <button type="button" class="modal-close-btn" (click)="closeQrView()">✕</button>
+        </div>
+        <div class="modal-body" style="display: flex; flex-direction: column; align-items: center; gap: 14px;">
+          <p style="font-size: 13px; color: #94a3b8; margin: 0;">
+            Scan this QR code with <strong>Google Authenticator</strong>, <strong>Authy</strong>, or any TOTP mobile app to verify 2-way parity:
+          </p>
+
+          <!-- Rendered QR Code Image -->
+          <div style="padding: 14px; background: #ffffff; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.4);">
+            <img
+              [src]="getQrCodeUrl(acc)"
+              [alt]="acc.issuer + ' 2FA QR Code'"
+              style="width: 200px; height: 200px; display: block;"
+            />
+          </div>
+
+          <div style="width: 100%; text-align: left; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Account Identifier</div>
+            <div style="font-size: 13px; color: #f8fafc; font-weight: 600; margin-bottom: 8px;">{{ acc.accountName }}</div>
+
+            <div style="font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Base32 Secret Key</div>
+            <div style="font-size: 13px; color: #38bdf8; font-family: monospace; word-break: break-all; margin-bottom: 8px;">{{ acc.secret }}</div>
+
+            <div style="font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Current Rolling Code</div>
+            <div style="font-size: 20px; font-weight: 800; color: #34d399; font-family: monospace;">{{ formatCode(acc.currentCode) }}</div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button type="button" class="btn-cyber-secondary" (click)="copyOtpAuthUri(acc)">
+            {{ copiedUriAccountId() === acc.id ? '✓ Copied URI!' : '🔗 Copy otpauth:// URI' }}
+          </button>
+          <button type="button" class="btn-cyber-primary" (click)="closeQrView()">Close</button>
+        </div>
+      </div>
+    </div>
+  }
 </div>

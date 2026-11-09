@@ -22,6 +22,15 @@
               <button
                 type="button"
                 class="btn-primary-action"
+                style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399;"
+                (click)="quickAddDemoApps()"
+                title="Quickly add Figma, Facebook, and GitHub with pre-filled credentials for testing verified launch"
+              >
+                <span>⚡ Quick Add Demo Apps</span>
+              </button>
+              <button
+                type="button"
+                class="btn-primary-action"
                 (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
               >
                 <span class="btn-plus">+</span>
@@ -306,16 +315,26 @@
               <p class="empty-desc">
                 {{ isPersonalWorkspace()
                   ? 'Add your favorite web applications (Figma, Facebook, GitHub, AWS, etc.) for dynamic autofill via the Vanguard browser extension.'
-                  : 'You do not have any single sign-on applications assigned to your account. You can request access using the button below.' }}
+                  : 'You do not have any single sign-on applications assigned to your account. You can request access or load demo apps below.' }}
               </p>
-              <button
-                type="button"
-                class="btn-primary-action btn-sm"
-                (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
-              >
-                <span class="btn-plus">+</span>
-                <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
-              </button>
+              <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                <button
+                  type="button"
+                  class="btn-primary-action btn-sm"
+                  style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399;"
+                  (click)="quickAddDemoApps()"
+                >
+                  ⚡ Quick Add Demo Apps (Figma & Facebook)
+                </button>
+                <button
+                  type="button"
+                  class="btn-primary-action btn-sm"
+                  (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
+                >
+                  <span class="btn-plus">+</span>
+                  <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -446,7 +465,7 @@
       <div class="modal-body">
         <!-- Quick Presets -->
         <div class="preset-section">
-          <label class="form-label">Quick Presets</label>
+          <label class="form-label">Quick Presets (Click to Auto-Fill App & Demo Credentials)</label>
           <div class="preset-pill-group">
             <button type="button" class="preset-pill" (click)="applyPreset('figma')">🎨 Figma</button>
             <button type="button" class="preset-pill" (click)="applyPreset('facebook')">📘 Facebook</button>

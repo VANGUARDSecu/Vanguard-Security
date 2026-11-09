@@ -1,4 +1,4 @@
-import { Component, inject, signal, HostListener } from '@angular/core';
+import { Component, inject, signal, HostListener, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -21,7 +21,7 @@ import {
   templateUrl: './admin-audit-logs.html',
   styleUrl: './admin-audit-logs.css'
 })
-export class AdminAuditLogs {
+export class AdminAuditLogs implements OnInit {
   readonly dashboardService = inject(DashboardService);
   readonly Math = Math;
 
@@ -33,6 +33,21 @@ export class AdminAuditLogs {
   readonly auditDateRangeFilter = this.dashboardService.auditDateRangeFilter;
   readonly auditThreatsOnlyFilter = this.dashboardService.auditThreatsOnlyFilter;
   readonly auditSearchQuery = this.dashboardService.auditSearchQuery;
+  readonly auditActorFilter = this.dashboardService.auditActorFilter;
+  readonly directoryUsers = this.dashboardService.directoryUsers;
+
+  ngOnInit(): void {
+    this.dashboardService.loadServerAuditLogs();
+  }
+
+  refreshAuditLogs(): void {
+    this.dashboardService.loadServerAuditLogs(this.auditActorFilter());
+  }
+
+  setAuditActor(actorEmail: string): void {
+    this.dashboardService.setAuditActor(actorEmail);
+    this.dashboardService.loadServerAuditLogs(actorEmail);
+  }
 
   readonly filteredAuditEvents = this.dashboardService.filteredAuditEvents;
   readonly paginatedAuditEvents = this.dashboardService.paginatedAuditEvents;

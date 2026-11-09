@@ -4,7 +4,10 @@
               <h2 class="section-title">Tenant-Wide Security Audit Explorer</h2>
               <p class="section-subtitle">Real-time cryptographic forensic trail of authentication events, directory changes, zero-trust policies, and threat anomalies.</p>
             </div>
-            <div class="header-actions">
+            <div class="header-actions" style="display: flex; gap: 10px;">
+              <button type="button" class="btn-reset-filters" (click)="refreshAuditLogs()" title="Refresh real-time employee movement audit trail">
+                🔄 Refresh Movements
+              </button>
               <button type="button" class="btn-primary-action" (click)="exportAuditLogs()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -29,21 +32,38 @@
                   type="text"
                   [ngModel]="auditSearchQuery()"
                   (ngModelChange)="auditSearchQuery.set($event)"
-                  placeholder="Search by actor, target service, client IP, or request ID..."
+                  placeholder="Search by employee email, action, target app, IP, or request ID..."
                   class="filter-search-input"
                 />
               </div>
 
+              <!-- SCRUM-172: Employee / Identity Filter -->
+              <div class="filter-select-wrap">
+                <label class="filter-label">Employee:</label>
+                <select
+                  class="filter-select"
+                  [ngModel]="auditActorFilter()"
+                  (ngModelChange)="setAuditActor($event)"
+                >
+                  <option value="all">All Employees &amp; Identities</option>
+                  <option *ngFor="let emp of directoryUsers()" [value]="emp.email">
+                    {{ emp.name }} ({{ emp.email }})
+                  </option>
+                </select>
+              </div>
+
               <!-- Event Type Dropdown Filter -->
               <div class="filter-select-wrap">
-                <label class="filter-label">Event Type:</label>
+                <label class="filter-label">Movement Type:</label>
                 <select
                   class="filter-select"
                   [ngModel]="auditEventTypeFilter()"
                   (ngModelChange)="setAuditEventType($event)"
                 >
-                  <option value="all">All Event Types</option>
-                  <option value="SSO_LOGIN">SSO_LOGIN</option>
+                  <option value="all">All Movements &amp; Events</option>
+                  <option value="SSO_LOGIN">SSO_LOGIN (Sign-In)</option>
+                  <option value="USER_LOGOUT">USER_LOGOUT (Sign-Out)</option>
+                  <option value="APP_LAUNCH">APP_LAUNCH (Application Opened)</option>
                   <option value="RADIUS_AUTH">RADIUS_AUTH</option>
                   <option value="LDAP_BIND">LDAP_BIND</option>
                   <option value="USER_PROVISIONED">USER_PROVISIONED</option>

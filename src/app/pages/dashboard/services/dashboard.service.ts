@@ -335,6 +335,12 @@ export class DashboardService {
   readonly auditDateRangeFilter = signal<string>('all');
   readonly auditThreatsOnlyFilter = signal<boolean>(false);
   readonly auditSearchQuery = signal<string>('');
+  readonly auditActorFilter = signal<string>('all');
+
+  setAuditActor(actorEmail: string): void {
+    this.auditActorFilter.set(actorEmail || 'all');
+    this.auditCurrentPage.set(1);
+  }
 
   readonly selectedAuditEvent = signal<TenantAuditEvent | null>(null);
   readonly showAuditInspector = signal<boolean>(false);
@@ -373,16 +379,31 @@ export class DashboardService {
     const severity = this.auditSeverityFilter();
     const dateRange = this.auditDateRangeFilter();
     const threatsOnly = this.auditThreatsOnlyFilter();
+    const actorFilter = this.auditActorFilter().toLowerCase().trim();
     const query = this.auditSearchQuery().toLowerCase().trim();
 
     const now = Date.now();
 
-    return this.tenantAuditEvents().filter((evt) => {
+    // Merge serverAuditEvents and tenantAuditEvents deduplicated by id
+    const seenIds = new Set<string>();
+    const combined: TenantAuditEvent[] = [];
+    for (const evt of [...this.serverAuditEvents(), ...this.tenantAuditEvents()]) {
+      if (!seenIds.has(evt.id)) {
+        seenIds.add(evt.id);
+        combined.push(evt);
+      }
+    }
+
+    return combined.filter((evt) => {
       const matchStatus = status === 'all' || evt.status === status;
       const matchProto = proto === 'all' || evt.protocol === proto;
       const matchType = eventType === 'all' || evt.eventType === eventType;
       const matchSeverity = severity === 'all' || evt.severity === severity;
       const matchThreat = !threatsOnly || !!evt.threatIndicator;
+      const matchActor =
+        actorFilter === 'all' ||
+        !actorFilter ||
+        evt.actor.toLowerCase().trim() === actorFilter;
 
       let matchDate = true;
       if (dateRange !== 'all' && evt.isoTimestamp) {
@@ -398,6 +419,7 @@ export class DashboardService {
         !query ||
         evt.actor.toLowerCase().includes(query) ||
         evt.target.toLowerCase().includes(query) ||
+        (evt.action && evt.action.toLowerCase().includes(query)) ||
         evt.clientIp.toLowerCase().includes(query) ||
         evt.location.toLowerCase().includes(query) ||
         evt.protocol.toLowerCase().includes(query) ||
@@ -405,7 +427,7 @@ export class DashboardService {
         (evt.eventType && evt.eventType.toLowerCase().includes(query)) ||
         (evt.threatIndicator?.description.toLowerCase().includes(query) ?? false);
 
-      return matchStatus && matchProto && matchType && matchSeverity && matchThreat && matchDate && matchQuery;
+      return matchStatus && matchProto && matchType && matchSeverity && matchThreat && matchActor && matchDate && matchQuery;
     });
   });
 
@@ -449,7 +471,9 @@ export class DashboardService {
     let inferredType: AuditEventType = 'SSO_LOGIN';
     const protoUpper = protocol.toUpperCase();
     const actUpper = action.toUpperCase();
-    if (protoUpper.includes('RADIUS') || actUpper.includes('RADIUS')) inferredType = 'RADIUS_AUTH';
+    if (actUpper.includes('LOGOUT') || actUpper.includes('SIGN OUT') || actUpper.includes('SIGNED OUT')) inferredType = 'USER_LOGOUT';
+    else if (actUpper.includes('LAUNCH')) inferredType = 'APP_LAUNCH';
+    else if (protoUpper.includes('RADIUS') || actUpper.includes('RADIUS')) inferredType = 'RADIUS_AUTH';
     else if (protoUpper.includes('LDAP') || actUpper.includes('LDAP')) inferredType = 'LDAP_BIND';
     else if (actUpper.includes('PROVISION') || actUpper.includes('INVIT') || actUpper.includes('USER')) inferredType = 'USER_PROVISIONED';
     else if (actUpper.includes('PASSWORD') || actUpper.includes('RESET')) inferredType = 'PASSWORD_RESET';
@@ -459,7 +483,7 @@ export class DashboardService {
     else if (actUpper.includes('SSH') || actUpper.includes('VAULT') || actUpper.includes('SECRET')) inferredType = 'VAULT_ACCESS';
 
     const newEvt: TenantAuditEvent = {
-      id: 'log-' + Date.now(),
+      id: 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       action,
       timestamp: timeStr,
       isoTimestamp: isoStr,
@@ -504,6 +528,23 @@ export class DashboardService {
     this.tenantAuditEvents.update((evts) => [newEvt, ...evts]);
     this.saveStored('vanguard_audit_events', this.tenantAuditEvents());
 
+    // SCRUM-172: Also append to signInHistory so User Activity shows all account movements
+    const signInEvt: SignInEvent = {
+      id: newEvt.id,
+      timestamp: timeStr,
+      application: target || 'Vanguard Identity Portal',
+      protocol,
+      device: newEvt.device,
+      ip: newEvt.clientIp,
+      location: newEvt.location,
+      status: newEvt.eventType === 'USER_LOGOUT' ? 'logout' : status === 'blocked' ? 'blocked' : status === 'challenge' ? 'mfa_required' : 'success',
+      movementType: newEvt.eventType,
+      action,
+      actorEmail: actor,
+    };
+    this.signInHistory.update((list) => [signInEvt, ...list].slice(0, 200));
+    this.saveStored('vanguard_signin_history', this.signInHistory());
+
     if (this.isBrowser) {
       const activeTenant = this.activeOrganizationId();
       this.supabaseService
@@ -533,36 +574,51 @@ export class DashboardService {
   readonly serverAuditEvents = signal<TenantAuditEvent[]>([]);
 
   /**
-   * SCRUM-133: load the authoritative audit trail from the backend
-   * (`GET /auth/audit-logs`, scoped server-side to the principal). These are
-   * tagged source:'server' / authoritative:true to distinguish them from the
-   * local client-ui feedback events.
+   * SCRUM-133 & SCRUM-172: load the authoritative audit trail from the backend
+   * (`GET /auth/audit-logs`, scoped server-side to the principal or tenant employees for Admin).
    */
-  loadServerAuditLogs(): void {
+  loadServerAuditLogs(employeeEmail?: string, movementType?: string): void {
     if (!this.isBrowser) return;
+    const params: Record<string, string> = {};
+    if (employeeEmail && employeeEmail !== 'all') {
+      params['employeeEmail'] = employeeEmail;
+    }
+    if (movementType && movementType !== 'all') {
+      params['movementType'] = movementType;
+    }
     this.http
-      .get<any[]>(`${this.apiBase}/auth/audit-logs`)
+      .get<any[]>(`${this.apiBase}/auth/audit-logs`, { params })
       .subscribe({
         next: (rows) => {
-          const mapped: TenantAuditEvent[] = (rows || []).map((r) => ({
-            id: r.id || 'srv-' + Math.random().toString(36).slice(2),
-            action: r.metadata?.action || r.status,
-            timestamp: r.timestamp,
-            isoTimestamp: r.timestamp,
-            actor: r.actorEmail,
-            source: 'server',
-            authoritative: true,
-            target: r.applicationName || r.clientId || '—',
-            protocol: r.protocol || 'Web Portal',
-            clientIp: r.ipAddress || '—',
-            location: r.location || '—',
-            device: r.device || '—',
-            status: r.status === 'SUCCESS' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
-            riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
-            eventType: 'SSO_LOGIN',
-            severity: r.severity || 'INFO',
-            requestId: r.id || '',
-          }));
+          const mapped: TenantAuditEvent[] = (rows || []).map((r) => {
+            const mt = (r.movementType || r.metadata?.movementType || '').toUpperCase();
+            let eventType: AuditEventType = 'SSO_LOGIN';
+            if (mt === 'LOGOUT' || r.status === 'LOGOUT') eventType = 'USER_LOGOUT';
+            else if (mt === 'APP_LAUNCH') eventType = 'APP_LAUNCH';
+            else if (mt === 'PASSWORD_CHANGE') eventType = 'PASSWORD_RESET';
+            else if (mt === 'MFA_CHANGE') eventType = 'MFA_CHALLENGE';
+            else if (mt === 'VAULT_ACCESS') eventType = 'VAULT_ACCESS';
+
+            return {
+              id: r.id || 'srv-' + Math.random().toString(36).slice(2),
+              action: r.action || r.metadata?.action || r.status,
+              timestamp: r.timestamp ? new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—',
+              isoTimestamp: r.timestamp,
+              actor: r.actorEmail,
+              source: 'server' as const,
+              authoritative: true,
+              target: r.applicationName || r.clientId || '—',
+              protocol: r.protocol || 'Web Portal',
+              clientIp: r.ipAddress || '—',
+              location: r.location || '—',
+              device: r.device || '—',
+              status: r.status === 'SUCCESS' || r.status === 'LOGOUT' ? 'success' : r.status === 'CHALLENGE' ? 'challenge' : 'blocked',
+              riskScore: r.severity === 'SECURITY_ALERT' ? 'High' : r.severity === 'WARN' ? 'Medium' : 'Low',
+              eventType,
+              severity: r.severity || 'INFO',
+              requestId: r.id || '',
+            };
+          });
           this.serverAuditEvents.set(mapped);
         },
         error: () => {

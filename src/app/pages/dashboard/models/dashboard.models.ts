@@ -83,7 +83,10 @@ export interface SignInEvent {
   device: string;
   ip: string;
   location: string;
-  status: 'success' | 'mfa_required' | 'blocked';
+  status: 'success' | 'mfa_required' | 'blocked' | 'logout';
+  movementType?: 'LOGIN' | 'LOGOUT' | 'APP_LAUNCH' | 'PASSWORD_CHANGE' | 'MFA_CHANGE' | 'VAULT_ACCESS' | string;
+  action?: string;
+  actorEmail?: string;
 }
 
 export interface UserSecurityAlertPreferences {

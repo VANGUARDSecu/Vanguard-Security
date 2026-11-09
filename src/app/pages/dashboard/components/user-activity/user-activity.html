@@ -1,9 +1,68 @@
         <section class="dash-section" *ngIf="activeTab() === 'user-activity'">
           <div class="section-header">
             <div class="section-title-wrap">
-              <h2 class="section-title">My Sign-in Activity</h2>
-              <p class="section-subtitle">Chronological record of your recent authentication events across web, network, and SSO apps.</p>
+              <h2 class="section-title">My Sign-in &amp; Account Movement Audit</h2>
+              <p class="section-subtitle">Chronological audit trail of your account movements: sign-ins, sign-outs, verified application launches, and security actions.</p>
             </div>
+            <div class="header-actions">
+              <button type="button" class="cat-pill" (click)="refreshMyActivity()">
+                🔄 Refresh Movements
+              </button>
+            </div>
+          </div>
+
+          <!-- SCRUM-172: Movement Filter & Search Bar -->
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div class="category-filter-bar" style="margin-bottom: 0;">
+              <button
+                type="button"
+                class="cat-pill"
+                [class.active]="movementFilter() === 'all'"
+                (click)="movementFilter.set('all')"
+              >
+                All Movements ({{ myMovementAuditTrail().length }})
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                [class.active]="movementFilter() === 'LOGIN'"
+                (click)="movementFilter.set('LOGIN')"
+              >
+                🟢 Sign-In
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                [class.active]="movementFilter() === 'LOGOUT'"
+                (click)="movementFilter.set('LOGOUT')"
+              >
+                🟠 Sign-Out
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                [class.active]="movementFilter() === 'APP_LAUNCH'"
+                (click)="movementFilter.set('APP_LAUNCH')"
+              >
+                🚀 App Launches
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                [class.active]="movementFilter() === 'SECURITY'"
+                (click)="movementFilter.set('SECURITY')"
+              >
+                🔐 Vault &amp; Security
+              </button>
+            </div>
+
+            <input
+              type="text"
+              [ngModel]="searchQuery()"
+              (ngModelChange)="searchQuery.set($event)"
+              placeholder="Search movement, app, or IP..."
+              style="padding: 8px 12px; border-radius: 8px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); color: #f8fafc; font-size: 12px; min-width: 220px;"
+            />
           </div>
 
           <div class="activity-table-card">
@@ -11,31 +70,45 @@
               <table class="activity-table">
                 <thead>
                   <tr>
-                    <th>Date & Time</th>
+                    <th>Date &amp; Time</th>
+                    <th>Movement / Action</th>
                     <th>Application / Gateway</th>
                     <th>Protocol</th>
-                    <th>Device & Browser</th>
-                    <th>IP Address & Location</th>
+                    <th>Device &amp; Browser</th>
+                    <th>IP Address &amp; Location</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr *ngFor="let evt of signInHistory()">
+                  <tr *ngFor="let evt of myMovementAuditTrail()">
                     <td class="col-time">{{ evt.timestamp }}</td>
+                    <td>
+                      <span class="table-proto-badge" style="margin-right: 6px;">
+                        {{ evt.movementType || 'LOGIN' }}
+                      </span>
+                      <span style="font-size: 12px; color: #cbd5e1;" *ngIf="evt.action">{{ evt.action }}</span>
+                    </td>
                     <td class="col-app"><strong>{{ evt.application }}</strong></td>
                     <td class="col-proto"><span class="table-proto-badge">{{ evt.protocol }}</span></td>
                     <td class="col-device">{{ evt.device }}</td>
                     <td class="col-ip">{{ evt.ip }} <span class="ip-loc">({{ evt.location }})</span></td>
                     <td class="col-status">
-                      <span class="badge badge-success">● SUCCESS</span>
+                      <span
+                        class="badge"
+                        [class.badge-success]="evt.status === 'success'"
+                        [class.badge-orange]="evt.status === 'logout' || evt.status === 'mfa_required'"
+                        [class.badge-danger]="evt.status === 'blocked'"
+                      >
+                        ● {{ evt.status === 'logout' ? 'SIGNED OUT' : (evt.status | uppercase) }}
+                      </span>
                     </td>
                   </tr>
-                  <tr *ngIf="signInHistory().length === 0">
-                    <td colspan="6" class="empty-state-cell">
+                  <tr *ngIf="myMovementAuditTrail().length === 0">
+                    <td colspan="7" class="empty-state-cell">
                       <div class="empty-state-wrap">
                         <span class="empty-icon">🕒</span>
-                        <h4 class="empty-title">No sign-in activity recorded</h4>
-                        <p class="empty-desc">Your authentication events and session activity will appear here once recorded.</p>
+                        <h4 class="empty-title">No sign-in or movement activity recorded</h4>
+                        <p class="empty-desc">Your authentication events, sign-outs, and application launch movements will appear here once recorded.</p>
                       </div>
                     </td>
                   </tr>

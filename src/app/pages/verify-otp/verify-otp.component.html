@@ -180,28 +180,27 @@
 
           <!-- 2-Digit Number Matching Challenge Card -->
           <div class="number-matching-card">
-            <span class="number-card-label">NUMBER TO MATCH ON PHONE</span>
+            <span class="number-card-label">NUMBER TO MATCH TO APPROVE</span>
             <div class="number-display-box" [attr.aria-label]="'Verification number challenge ' + numberCode()">
               <span class="number-display-val">{{ numberCode() || '--' }}</span>
             </div>
             <p class="number-card-desc">
-              Open the notification or <strong>Vanguard Authenticator</strong> app on your smartphone and select the number above to authorize access.
+              Select the number above in your <strong>Vanguard Mobile Authenticator</strong> or in your <strong>Vanguard Dashboard</strong> to authorize access.
             </p>
           </div>
 
-          <!-- SCRUM-168: Direct Browser Approval Button -->
+          <!-- SCRUM-176: Open Vanguard Dashboard to Approve -->
           <div style="margin: 18px 0; text-align: center;">
             <button
               type="button"
               class="verify-btn"
-              style="background: #10b981; color: #042f2e; font-weight: 700; padding: 12px 18px; border-radius: 8px; border: none; cursor: pointer; width: 100%; font-size: 14px;"
-              (click)="approveDirectlyInFrontend()"
-              [disabled]="isLoading()"
+              style="background: #10b981; color: #042f2e; font-weight: 700; padding: 12px 18px; border-radius: 8px; border: none; cursor: pointer; width: 100%; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;"
+              (click)="openDashboardForApproval()"
             >
-              ✅ Approve Sign-In on this Browser
+              <span>↗ Open Vanguard Dashboard to Approve</span>
             </button>
             <span style="display: block; font-size: 12px; color: #94a3b8; margin-top: 6px;">
-              No smartphone nearby? Approve immediately right here in your browser session.
+              Approving on desktop? Select number <strong>{{ numberCode() }}</strong> in your Vanguard Dashboard.
             </span>
           </div>
 
@@ -271,23 +270,6 @@
       } @else {
         <!-- OTP Input Form -->
         <form (submit)="$event.preventDefault(); onSubmit()" class="otp-form" novalidate>
-        
-        @if (isSsoVerification()) {
-          <div style="margin-bottom: 16px; padding: 12px; border-radius: 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); text-align: center;">
-            <button
-              type="button"
-              class="verify-btn"
-              style="background: #10b981; color: #042f2e; font-weight: 700; padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; width: 100%; font-size: 13px;"
-              (click)="approveDirectlyInFrontend()"
-              [disabled]="isLoading()"
-            >
-              ✅ Approve SSO Directly on this Browser (Skip Code)
-            </button>
-            <span style="display: block; font-size: 11px; color: #94a3b8; margin-top: 6px;">
-              Authorize instantly using your current session without waiting for an email. (Dev: code 123456 is also valid)
-            </span>
-          </div>
-        }
 
         <div class="otp-inputs-row" (paste)="onPaste($event)">
           @for (digit of digits(); track $index) {
@@ -346,11 +328,11 @@
             <button
               type="button"
               class="method-toggle-btn"
-              (click)="approveDirectlyInFrontend()"
+              (click)="switchToPushApproval()"
               [disabled]="isLoading()"
               style="width: 100%; justify-content: center; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; padding: 10px 14px; border-radius: 10px; font-weight: 600; cursor: pointer;"
             >
-              <span>✓ Approve SSO Directly in Frontend (Skip OTP)</span>
+              <span>📱 Approve via Mobile MFA or Dashboard instead</span>
             </button>
           </div>
         }

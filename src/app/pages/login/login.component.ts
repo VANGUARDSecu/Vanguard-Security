@@ -241,21 +241,19 @@ export class LoginComponent implements OnInit, OnDestroy {
         }
 
         if (sso) {
-          // SCRUM-168: Support Frontend Direct Approval, Email OTP, or Mobile Push MFA
-          const chosenMethod = this.ssoApprovalMethod();
-          if (chosenMethod === 'frontend') {
-            this.approveSsoForUser(response.user);
-          } else if (chosenMethod === 'email_otp') {
-            const currentUser = response.user || this.authService.currentUser();
-            const targetEmail = currentUser?.email || email.trim();
-            const fullName = this.resolveUserFullName(currentUser, targetEmail);
-            const role = currentUser?.role || 'user';
-            const dept = currentUser?.user_metadata?.['department'] || 'Corporate Security';
-            this.fallbackToEmailOtp(sso, targetEmail, currentUser, fullName, role, dept, !!response.hasTotp);
-          } else {
-            // Mandatory SSO MFA Enforcement (SCRUM-61 / Mobile Push)
-            this.initiateSsoMfaForUser(response.user, response.hasTotp);
-          }
+          // SCRUM-176: Authenticate first, then transition to /verify-otp with Mobile MFA as default
+          this.showNotification('success', 'Credentials verified! Redirecting to SSO verification...', 3000);
+          setTimeout(() => {
+            this.router.navigate(['/verify-otp'], {
+              queryParams: {
+                email: email.trim(),
+                mode: 'signin',
+                hasTotp: response.hasTotp ? 'true' : 'false',
+                method: 'push_approval',
+                ...sso,
+              },
+            });
+          }, 400);
         } else if (response.requireMfa) {
           this.showNotification('success', 'Credentials verified! Redirecting to 2-Step Verification...', 3000);
           setTimeout(() => {
@@ -290,7 +288,19 @@ export class LoginComponent implements OnInit, OnDestroy {
 
   onContinueSso(): void {
     const user = this.currentUser();
-    if (user) {
+    const sso = this.ssoParams();
+    if (user && sso) {
+      // SCRUM-176: Step-up verification for SSO session, defaulting to Mobile MFA
+      this.router.navigate(['/verify-otp'], {
+        queryParams: {
+          email: user.email,
+          mode: 'signin',
+          hasTotp: 'false',
+          method: 'push_approval',
+          ...sso,
+        },
+      });
+    } else if (user) {
       this.approveSsoForUser(user);
     }
   }

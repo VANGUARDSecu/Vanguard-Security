@@ -81,6 +81,165 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Real-time SSO Interactive Sign-In Approval Card (SCRUM-176) */
+.sso-dashboard-approval-card {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 78, 59, 0.35));
+  border: 1px solid #10b981;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.25);
+  animation: fadeIn 0.3s ease-out;
+}
+
+.sso-prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+  padding-bottom: 12px;
+}
+
+.sso-prompt-title-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sso-pulse-icon {
+  font-size: 24px;
+  animation: pulse 1.5s infinite;
+}
+
+.sso-prompt-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.sso-prompt-subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.sso-prompt-time-badge {
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  color: #6ee7b7;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sso-prompt-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.detail-value {
+  font-size: 13px;
+  color: #f1f5f9;
+}
+
+.sso-number-match-section {
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.match-instruction {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+}
+
+.number-match-options {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.number-opt-btn {
+  background: #10b981;
+  color: #042f2e;
+  font-size: 20px;
+  font-weight: 800;
+  padding: 12px 24px;
+  border-radius: 10px;
+  border: 2px solid #34d399;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 70px;
+}
+
+.number-opt-btn:hover:not(:disabled) {
+  background: #34d399;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.sso-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.deny-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deny-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.fraud-btn {
+  background: rgba(220, 38, 38, 0.25);
+  color: #fca5a5;
+  border: 1px solid #ef4444;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
 @media (max-width: 1024px) {
   .dashboard-layout {
     flex-direction: column;

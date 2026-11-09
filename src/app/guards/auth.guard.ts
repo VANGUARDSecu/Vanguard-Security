@@ -6,17 +6,24 @@ export const authGuard: CanActivateFn = () => {
   const authService = inject(AuthService);
   const router = inject(Router);
 
-  // SCRUM-163: If OAuth callback tokens/code are present in URL or an OAuth challenge is actively
-  // being processed, do NOT redirect to /login. Allow checkForOAuthCallback() to execute cleanly.
+  // SCRUM-163 & SCRUM-176: If OAuth callback tokens/code are present in URL, forward to /login cleanly.
+  // If an OAuth challenge is actively being processed, allow it to execute cleanly.
   if (typeof window !== 'undefined') {
     const hash = window.location.hash || '';
     const search = window.location.search || '';
-    const isOAuthCallback =
-      hash.includes('access_token=') ||
-      search.includes('code=') ||
-      authService.isChallengingOAuth;
+    const hasOAuthTokens = hash.includes('access_token=') || search.includes('code=');
 
-    if (isOAuthCallback) {
+    if (hasOAuthTokens) {
+      const targetUrl = '/login' + (search ? search : '') + (hash ? hash : '');
+      if (typeof router.navigateByUrl === 'function') {
+        router.navigateByUrl(targetUrl);
+      } else if (typeof router.navigate === 'function') {
+        router.navigate(['/login']);
+      }
+      return false;
+    }
+
+    if (authService.isChallengingOAuth) {
       return false;
     }
   }

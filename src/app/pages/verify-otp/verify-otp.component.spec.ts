@@ -213,5 +213,42 @@ describe('VerifyOtpComponent', () => {
 
       (window as any).location = originalLocation;
     });
+
+    it('SCRUM-176: openDashboardForApproval should open /dashboard in a new window', () => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      component.openDashboardForApproval();
+      expect(openSpy).toHaveBeenCalledWith('/dashboard', '_blank');
+    });
+
+    it('SCRUM-176: switchToPushApproval should initiate push MFA and set method to push_approval', () => {
+      const pushSpy = vi.spyOn(authService, 'initiatePushMfa').mockReturnValue(
+        of({
+          success: true,
+          challengeId: 'push_mfa_176',
+          email: 'user@example.com',
+          clientId: 'vanguard-dummy-portal',
+          clientName: 'Acme Dummy Portal',
+          clientType: 'web',
+          appIcon: '🛡️',
+          numberMatching: { enabled: true, code: 77 },
+          expiresInSeconds: 60,
+          message: 'Push dispatched',
+        })
+      );
+
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+      });
+      component.email.set('user@example.com');
+      component.method.set('email_otp');
+
+      component.switchToPushApproval();
+
+      expect(pushSpy).toHaveBeenCalled();
+      expect(component.method()).toBe('push_approval');
+      expect(component.challengeId()).toBe('push_mfa_176');
+      expect(component.numberCode()).toBe('77');
+    });
   });
 });

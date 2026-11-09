@@ -1790,6 +1790,19 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       expect(auditLog?.status).toBe('blocked');
     });
   });
+
+  describe('SCRUM-176: Interactive Dashboard Approval Challenge', () => {
+    it('should delegate approveLiveSsoChallenge and denyLiveSsoChallenge to dashboardService', () => {
+      const approveSpy = vi.spyOn(component.dashboardService, 'approveLiveSsoChallenge').mockImplementation(() => {});
+      const denySpy = vi.spyOn(component.dashboardService, 'denyLiveSsoChallenge').mockImplementation(() => {});
+
+      component.approveLiveSsoChallenge('push_123', 42);
+      expect(approveSpy).toHaveBeenCalledWith('push_123', 42);
+
+      component.denyLiveSsoChallenge('push_123', true);
+      expect(denySpy).toHaveBeenCalledWith('push_123', true);
+    });
+  });
 });
 
 

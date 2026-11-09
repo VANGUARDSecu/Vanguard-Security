@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { Component } from '@angular/core';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
 import { AuthService } from '../../services/auth.service';
@@ -31,6 +31,9 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     }).compileComponents();
 
     authService = TestBed.inject(AuthService);
+    vi.spyOn(authService, 'sendInviteEmail').mockReturnValue(
+      of({ success: true, message: 'Invite sent' })
+    );
     fixture = TestBed.createComponent(DashboardComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
@@ -299,6 +302,24 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
     component.closeInviteModal();
     expect(component.showInviteModal()).toBe(false);
+  });
+
+  it('should reject employee invitation and not mutate directoryUsers when backend returns error (SCRUM-174)', () => {
+    vi.spyOn(authService, 'sendInviteEmail').mockReturnValue(
+      throwError(() => new Error('An active employee account already exists with this email address.'))
+    );
+
+    const initialCount = component.directoryUsers().length;
+    component.inviteFirstName = 'Duplicate';
+    component.inviteLastName = 'User';
+    component.inviteEmail = 'dup.employee@vanguard.security';
+    component.inviteDepartment = 'Engineering';
+    component.submitInviteUser();
+
+    expect(component.inviteSuccess()).toBe(false);
+    expect(component.inviteError()).toContain('An active employee account already exists');
+    expect(component.directoryUsers().length).toBe(initialCount);
+    expect(component.directoryUsers().some((u) => u.email === 'dup.employee@vanguard.security')).toBe(false);
   });
 
   it('should support dynamic department and role entry, suggestions, and filtering (SCRUM-37)', () => {

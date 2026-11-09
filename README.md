@@ -29,6 +29,16 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Email Uniqueness & Recovery Hardening (SCRUM-174)
+- **Elimination of Duplicate Recovery OTP Dispatch (429 Rate-Limit Prevention)**:
+  - On `/verify-otp`, removed the duplicate `authService.forgotPassword()` call on initial component mount during `mode: recovery`. The initial 8-digit recovery code dispatched during `/forgot-password` form submission is preserved, eliminating the instant Supabase `429 Too Many Requests: For security purposes, you can only request this once every 60 seconds` rate-limit error.
+- **Safe Directory Invitation State Management & Duplicate Prevention**:
+  - In `DashboardService.submitInviteUser()`, eliminated premature optimistic mutations to `directoryUsers` and `localStorage`.
+  - The local directory store and credentials card are updated exclusively upon a verified `200/201` HTTP response from the backend API.
+  - If the backend returns a `409 ConflictException` (e.g. active employee or individual account duplicate), `inviteError` displays the authoritative failure message, and the directory table remains clean and unmodified.
+- **Live Directory Synchronization**:
+  - Automatically synchronizes live directory members and activation statuses with the backend `GET /directory-users` endpoint on component mount.
+
 ### 3rd-Party 2FA Authenticator, Pre-Launch Security Verification, Employee App Provisioning, Movement Audit & Billing System (SCRUM-166 → SCRUM-173)
 - **3rd-Party 2FA Authenticator — Google Authenticator Parity (SCRUM-166)**:
   - Full RFC 6238 / RFC 4226 TOTP generator supporting **SHA-1, SHA-256, and SHA-512**, **6 or 8 digits**, and **15s / 30s / 60s periods**.

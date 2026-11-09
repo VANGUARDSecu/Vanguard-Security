@@ -208,31 +208,13 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.pushRetriesRemaining.set(3);
         this.startPushPolling(this.challengeId()!);
       } else if (!this.isSsoVerification()) {
-        // For non-SSO flows, send initial OTP email on page load
-        this.isLoading.set(true);
-        
-        if (modeParam === 'recovery') {
-          // Recovery mode uses forgotPassword
-          this.authService.forgotPassword(emailParam).subscribe({
-            next: (res) => {
-              this.isLoading.set(false);
-              this.startResendTimer(60);
-              this.clearOtpInputs();
-            },
-            error: (err: Error) => {
-              this.isLoading.set(false);
-              this.showNotification('error', err.message || 'Failed to send recovery code.');
-              this.startResendTimer(30);
-            },
-          });
-        } else {
-          // SCRUM-170: login() and signup() already generate and dispatch the 8-digit
-          // OTP email on the backend. Start the resend timer without overwriting the
-          // active OTP code via a duplicate resendOtp call on mount.
-          this.isLoading.set(false);
-          this.startResendTimer(45);
-          this.clearOtpInputs();
-        }
+        // SCRUM-174 & SCRUM-170: login(), signup(), and forgotPassword() already generate
+        // and dispatch the authoritative 8-digit OTP email on the backend before routing
+        // to /verify-otp. Starting the resend timer directly on mount prevents duplicate sends,
+        // OTP code overwrites, and Supabase 429 rate-limit errors.
+        this.isLoading.set(false);
+        this.startResendTimer(modeParam === 'recovery' ? 60 : 45);
+        this.clearOtpInputs();
       } else {
         // SSO flows already handled above in initiateSsoMfa call
         this.clearOtpInputs();

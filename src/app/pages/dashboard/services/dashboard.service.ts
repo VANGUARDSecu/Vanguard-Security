@@ -2671,20 +2671,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       expiresAt,
     };
 
-    this.directoryUsers.update((users) => [newUser, ...users]);
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
-    this.logAuditEvent(
-      `Invited employee ${newUser.email} (${newUser.department} - ${newUser.role}) (Valid for 48h)`,
-      'Directory Vault',
-      'Invitation Service',
-      'success',
-      'Low'
-    );
-
-    this.inviteCreatedUser.set(newUser);
-    this.inviteSuccess.set(true);
     this.inviteEmailStatus.set('sending');
-
+    this.inviteError.set(null);
     this.showAdminNotice(`Provisioning employee and dispatching email to ${newUser.email}...`);
 
     this.authService
@@ -2699,15 +2687,30 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       })
       .subscribe({
         next: (res) => {
+          // SCRUM-174: Update local directory store only upon verified backend success
+          this.directoryUsers.update((users) => [newUser, ...users]);
+          this.saveStored('vanguard_directory_users', this.directoryUsers());
+          this.logAuditEvent(
+            `Invited employee ${newUser.email} (${newUser.department} - ${newUser.role}) (Valid for 48h)`,
+            'Directory Vault',
+            'Invitation Service',
+            'success',
+            'Low'
+          );
+
+          this.inviteCreatedUser.set(newUser);
+          this.inviteSuccess.set(true);
           this.inviteEmailStatus.set('sent');
           this.inviteEmailMessage.set(res.message || `Credentials sent to ${newUser.email}`);
           this.showAdminNotice(`Credentials & invitation successfully emailed to ${newUser.email}`);
         },
         error: (err) => {
           this.inviteEmailStatus.set('failed');
-          const msg = err.message || 'Email delivery failed.';
+          const msg = err.message || 'Employee invitation failed.';
+          this.inviteError.set(msg);
+          this.inviteSuccess.set(false);
           this.inviteEmailMessage.set(msg);
-          this.showAdminNotice(`Account created. Notice: ${msg}`);
+          this.showAdminNotice(`Invitation failed: ${msg}`);
         },
       });
   }

@@ -137,18 +137,30 @@
               <span class="status-label">Access Status:</span>
               <span class="sso-approval-pill">Pending Approval</span>
             </div>
-            <div class="status-desc">
-              An access request has been automatically submitted to your tenant administrator. You will be able to sign in once reviewed and approved.
+            <div class="status-desc" style="display: flex; align-items: center; gap: 8px;">
+              <span class="pulse-dot-amber"></span>
+              <span>An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.</span>
             </div>
           </div>
 
-          <div class="sso-approval-actions">
-            <button type="button" class="sso-return-btn" (click)="onCancelSso()">
-              Return to {{ clientDisplayName() }}
+          <div class="sso-approval-actions" style="display: flex; flex-direction: column; gap: 10px;">
+            <button
+              type="button"
+              class="verify-btn"
+              style="background: #10b981; color: #042f2e; font-weight: 700; width: 100%; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 14px;"
+              (click)="checkApprovalAndProceed(false)"
+              [disabled]="isCheckingApproval()"
+            >
+              {{ isCheckingApproval() ? 'Checking Admin Approval...' : '↻ Check Admin Approval & Continue SSO' }}
             </button>
-            <a routerLink="/dashboard" class="sso-dashboard-link">
-              Go to Vanguard Dashboard
-            </a>
+            <div style="display: flex; gap: 10px; justify-content: center; width: 100%;">
+              <button type="button" class="sso-return-btn" style="flex: 1;" (click)="onCancelSso()">
+                Return to {{ clientDisplayName() }}
+              </button>
+              <a routerLink="/dashboard" class="sso-dashboard-link" style="flex: 1; text-align: center;">
+                Go to Vanguard Dashboard
+              </a>
+            </div>
           </div>
         </div>
       } @else if (method() === 'push_approval') {
@@ -175,6 +187,22 @@
             <p class="number-card-desc">
               Open the notification or <strong>Vanguard Authenticator</strong> app on your smartphone and select the number above to authorize access.
             </p>
+          </div>
+
+          <!-- SCRUM-168: Direct Browser Approval Button -->
+          <div style="margin: 18px 0; text-align: center;">
+            <button
+              type="button"
+              class="verify-btn"
+              style="background: #10b981; color: #042f2e; font-weight: 700; padding: 12px 18px; border-radius: 8px; border: none; cursor: pointer; width: 100%; font-size: 14px;"
+              (click)="approveDirectlyInFrontend()"
+              [disabled]="isLoading()"
+            >
+              ✅ Approve Sign-In on this Browser
+            </button>
+            <span style="display: block; font-size: 12px; color: #94a3b8; margin-top: 6px;">
+              No smartphone nearby? Approve immediately right here in your browser session.
+            </span>
           </div>
 
           <!-- Live Expiration Countdown -->
@@ -213,33 +241,15 @@
             }
           </div>
 
-          <!-- Mobile App Switching Deep-Link Button -->
-          <div class="push-actions-row">
-            <button type="button" class="open-authenticator-btn" (click)="openAuthenticatorApp()">
-              <span class="btn-icon">🛡️</span>
-              <span>Open Vanguard Authenticator App</span>
-            </button>
-            <div class="web-authenticator-sublink">
-              <span>Running on browser?</span>
-              <a href="http://localhost:8082" target="_blank" rel="noopener noreferrer">Open Web Authenticator (:8082) &rarr;</a>
-            </div>
-          </div>
-
           <!-- Alternative Authentication Divider -->
           <div class="divider-row">
             <div class="divider-line"></div>
-            <span class="divider-text">phone not nearby?</span>
+            <span class="divider-text">alternative authentication</span>
             <div class="divider-line"></div>
           </div>
 
-          <!-- Fallback to Email OTP & Direct Frontend Approval (SCRUM-168) -->
-          <div class="push-fallback-row" style="display: flex; flex-direction: column; gap: 10px;">
-            <button type="button" class="fallback-email-btn" (click)="approveDirectlyInFrontend()" style="background: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="method-icon">
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span>Approve Directly in Frontend (Browser)</span>
-            </button>
+          <!-- Fallback to Email OTP -->
+          <div class="push-fallback-row">
             <button type="button" class="fallback-email-btn" (click)="switchToEmailOtp()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="method-icon">
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
@@ -262,6 +272,23 @@
         <!-- OTP Input Form -->
         <form (submit)="$event.preventDefault(); onSubmit()" class="otp-form" novalidate>
         
+        @if (isSsoVerification()) {
+          <div style="margin-bottom: 16px; padding: 12px; border-radius: 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); text-align: center;">
+            <button
+              type="button"
+              class="verify-btn"
+              style="background: #10b981; color: #042f2e; font-weight: 700; padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; width: 100%; font-size: 13px;"
+              (click)="approveDirectlyInFrontend()"
+              [disabled]="isLoading()"
+            >
+              ✅ Approve SSO Directly on this Browser (Skip Code)
+            </button>
+            <span style="display: block; font-size: 11px; color: #94a3b8; margin-top: 6px;">
+              Authorize instantly using your current session without waiting for an email. (Dev: code 123456 is also valid)
+            </span>
+          </div>
+        }
+
         <div class="otp-inputs-row" (paste)="onPaste($event)">
           @for (digit of digits(); track $index) {
             <input

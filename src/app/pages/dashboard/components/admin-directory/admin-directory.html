@@ -7,7 +7,7 @@
             <div class="header-actions" style="display: flex; gap: 10px;">
               <button
                 type="button"
-                class="btn-refresh-directory"
+                class="btn-primary-action btn-provision-primary"
                 *ngIf="directoryActiveSubTab() === 'users'"
                 (click)="openProvisionAppModal()"
                 title="Register and assign an application account exclusively for a specific employee"
@@ -196,7 +196,7 @@
                         <div class="row-actions">
                           <button
                             type="button"
-                            class="action-btn text-success"
+                            class="action-btn btn-provision-row"
                             (click)="openProvisionAppModal(u)"
                             title="Create / Register & Assign an Application Account exclusively for this employee"
                           >

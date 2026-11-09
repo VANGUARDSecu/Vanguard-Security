@@ -188,6 +188,18 @@
           <span>Security & MFA</span>
           <span class="nav-count-badge badge-mfa" [class.badge-active]="activeTab() === 'user-security'">MFA</span>
         </button>
+
+        <button
+          type="button"
+          class="nav-link-btn"
+          [class.active]="activeTab() === 'user-activity'"
+          (click)="setActiveTab('user-activity')"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          <span>Account Movement & Audit</span>
+        </button>
       </nav>
 
       <!-- Navigation Links for Company User Portal Mode -->

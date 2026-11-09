@@ -27,12 +27,93 @@ export function base32Decode(input: string): Uint8Array {
 export interface TotpOptions {
   digits?: number;
   period?: number;
+  algorithm?: 'SHA1' | 'SHA256' | 'SHA512';
   timestampMs?: number;
+}
+
+export interface ParsedOtpAuthUri {
+  issuer: string;
+  accountName: string;
+  secret: string;
+  digits: 6 | 8;
+  period: 30 | 60;
+  algorithm: 'SHA1' | 'SHA256' | 'SHA512';
+}
+
+/**
+ * SCRUM-166: Parse a standard Google Authenticator / RFC 6238 otpauth://totp/ URI
+ * from 3rd-party applications (Google, GitHub, Facebook, Figma, AWS, Discord, etc.).
+ */
+export function parseOtpAuthUri(rawUri: string): ParsedOtpAuthUri {
+  const trimmed = (rawUri || '').trim();
+  if (!trimmed.toLowerCase().startsWith('otpauth://')) {
+    throw new Error('Invalid URI format. Must start with otpauth://totp/...');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('Malformed otpauth:// URI.');
+  }
+
+  const secretParam = (parsed.searchParams.get('secret') || '').replace(/\s+/g, '').toUpperCase();
+  if (!secretParam) {
+    throw new Error('otpauth:// URI is missing the required secret parameter.');
+  }
+  // Validate Base32 secret
+  base32Decode(secretParam);
+
+  const rawLabel = decodeURIComponent(parsed.pathname.replace(/^\/+/, '').replace(/^totp\/+/i, ''));
+  let issuerFromLabel = '';
+  let accountName = rawLabel;
+  if (rawLabel.includes(':')) {
+    const [iss, ...rest] = rawLabel.split(':');
+    issuerFromLabel = iss.trim();
+    accountName = rest.join(':').trim();
+  }
+
+  const issuer = (parsed.searchParams.get('issuer') || issuerFromLabel || 'External Service').trim();
+  const digitsRaw = Number(parsed.searchParams.get('digits') || '6');
+  const digits: 6 | 8 = digitsRaw === 8 ? 8 : 6;
+  const periodRaw = Number(parsed.searchParams.get('period') || '30');
+  const period: 30 | 60 = periodRaw === 60 ? 60 : 30;
+  const algRaw = (parsed.searchParams.get('algorithm') || 'SHA1').toUpperCase().replace('-', '');
+  const algorithm: 'SHA1' | 'SHA256' | 'SHA512' =
+    algRaw === 'SHA256' ? 'SHA256' : algRaw === 'SHA512' ? 'SHA512' : 'SHA1';
+
+  return {
+    issuer,
+    accountName: accountName || 'Primary Account',
+    secret: secretParam,
+    digits,
+    period,
+    algorithm,
+  };
+}
+
+export function buildOtpAuthUri(acc: {
+  issuer: string;
+  accountName: string;
+  secret: string;
+  digits?: number;
+  period?: number;
+  algorithm?: string;
+}): string {
+  const iss = encodeURIComponent(acc.issuer.trim());
+  const acct = encodeURIComponent((acc.accountName || 'Primary Account').trim());
+  const sec = encodeURIComponent(acc.secret.replace(/\s+/g, '').toUpperCase());
+  const digits = acc.digits || 6;
+  const period = acc.period || 30;
+  const algorithm = acc.algorithm || 'SHA1';
+  return `otpauth://totp/${iss}:${acct}?secret=${sec}&issuer=${iss}&algorithm=${algorithm}&digits=${digits}&period=${period}`;
 }
 
 export async function generateTotp(base32Secret: string, opts: TotpOptions = {}): Promise<string> {
   const digits = opts.digits ?? 6;
   const period = opts.period ?? 30;
+  const alg = opts.algorithm ?? 'SHA1';
+  const webCryptoHash = alg === 'SHA256' ? 'SHA-256' : alg === 'SHA512' ? 'SHA-512' : 'SHA-1';
   const nowMs = opts.timestampMs ?? Date.now();
   const counter = Math.floor(nowMs / 1000 / period);
 
@@ -48,7 +129,7 @@ export async function generateTotp(base32Secret: string, opts: TotpOptions = {})
   const key = await subtle.importKey(
     'raw',
     keyBytes as unknown as BufferSource,
-    { name: 'HMAC', hash: 'SHA-1' },
+    { name: 'HMAC', hash: webCryptoHash },
     false,
     ['sign'],
   );

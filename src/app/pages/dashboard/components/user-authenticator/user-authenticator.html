@@ -10,15 +10,15 @@
           </svg>
         </div>
         <div>
-          <h1 class="hero-heading">2FA Authenticator Vault</h1>
+          <h1 class="hero-heading">3rd-Party 2FA Authenticator Vault</h1>
           <p class="hero-subtitle">
-            Time-based One-Time Passwords (RFC 6238 TOTP) with live 30-second rolling code generation.
+            Google Authenticator-compatible RFC 6238 TOTP generator for external apps (Google, GitHub, Facebook, Figma, AWS, Discord, and more).
           </p>
         </div>
       </div>
     </div>
 
-    <div class="hero-right">
+    <div class="hero-right" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
       <!-- Live Rolling Timer Badge -->
       <div class="totp-timer-badge" [class.urgent]="totpSecondsRemaining() <= 7">
         <div class="pulse-ring"></div>
@@ -27,7 +27,11 @@
         <span class="timer-label">Rolling Refresh</span>
       </div>
 
-      <button type="button" class="btn-cyber-primary" (click)="openAddModal()">
+      <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')" style="padding: 10px 14px; border-radius: 10px;">
+        <span>📷 Scan QR / URI</span>
+      </button>
+
+      <button type="button" class="btn-cyber-primary" (click)="openAddModal('manual')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
           <line x1="12" y1="5" x2="12" y2="19"></line>
           <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -46,6 +50,31 @@
     ></div>
   </div>
 
+  <!-- Search Bar & Quick Add Service Presets (SCRUM-166) -->
+  <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 16px 0;">
+    <div style="flex: 1; min-width: 240px;">
+      <input
+        type="text"
+        [ngModel]="searchQuery()"
+        (ngModelChange)="searchQuery.set($event)"
+        placeholder="Search 2FA accounts by service (e.g. Google, GitHub, Figma) or email..."
+        class="cyber-input"
+        style="width: 100%;"
+      />
+    </div>
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+      <span style="font-size: 12px; color: #94a3b8; margin-right: 4px;">Quick Enroll:</span>
+      <button
+        *ngFor="let preset of servicePresets"
+        type="button"
+        (click)="openAddModal('manual'); selectPreset(preset)"
+        style="padding: 6px 10px; border-radius: 8px; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); color: #e2e8f0; font-size: 12px; cursor: pointer;"
+      >
+        {{ preset.icon }} {{ preset.issuer }}
+      </button>
+    </div>
+  </div>
+
   <!-- Accounts List / Grid -->
   <div class="totp-list-container">
     <div class="empty-totp-card" *ngIf="activeTotpAccounts().length === 0">
@@ -57,15 +86,20 @@
       </div>
       <h3 class="empty-title">No 2FA accounts registered</h3>
       <p class="empty-desc">
-        Add your first Two-Factor Authenticator token for services like Google, AWS, GitHub, or Cloudflare to generate live rolling codes.
+        Use Vanguard as your 3rd-party authenticator (just like Google Authenticator) for Google, GitHub, Facebook, Figma, AWS, or any TOTP-enabled application. Scan a QR code, paste an <code>otpauth://</code> URI, or enter a Base32 secret key.
       </p>
-      <button type="button" class="btn-cyber-primary" (click)="openAddModal()">
-        + Add First 2FA Account
-      </button>
+      <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+        <button type="button" class="btn-cyber-primary" (click)="openAddModal('manual')">
+          + Enter Secret Key
+        </button>
+        <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')">
+          📷 Scan QR / Paste otpauth:// URI
+        </button>
+      </div>
     </div>
 
-    <div class="totp-grid" *ngIf="activeTotpAccounts().length > 0">
-      <div class="totp-card" *ngFor="let acc of activeTotpAccounts()">
+    <div class="totp-grid" *ngIf="filteredTotpAccounts().length > 0">
+      <div class="totp-card" *ngFor="let acc of filteredTotpAccounts()">
         <div class="totp-card-header">
           <div class="account-badge">
             <div class="issuer-avatar">
@@ -77,17 +111,36 @@
             </div>
           </div>
 
-          <button
-            type="button"
-            class="btn-revoke-acc"
-            (click)="deleteAccount(acc.id, acc.issuer)"
-            title="Revoke 2FA Account"
-          >
-            ✕
-          </button>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button
+              type="button"
+              class="btn-revoke-acc"
+              (click)="copyOtpAuthUri(acc)"
+              title="Copy otpauth:// URI for backup/export"
+              style="font-size: 11px; padding: 4px 8px;"
+            >
+              {{ copiedUriAccountId() === acc.id ? '✓ URI' : '🔗 URI' }}
+            </button>
+            <button
+              type="button"
+              class="btn-revoke-acc"
+              (click)="openEditModal(acc)"
+              title="Edit 2FA Account"
+            >
+              ✎
+            </button>
+            <button
+              type="button"
+              class="btn-revoke-acc"
+              (click)="deleteAccount(acc.id, acc.issuer)"
+              title="Revoke 2FA Account"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        <!-- 6-digit rolling code -->
+        <!-- 6 or 8-digit rolling code -->
         <div class="code-viewport">
           <div class="code-digits font-mono" [class.code-urgent]="totpSecondsRemaining() <= 7">
             {{ formatCode(acc.currentCode) }}
@@ -97,7 +150,7 @@
             type="button"
             class="btn-copy-code"
             (click)="copyCode(acc.currentCode, acc.id)"
-            title="Copy 6-digit code"
+            title="Copy one-time code"
           >
             <span *ngIf="copiedAccountId() === acc.id" class="copied-badge">Copied!</span>
             <svg *ngIf="copiedAccountId() !== acc.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
@@ -122,23 +175,122 @@
             </span>
           </div>
 
-          <span class="standard-pill">RFC 6238</span>
+          <span class="standard-pill">
+            {{ acc.algorithm || 'SHA1' }} · {{ acc.digits || 6 }}d
+          </span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ADD 2FA ACCOUNT MODAL -->
+  <!-- ADD / EDIT 2FA ACCOUNT MODAL -->
   <div class="modal-backdrop" *ngIf="showAddModal()">
-    <div class="modal-box cyber-modal">
+    <div class="modal-box cyber-modal" style="max-width: 560px;">
       <div class="modal-header">
-        <h2 class="modal-heading">Add Two-Factor Authenticator Account</h2>
+        <h2 class="modal-heading">
+          {{ editingAccountId() ? 'Edit 2FA Authenticator Account' : 'Add 3rd-Party Authenticator Account' }}
+        </h2>
         <button type="button" class="modal-close-btn" (click)="closeAddModal()">✕</button>
       </div>
 
       <div class="modal-body">
+        <!-- Enrollment Mode Tabs -->
+        <div *ngIf="!editingAccountId()" style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <button
+            type="button"
+            (click)="enrollMode.set('manual')"
+            [style.background]="enrollMode() === 'manual' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(15, 23, 42, 0.6)'"
+            [style.borderColor]="enrollMode() === 'manual' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
+            style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
+          >
+            ⌨️ Manual Key
+          </button>
+          <button
+            type="button"
+            (click)="enrollMode.set('uri')"
+            [style.background]="enrollMode() === 'uri' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(15, 23, 42, 0.6)'"
+            [style.borderColor]="enrollMode() === 'uri' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
+            style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
+          >
+            🔗 Paste otpauth:// URI
+          </button>
+          <button
+            type="button"
+            (click)="enrollMode.set('qr')"
+            [style.background]="enrollMode() === 'qr' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(15, 23, 42, 0.6)'"
+            [style.borderColor]="enrollMode() === 'qr' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
+            style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
+          >
+            📷 Scan / Upload QR
+          </button>
+        </div>
+
         <div class="alert-error" *ngIf="formErrorMessage()">
           {{ formErrorMessage() }}
+        </div>
+        <div *ngIf="formSuccessMessage()" style="padding: 10px 12px; margin-bottom: 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 12px;">
+          {{ formSuccessMessage() }}
+        </div>
+
+        <!-- TAB 2: PASTE OTPAUTH URI -->
+        <div *ngIf="enrollMode() === 'uri'" class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label">Google Authenticator / TOTP URI (otpauth://totp/...)</label>
+          <div style="display: flex; gap: 8px;">
+            <input
+              type="text"
+              [(ngModel)]="formOtpAuthUri"
+              placeholder="otpauth://totp/GitHub:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"
+              class="cyber-input font-mono"
+              style="flex: 1;"
+            />
+            <button type="button" class="btn-cyber-secondary" (click)="applyOtpAuthUri()">
+              Parse URI
+            </button>
+          </div>
+          <span class="form-hint">Paste any standard <code>otpauth://totp/</code> link to auto-fill service, account, secret, and algorithm.</span>
+        </div>
+
+        <!-- TAB 3: SCAN / UPLOAD QR IMAGE -->
+        <div *ngIf="enrollMode() === 'qr'" style="margin-bottom: 16px; padding: 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.65); border: 1px dashed rgba(59, 130, 246, 0.45);">
+          <label class="form-label" style="display: block; margin-bottom: 8px;">Upload 2FA QR Code Image or Screenshot</label>
+          <input
+            type="file"
+            accept="image/*"
+            (change)="onQrFileSelected($event)"
+            class="cyber-input"
+            style="width: 100%; margin-bottom: 10px;"
+          />
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
+            <button type="button" class="btn-cyber-secondary" (click)="startCameraScan(qrVideo)" *ngIf="!isCameraActive()">
+              📷 Start Webcam QR Scanner
+            </button>
+            <button type="button" class="btn-cyber-secondary" (click)="stopCameraScan()" *ngIf="isCameraActive()">
+              ⏹ Stop Webcam
+            </button>
+          </div>
+          <video
+            #qrVideo
+            [style.display]="isCameraActive() ? 'block' : 'none'"
+            style="width: 100%; max-height: 220px; margin-top: 10px; border-radius: 8px; background: #000;"
+            muted
+            playsinline
+          ></video>
+        </div>
+
+        <!-- Preset Pills -->
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Popular 3rd-Party Services</label>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button
+              *ngFor="let preset of servicePresets"
+              type="button"
+              (click)="selectPreset(preset)"
+              [style.borderColor]="formIssuer === preset.issuer ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
+              style="padding: 5px 10px; border-radius: 6px; background: rgba(30, 41, 59, 0.8); border: 1px solid; color: #e2e8f0; font-size: 12px; cursor: pointer;"
+            >
+              {{ preset.icon }} {{ preset.issuer }}
+            </button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -146,7 +298,7 @@
           <input
             type="text"
             [(ngModel)]="formIssuer"
-            placeholder="e.g. GitHub, Google Cloud, AWS, Proton"
+            placeholder="e.g. Google, GitHub, Facebook, Figma, AWS"
             class="cyber-input"
           />
         </div>
@@ -169,14 +321,40 @@
             placeholder="e.g. JBSWY3DPEHPK3PXP"
             class="cyber-input font-mono"
           />
-          <span class="form-hint">Paste the alphanumeric secret key provided when setting up 2FA on your service.</span>
+          <span class="form-hint">Paste the alphanumeric Base32 secret key provided when enabling 2FA on the external application.</span>
+        </div>
+
+        <!-- Advanced RFC 6238 Parameters (Algorithm, Digits, Period) -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;">
+          <div class="form-group">
+            <label class="form-label">Digits</label>
+            <select [(ngModel)]="formDigits" class="cyber-input">
+              <option [ngValue]="6">6 Digits (Standard)</option>
+              <option [ngValue]="8">8 Digits</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hash Algorithm</label>
+            <select [(ngModel)]="formAlgorithm" class="cyber-input">
+              <option value="SHA1">HMAC-SHA1</option>
+              <option value="SHA256">HMAC-SHA256</option>
+              <option value="SHA512">HMAC-SHA512</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Refresh Period</label>
+            <select [(ngModel)]="formPeriod" class="cyber-input">
+              <option [ngValue]="30">30 Seconds</option>
+              <option [ngValue]="60">60 Seconds</option>
+            </select>
+          </div>
         </div>
       </div>
 
       <div class="modal-footer">
         <button type="button" class="btn-cyber-secondary" (click)="closeAddModal()">Cancel</button>
         <button type="button" class="btn-cyber-primary" (click)="saveAccount()">
-          Enroll Authenticator
+          {{ editingAccountId() ? 'Save Changes' : 'Enroll Authenticator' }}
         </button>
       </div>
     </div>

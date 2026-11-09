@@ -5767,7 +5767,11 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const next: Record<string, string> = {};
     for (const acc of accounts) {
       try {
-        next[acc.id] = await generateTotp(acc.secret, { digits: 6, period: 30 });
+        next[acc.id] = await generateTotp(acc.secret, {
+          digits: acc.digits || 6,
+          period: acc.period || 30,
+          algorithm: acc.algorithm || 'SHA1',
+        });
       } catch {
         next[acc.id] = '------';
       }
@@ -5817,6 +5821,9 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
   addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
     const newAcc: TotpAccount = {
+      digits: 6,
+      period: 30,
+      algorithm: 'SHA1',
       ...account,
       id: 'totp-acc-' + Date.now()
     };
@@ -5824,6 +5831,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
     void this.refreshTotpCodes();
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
+  }
+
+  updateTotpAccount(id: string, updates: Partial<Omit<TotpAccount, 'id'>>): void {
+    this.totpAccounts.update((accounts) =>
+      accounts.map((acc) => (acc.id === id ? { ...acc, ...updates } : acc))
+    );
+    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    void this.refreshTotpCodes();
+    this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
   }
 
   deleteTotpAccount(id: string): void {

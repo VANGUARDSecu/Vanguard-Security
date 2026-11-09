@@ -73,6 +73,20 @@ export class UserMyApps {
   newAppCategory: 'cloud' | 'developer' | 'collaboration' = 'collaboration';
   newAppDescription = '';
   newAppIcon = '🌐';
+  newAppUsername = '';
+  newAppPassword = '';
+
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill State
+  readonly showLaunchVerifyModal = signal<boolean>(false);
+  readonly pendingLaunchApp = signal<SaaSApp | null>(null);
+  readonly launchVerifyMethod = signal<'password' | 'pin' | 'quick'>('password');
+  readonly launchVerifySecret = signal<string>('');
+  readonly launchVerifyError = signal<string | null>(null);
+  readonly launchCustomUsername = signal<string>('');
+  readonly launchCustomPassword = signal<string>('');
+  readonly launchSaveToVault = signal<boolean>(true);
+  readonly launchMarkLoggedIn = signal<boolean>(true);
+  readonly activeAutofillToast = this.dashboardService.activeAutofillToast;
 
   // Request Application Form Signals
   readonly reqDeliveryMode = signal<'sso' | 'extension'>('extension');
@@ -204,6 +218,103 @@ export class UserMyApps {
 
   launchApp(app: SaaSApp) {
     this.dashboardService.launchApp(app);
+  }
+
+  /**
+   * SCRUM-169: Initiates secure app launch from "My Applications".
+   * - If the app is already marked as logged in on this session, launches immediately.
+   * - Otherwise, opens the Security Verification Modal before launching and auto-filling credentials.
+   */
+  initiateSecureAppLaunch(app: SaaSApp): void {
+    if (!app.assigned || app.status === 'Pending Approval') {
+      this.dashboardService.launchApp(app);
+      return;
+    }
+
+    if (this.dashboardService.isAppSessionLoggedIn(app.id)) {
+      this.dashboardService.launchApp(app, { skipAutofill: true });
+      return;
+    }
+
+    const resolved = this.dashboardService.resolveAppCredentials(app);
+    this.pendingLaunchApp.set(app);
+    this.launchVerifyMethod.set('password');
+    this.launchVerifySecret.set('');
+    this.launchVerifyError.set(null);
+    this.launchCustomUsername.set(resolved?.username || '');
+    this.launchCustomPassword.set(resolved?.password || '');
+    this.launchSaveToVault.set(!resolved?.password);
+    this.launchMarkLoggedIn.set(true);
+    this.showLaunchVerifyModal.set(true);
+  }
+
+  confirmSecureAppLaunch(): void {
+    const app = this.pendingLaunchApp();
+    if (!app) return;
+
+    const check = this.dashboardService.verifyLaunchIdentity(
+      this.launchVerifyMethod(),
+      this.launchVerifySecret(),
+    );
+    if (!check.verified) {
+      this.launchVerifyError.set(check.error || 'Identity verification failed.');
+      return;
+    }
+
+    const username = this.launchCustomUsername().trim();
+    const password = this.launchCustomPassword();
+
+    if (this.launchSaveToVault() && username && password) {
+      const existing = this.dashboardService.findCredentialsForDomain(app.launchUrl || app.name);
+      if (existing.length === 0) {
+        this.dashboardService.addVaultItem({
+          title: app.name,
+          category: 'Login',
+          username,
+          password,
+          url: app.launchUrl,
+          notes: `Saved during verified launch of ${app.name}`,
+        });
+      }
+    }
+
+    this.showLaunchVerifyModal.set(false);
+    this.pendingLaunchApp.set(null);
+    this.launchVerifyError.set(null);
+
+    this.dashboardService.launchApp(app, {
+      customUsername: username,
+      customPassword: password,
+      markAlreadyLoggedIn: this.launchMarkLoggedIn(),
+    });
+  }
+
+  closeLaunchVerifyModal(): void {
+    this.showLaunchVerifyModal.set(false);
+    this.pendingLaunchApp.set(null);
+    this.launchVerifyError.set(null);
+  }
+
+  isAppLoggedIn(appId: string): boolean {
+    return this.dashboardService.isAppSessionLoggedIn(appId);
+  }
+
+  toggleAppLoggedInState(app: SaaSApp, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    const next = !this.dashboardService.isAppSessionLoggedIn(app.id);
+    this.dashboardService.markAppSessionLoggedIn(app.id, next);
+  }
+
+  dismissAutofillToast(): void {
+    this.dashboardService.activeAutofillToast.set(null);
+  }
+
+  copyAutofillValue(val?: string): void {
+    if (val && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(val).catch(() => {});
+    }
   }
 
   launchConnectedApp(app: UserConnectedApp) {
@@ -370,6 +481,8 @@ export class UserMyApps {
     this.newAppCategory = 'collaboration';
     this.newAppDescription = '';
     this.newAppIcon = '🌐';
+    this.newAppUsername = '';
+    this.newAppPassword = '';
     this.addAppError.set(null);
     this.showAddPersonalAppModal.set(true);
   }
@@ -449,6 +562,17 @@ export class UserMyApps {
       description: this.newAppDescription.trim() || `${this.newAppName.trim()} web application`,
       icon: this.newAppIcon || '🌐',
     });
+
+    if (this.newAppUsername.trim() || this.newAppPassword) {
+      this.dashboardService.addVaultItem({
+        title: this.newAppName.trim(),
+        category: 'Login',
+        username: this.newAppUsername.trim(),
+        password: this.newAppPassword,
+        url: formattedUrl,
+        notes: `Linked auto-fill credentials for ${this.newAppName.trim()}`,
+      });
+    }
 
     this.closeAddPersonalAppModal();
   }

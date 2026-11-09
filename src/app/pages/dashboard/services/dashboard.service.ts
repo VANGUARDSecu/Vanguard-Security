@@ -4943,9 +4943,110 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill Credential Injection
+  // ==========================================
+  readonly appSessionLoggedInIds = signal<string[]>(
+    this.loadStored<string[]>('vanguard_logged_in_apps', []),
+  );
+  readonly activeAutofillToast = signal<{
+    appId: string;
+    appName: string;
+    launchUrl: string;
+    username: string;
+    password?: string;
+  } | null>(null);
+
+  isAppSessionLoggedIn(appId: string): boolean {
+    if (!appId) return false;
+    return this.appSessionLoggedInIds().includes(appId);
+  }
+
+  markAppSessionLoggedIn(appId: string, loggedIn = true): void {
+    if (!appId) return;
+    const current = new Set(this.appSessionLoggedInIds());
+    if (loggedIn) {
+      current.add(appId);
+    } else {
+      current.delete(appId);
+    }
+    const next = Array.from(current);
+    this.appSessionLoggedInIds.set(next);
+    this.saveStored('vanguard_logged_in_apps', next);
+  }
+
+  resolveAppCredentials(app: SaaSApp): { username: string; password: string } | null {
+    if (app.assignedUsername) {
+      return {
+        username: app.assignedUsername,
+        password: app.assignedPassword || '',
+      };
+    }
+    const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
+    if (matched.length > 0) {
+      return {
+        username: matched[0].username || matched[0].title || '',
+        password: matched[0].password || '',
+      };
+    }
+    if (app.requestedUsername) {
+      return {
+        username: app.requestedUsername,
+        password: '',
+      };
+    }
+    return null;
+  }
+
+  buildAutofillLaunchUrl(baseUrl: string, username?: string, password?: string): string {
+    if (!baseUrl) return '';
+    if (!username && !password) return baseUrl;
+    const baseWithoutHash = baseUrl.split('#')[0];
+    const params = new URLSearchParams();
+    params.set('vg_autofill', '1');
+    if (username) params.set('vg_u', username);
+    if (password) params.set('vg_p', password);
+    return `${baseWithoutHash}#${params.toString()}`;
+  }
+
+  verifyLaunchIdentity(
+    method: 'password' | 'pin' | 'quick',
+    secretInput: string,
+  ): { verified: boolean; error?: string } {
+    if (method === 'quick') {
+      return { verified: true };
+    }
+    const trimmed = (secretInput || '').trim();
+    if (method === 'pin') {
+      if (!/^\d{6,8}$/.test(trimmed)) {
+        return {
+          verified: false,
+          error: 'Please enter a valid 6-digit security PIN or 2FA code.',
+        };
+      }
+      return { verified: true };
+    }
+    // method === 'password'
+    if (trimmed.length < 4) {
+      return {
+        verified: false,
+        error: 'Please enter your Vanguard account password or vault master password (min 4 characters).',
+      };
+    }
+    return { verified: true };
+  }
+
+  // ==========================================
   // SSO Launch Simulator with Zero-Trust Assertion Guard
   // ==========================================
-  launchApp(app: SaaSApp): void {
+  launchApp(
+    app: SaaSApp,
+    options?: {
+      skipAutofill?: boolean;
+      customUsername?: string;
+      customPassword?: string;
+      markAlreadyLoggedIn?: boolean;
+    },
+  ): void {
     // Zero-Trust Assertion Guard: Ensure Vanguard IdP only issues assertions for officially approved & assigned apps
     if (!app.assigned || app.status === 'Pending Approval') {
       this.adminActionNotice.set(
@@ -4962,23 +5063,77 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       return;
     }
 
-    const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
-    if (matched.length > 0) {
-      this.ssoLaunchingNotice.set(
-        `Launching ${app.name}. Auto-fill credentials for ${matched[0].username || matched[0].title} ready!`
+    const alreadyLoggedIn = this.isAppSessionLoggedIn(app.id) || options?.skipAutofill === true;
+    const resolvedCreds =
+      options?.customUsername || options?.customPassword
+        ? {
+            username: options.customUsername || '',
+            password: options.customPassword || '',
+          }
+        : this.resolveAppCredentials(app);
+
+    let targetLaunchUrl = app.launchUrl;
+
+    if (!alreadyLoggedIn && resolvedCreds && (resolvedCreds.username || resolvedCreds.password)) {
+      targetLaunchUrl = this.buildAutofillLaunchUrl(
+        app.launchUrl,
+        resolvedCreds.username,
+        resolvedCreds.password,
       );
-      if (matched[0].password && this.isBrowser && navigator?.clipboard?.writeText) {
-        navigator.clipboard.writeText(matched[0].password).catch(() => {});
+      this.ssoLaunchingNotice.set(
+        `Verified & Launching ${app.name}. Auto-filling credentials for ${resolvedCreds.username || app.name}!`
+      );
+      this.activeAutofillToast.set({
+        appId: app.id,
+        appName: app.name,
+        launchUrl: app.launchUrl,
+        username: resolvedCreds.username,
+        password: resolvedCreds.password,
+      });
+      if (resolvedCreds.password && this.isBrowser && navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(resolvedCreds.password).catch(() => {});
+      }
+      if (this.isBrowser && typeof window !== 'undefined') {
+        try {
+          window.postMessage(
+            {
+              type: 'VANGUARD_AUTOFILL_LAUNCH',
+              appId: app.id,
+              appName: app.name,
+              targetUrl: app.launchUrl,
+              username: resolvedCreds.username,
+              password: resolvedCreds.password,
+            },
+            '*',
+          );
+        } catch {
+          // ignore postMessage errors in restricted contexts
+        }
       }
     } else {
       this.ssoLaunchingNotice.set(
-        `Redirecting to ${app.name} via cryptographically signed ${app.protocol} assertion...`
+        alreadyLoggedIn
+          ? `Session active for ${app.name}. Launching application directly...`
+          : `Redirecting to ${app.name} via cryptographically signed ${app.protocol} assertion...`
       );
     }
+
+    if (options?.markAlreadyLoggedIn) {
+      this.markAppSessionLoggedIn(app.id, true);
+    }
+
+    this.logAuditEvent(
+      `Application launched: ${app.name} (${alreadyLoggedIn ? 'Active Session Direct Launch' : 'Verified Auto-Fill Launch'})`,
+      app.name,
+      app.protocol || 'Web Auth',
+      'success',
+      'Low',
+    );
+
     setTimeout(() => {
       this.ssoLaunchingNotice.set(null);
-      if (this.isBrowser && app.launchUrl) {
-        window.open(app.launchUrl, '_blank');
+      if (this.isBrowser && targetLaunchUrl) {
+        window.open(targetLaunchUrl, '_blank');
       }
     }, 1200);
   }

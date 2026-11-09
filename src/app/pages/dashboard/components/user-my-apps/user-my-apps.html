@@ -139,6 +139,48 @@
             </button>
           </div>
 
+          <!-- SCRUM-169: Auto-Fill Credential Injection Assistant Banner -->
+          <div
+            *ngIf="activeAutofillToast() as toast"
+            style="margin-bottom: 18px; padding: 14px 18px; border-radius: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;"
+          >
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #34d399; display: flex; align-items: center; gap: 8px;">
+                <span>⚡ Verified Launch & Credential Auto-Fill Active for {{ toast.appName }}</span>
+              </div>
+              <div style="font-size: 12px; color: #94a3b8; margin-top: 3px;">
+                Auto-filling username <strong style="color: #e2e8f0;">{{ toast.username }}</strong> and password into <code style="color: #93c5fd;">{{ toast.launchUrl }}</code> via Vanguard Extension / Launch Payload.
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button
+                type="button"
+                class="cat-pill"
+                style="padding: 6px 10px; font-size: 11px;"
+                (click)="copyAutofillValue(toast.username)"
+              >
+                📋 Copy Username
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                style="padding: 6px 10px; font-size: 11px;"
+                *ngIf="toast.password"
+                (click)="copyAutofillValue(toast.password)"
+              >
+                🔑 Copy Password
+              </button>
+              <button
+                type="button"
+                class="cat-pill"
+                style="padding: 6px 10px; font-size: 11px;"
+                (click)="dismissAutofillToast()"
+              >
+                ✕ Dismiss
+              </button>
+            </div>
+          </div>
+
           <div class="apps-grid">
             <div class="app-card" *ngFor="let app of filteredApps()">
               <div class="app-card-top">
@@ -150,9 +192,25 @@
                   <span class="app-approved-tag" *ngIf="app.status === 'Approved'" title="Access approved by administrator">
                     ✓ Approved
                   </span>
-                  <span class="vault-matched-tag" *ngIf="isPersonalWorkspace() && getMatchingVaultCredentials(app).length > 0" title="Auto-fill credentials detected in personal vault">
+                  <span
+                    class="vault-matched-tag"
+                    *ngIf="app.assignedUsername || getMatchingVaultCredentials(app).length > 0"
+                    title="Auto-fill credentials ready for launch"
+                  >
                     ⚡ Auto-fill Ready
                   </span>
+                  <button
+                    type="button"
+                    class="status-live-pill"
+                    style="cursor: pointer; border: none;"
+                    [style.background]="isAppLoggedIn(app.id) ? 'rgba(16, 185, 129, 0.16)' : 'rgba(245, 158, 11, 0.14)'"
+                    [style.color]="isAppLoggedIn(app.id) ? '#34d399' : '#fbbf24'"
+                    (click)="toggleAppLoggedInState(app, $event)"
+                    [title]="isAppLoggedIn(app.id) ? 'Already logged in on this browser — click to require verification & auto-fill again' : 'Verification required before launch — click if you are already logged in'"
+                  >
+                    <span class="pulse-dot" *ngIf="isAppLoggedIn(app.id)"></span>
+                    {{ isAppLoggedIn(app.id) ? 'Already Logged In' : '🔒 Verify to Launch' }}
+                  </button>
                   <span class="status-live-pill" *ngIf="app.isIntegrated || app.connectionStatus === 'Currently Connected'" title="Currently connected to this application">
                     <span class="pulse-dot"></span>
                     Currently Connected
@@ -181,14 +239,14 @@
               <h3 class="app-name">{{ app.name }}</h3>
               <p class="app-desc">{{ app.description }}</p>
 
-              <div class="app-meta-row" *ngIf="isPersonalWorkspace() && getMatchingVaultCredentials(app).length > 0">
+              <div class="app-meta-row" *ngIf="app.assignedUsername || getMatchingVaultCredentials(app).length > 0">
                 <span class="vault-linked-info">
-                  🔑 Linked: {{ getMatchingVaultCredentials(app)[0].username || getMatchingVaultCredentials(app)[0].title }}
+                  🔑 Account: {{ app.assignedUsername || getMatchingVaultCredentials(app)[0].username || getMatchingVaultCredentials(app)[0].title }}
                 </span>
               </div>
 
-              <button type="button" class="btn-launch-app" (click)="launchApp(app)">
-                <span>Launch & Auto-fill</span>
+              <button type="button" class="btn-launch-app" (click)="initiateSecureAppLaunch(app)">
+                <span>{{ isAppLoggedIn(app.id) ? 'Open Application (Logged In)' : 'Launch & Auto-fill' }}</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="launch-icon">
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                   <polyline points="15 3 21 3 21 9"></polyline>
@@ -405,6 +463,27 @@
             placeholder="Personal workspace, projects, etc."
             class="form-input"
           />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">Auto-Fill Username / Email (Optional)</label>
+            <input
+              type="text"
+              [(ngModel)]="newAppUsername"
+              placeholder="e.g. you@example.com"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">Auto-Fill Password (Optional)</label>
+            <input
+              type="password"
+              [(ngModel)]="newAppPassword"
+              placeholder="••••••••••••"
+              class="form-input"
+            />
+          </div>
         </div>
 
         <div class="form-error-alert" *ngIf="addAppError()">
@@ -666,6 +745,155 @@
         >
           <span *ngIf="!isSubmittingRequest()">Submit Access Request</span>
           <span *ngIf="isSubmittingRequest()">Submitting...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL: PRE-LAUNCH SECURITY VERIFICATION & AUTO-FILL (SCRUM-169)
+       ======================================================================== -->
+  <div class="modal-backdrop" *ngIf="showLaunchVerifyModal() && pendingLaunchApp() as targetApp">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">🔒 Security Verification Before Launch</h3>
+          <p class="modal-desc" style="margin: 4px 0 0 0; font-size: 12px;">
+            Verify your identity to unlock and auto-fill credentials into <strong>{{ targetApp.name }}</strong>
+          </p>
+        </div>
+        <button type="button" class="modal-close-btn" (click)="closeLaunchVerifyModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Application Summary Pill -->
+        <div
+          style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); margin-bottom: 14px;"
+        >
+          <span style="font-size: 24px;">{{ targetApp.icon }}</span>
+          <div style="flex: 1;">
+            <div style="font-weight: 700; color: #f8fafc; font-size: 14px;">{{ targetApp.name }}</div>
+            <div style="font-size: 11px; color: #94a3b8;">{{ targetApp.launchUrl }}</div>
+          </div>
+          <span class="proto-tag">{{ targetApp.protocol }}</span>
+        </div>
+
+        <!-- Step 1: Verification Method Selector -->
+        <div class="form-group">
+          <label class="form-label">1. Select Verification Method</label>
+          <div class="preset-pill-group">
+            <button
+              type="button"
+              class="preset-pill"
+              [class.active]="launchVerifyMethod() === 'password'"
+              [style.borderColor]="launchVerifyMethod() === 'password' ? '#3b82f6' : ''"
+              (click)="launchVerifyMethod.set('password'); launchVerifyError.set(null)"
+            >
+              🔑 Master / Account Password
+            </button>
+            <button
+              type="button"
+              class="preset-pill"
+              [class.active]="launchVerifyMethod() === 'pin'"
+              [style.borderColor]="launchVerifyMethod() === 'pin' ? '#3b82f6' : ''"
+              (click)="launchVerifyMethod.set('pin'); launchVerifyError.set(null)"
+            >
+              🔢 6-Digit PIN / 2FA Code
+            </button>
+            <button
+              type="button"
+              class="preset-pill"
+              [class.active]="launchVerifyMethod() === 'quick'"
+              [style.borderColor]="launchVerifyMethod() === 'quick' ? '#10b981' : ''"
+              (click)="launchVerifyMethod.set('quick'); launchVerifyError.set(null)"
+            >
+              ✅ Active Session Approval
+            </button>
+          </div>
+        </div>
+
+        <!-- Verification Input -->
+        <div class="form-group" *ngIf="launchVerifyMethod() === 'password'">
+          <label class="form-label">Enter Account or Vault Master Password *</label>
+          <input
+            type="password"
+            [ngModel]="launchVerifySecret()"
+            (ngModelChange)="launchVerifySecret.set($event)"
+            placeholder="Enter your Vanguard password to authorize auto-fill"
+            class="form-input"
+            (keyup.enter)="confirmSecureAppLaunch()"
+          />
+        </div>
+
+        <div class="form-group" *ngIf="launchVerifyMethod() === 'pin'">
+          <label class="form-label">Enter 6-Digit Security PIN or TOTP Code *</label>
+          <input
+            type="text"
+            maxlength="8"
+            [ngModel]="launchVerifySecret()"
+            (ngModelChange)="launchVerifySecret.set($event)"
+            placeholder="e.g. 123456"
+            class="form-input"
+            (keyup.enter)="confirmSecureAppLaunch()"
+          />
+        </div>
+
+        <div
+          *ngIf="launchVerifyMethod() === 'quick'"
+          style="padding: 10px 12px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); font-size: 12px; color: #34d399; margin-bottom: 12px;"
+        >
+          ✓ Using your authenticated Vanguard session token to authorize application launch &amp; credential auto-fill.
+        </div>
+
+        <!-- Step 2: Credentials to Auto-Fill -->
+        <div
+          style="padding: 12px; border-radius: 10px; background: rgba(30, 41, 59, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); margin-top: 8px;"
+        >
+          <div style="font-size: 12px; font-weight: 600; color: #e2e8f0; margin-bottom: 8px;">
+            2. Credentials to Auto-Fill in {{ targetApp.name }}
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1" style="margin-bottom: 8px;">
+              <label class="form-label">Username / Email</label>
+              <input
+                type="text"
+                [ngModel]="launchCustomUsername()"
+                (ngModelChange)="launchCustomUsername.set($event)"
+                placeholder="you@example.com"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group flex-1" style="margin-bottom: 8px;">
+              <label class="form-label">Password</label>
+              <input
+                type="password"
+                [ngModel]="launchCustomPassword()"
+                (ngModelChange)="launchCustomPassword.set($event)"
+                placeholder="••••••••••••"
+                class="form-input"
+              />
+            </div>
+          </div>
+
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; cursor: pointer; margin-top: 4px;">
+            <input
+              type="checkbox"
+              [ngModel]="launchMarkLoggedIn()"
+              (ngModelChange)="launchMarkLoggedIn.set($event)"
+            />
+            <span>Remember as <strong>Already Logged In</strong> after launch (next click opens {{ targetApp.name }} directly)</span>
+          </label>
+        </div>
+
+        <div class="form-error-alert" *ngIf="launchVerifyError()" style="margin-top: 12px;">
+          ⚠️ {{ launchVerifyError() }}
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost" (click)="closeLaunchVerifyModal()">Cancel</button>
+        <button type="button" class="btn-primary-action" (click)="confirmSecureAppLaunch()">
+          ✓ Verify &amp; Launch {{ targetApp.name }}
         </button>
       </div>
     </div>

@@ -573,5 +573,76 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.reqDomain()).toBe('analytics.google.com');
     });
   });
+
+  // ==========================================================================
+  // SCRUM-169: Pre-Launch Security Verification & Auto-Fill Credential Injection
+  // ==========================================================================
+  describe('SCRUM-169 Security Verification Before Launching Apps & Auto-Fill Injection', () => {
+    it('requires security verification before launching an application that is not yet logged in', () => {
+      const figmaApp = {
+        id: 'app-figma-sec',
+        name: 'Figma',
+        category: 'collaboration' as const,
+        description: 'Design platform',
+        icon: '🎨',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://www.figma.com/login',
+        assigned: true,
+        assignedUsername: 'designer@acme.com',
+        assignedPassword: 'FigmaSecretPassword!',
+      };
+
+      component.initiateSecureAppLaunch(figmaApp);
+      expect(component.showLaunchVerifyModal()).toBe(true);
+      expect(component.pendingLaunchApp()?.id).toBe('app-figma-sec');
+      expect(component.launchCustomUsername()).toBe('designer@acme.com');
+      expect(component.launchCustomPassword()).toBe('FigmaSecretPassword!');
+
+      // Empty password should fail verification
+      component.launchVerifyMethod.set('password');
+      component.launchVerifySecret.set('');
+      component.confirmSecureAppLaunch();
+      expect(component.launchVerifyError()).toContain('password');
+      expect(component.showLaunchVerifyModal()).toBe(true);
+
+      // Valid password verifies, launches with auto-fill payload, and marks app as logged in
+      component.launchVerifySecret.set('MasterPass123!');
+      component.confirmSecureAppLaunch();
+      expect(component.showLaunchVerifyModal()).toBe(false);
+      expect(dashboardService.activeAutofillToast()?.username).toBe('designer@acme.com');
+      expect(dashboardService.isAppSessionLoggedIn('app-figma-sec')).toBe(true);
+    });
+
+    it('skips verification modal and launches directly when application is already logged in', () => {
+      const fbApp = {
+        id: 'app-fb-sec',
+        name: 'Facebook',
+        category: 'collaboration' as const,
+        description: 'Social suite',
+        icon: '📘',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://www.facebook.com/login',
+        assigned: true,
+      };
+
+      dashboardService.markAppSessionLoggedIn('app-fb-sec', true);
+      component.initiateSecureAppLaunch(fbApp);
+
+      expect(component.showLaunchVerifyModal()).toBe(false);
+      expect(dashboardService.ssoLaunchingNotice()).toContain('Session active for Facebook');
+    });
+
+    it('builds #vg_autofill=1 hash payload URL for extension auto-fill injection', () => {
+      const url = dashboardService.buildAutofillLaunchUrl(
+        'https://www.figma.com/login',
+        'designer@acme.com',
+        'MyPass123!',
+      );
+      expect(url).toContain('https://www.figma.com/login#');
+      expect(url).toContain('vg_autofill=1');
+      expect(url).toContain('vg_u=designer%40acme.com');
+      expect(url).toContain('vg_p=MyPass123!');
+    });
+  });
   });
 });

@@ -24,6 +24,11 @@ export interface SaaSApp {
   connectionStatus?: string;
   targetDomain?: string;
   requestedUsername?: string;
+  assignedUsername?: string;
+  assignedPassword?: string;
+  targetUserId?: string;
+  targetUserEmail?: string;
+  alreadyLoggedIn?: boolean;
 }
 
 export interface UserConnectedApp {

@@ -644,5 +644,61 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(url).toContain('vg_p=MyPass123!');
     });
   });
+
+  // ==========================================================================
+  // SCRUM-171: Admin Employee Application Account Provisioning & Isolation
+  // ==========================================================================
+  describe('SCRUM-171 Admin Employee Application Account Provisioning & Visibility Isolation', () => {
+    it('shows Admin-provisioned application accounts ONLY to the targeted employee', () => {
+      // Admin provisions a Figma account specifically for Marcus (emp-1)
+      dashboardService.provisionEmployeeAppAccount({
+        targetUserId: 'emp-marcus-1',
+        targetUserEmail: 'marcus@acme.com',
+        targetUserName: 'Marcus Vance',
+        appName: 'Figma Enterprise',
+        launchUrl: 'https://www.figma.com/login',
+        category: 'collaboration',
+        protocol: 'Extension Autofill',
+        icon: '🎨',
+        assignedUsername: 'marcus.design@acme.com',
+        assignedPassword: 'FigmaAdminCreatedPass#1',
+      });
+
+      // When Marcus logs in, he sees the provisioned Figma account & credentials
+      authService.currentUser.set({
+        id: 'emp-marcus-1',
+        email: 'marcus@acme.com',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.switchWorkspace('org_root');
+      fixture.detectChanges();
+
+      const marcusApps = component.activeAppsList();
+      const marcusFigma = marcusApps.find((a) => a.name === 'Figma Enterprise');
+      expect(marcusFigma).toBeDefined();
+      expect(marcusFigma?.assignedUsername).toBe('marcus.design@acme.com');
+      expect(marcusFigma?.assignedPassword).toBe('FigmaAdminCreatedPass#1');
+
+      // When another employee (Elena) logs in, she does NOT see Marcus's Figma account
+      authService.currentUser.set({
+        id: 'emp-elena-2',
+        email: 'elena@acme.com',
+        firstName: 'Elena',
+        lastName: 'Rostova',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.apps.set([]);
+      fixture.detectChanges();
+
+      const elenaApps = component.activeAppsList();
+      expect(elenaApps.find((a) => a.name === 'Figma Enterprise')).toBeUndefined();
+    });
+  });
   });
 });

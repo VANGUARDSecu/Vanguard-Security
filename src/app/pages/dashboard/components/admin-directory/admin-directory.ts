@@ -225,4 +225,184 @@ export class AdminDirectory implements OnInit {
   getUserGroups(user: DirectoryUser): DirectoryGroup[] { return this.dashboardService.getUserGroups(user); }
   getGroupApps(group: DirectoryGroup) { return this.dashboardService.getGroupApps(group); }
 
+  // =========================================================================
+  // SCRUM-171: Admin Employee Application Account Provisioning & Isolation
+  // =========================================================================
+  readonly showProvisionAppModal = signal<boolean>(false);
+  readonly provisionTargetUser = signal<DirectoryUser | null>(null);
+  readonly provisionAppName = signal<string>('Figma Enterprise');
+  readonly provisionAppUrl = signal<string>('https://www.figma.com/login');
+  readonly provisionRegisterUrl = signal<string>('https://www.figma.com/signup');
+  readonly provisionAppCategory = signal<SaaSApp['category']>('collaboration');
+  readonly provisionAppProtocol = signal<string>('Extension Autofill');
+  readonly provisionAppIcon = signal<string>('🎨');
+  readonly provisionUsername = signal<string>('');
+  readonly provisionPassword = signal<string>('');
+  readonly provisionDescription = signal<string>('');
+  readonly provisionError = signal<string | null>(null);
+  readonly provisionSuccess = signal<string | null>(null);
+
+  openProvisionAppModal(user?: DirectoryUser): void {
+    const target = user || this.directoryUsers()[0] || null;
+    this.provisionTargetUser.set(target);
+    this.provisionError.set(null);
+    this.provisionSuccess.set(null);
+    this.applyProvisionAppPreset('figma', target);
+    this.generateProvisionPassword();
+    this.showProvisionAppModal.set(true);
+  }
+
+  closeProvisionAppModal(): void {
+    this.showProvisionAppModal.set(false);
+    this.provisionError.set(null);
+    this.provisionSuccess.set(null);
+  }
+
+  onSelectProvisionTargetUserId(userId: string): void {
+    const match = this.directoryUsers().find((u) => u.id === userId) || null;
+    this.provisionTargetUser.set(match);
+    if (match && !this.provisionUsername()) {
+      this.provisionUsername.set(match.email);
+    }
+  }
+
+  applyProvisionAppPreset(
+    preset: 'dummy-web' | 'figma' | 'facebook' | 'github' | 'aws' | 'custom',
+    targetOverride?: DirectoryUser | null,
+  ): void {
+    const target = targetOverride !== undefined ? targetOverride : this.provisionTargetUser();
+    const defaultEmail = target?.email || 'employee@company.com';
+    this.provisionError.set(null);
+    this.provisionSuccess.set(null);
+
+    switch (preset) {
+      case 'dummy-web':
+        this.provisionAppName.set('Acme Dummy Web');
+        this.provisionAppUrl.set('http://localhost:4201/login');
+        this.provisionRegisterUrl.set('http://localhost:4201/signup');
+        this.provisionAppCategory.set('cloud');
+        this.provisionAppProtocol.set('OIDC');
+        this.provisionAppIcon.set('🏢');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('Internal employee portal account created by Administrator');
+        break;
+      case 'figma':
+        this.provisionAppName.set('Figma Enterprise');
+        this.provisionAppUrl.set('https://www.figma.com/login');
+        this.provisionRegisterUrl.set('https://www.figma.com/signup');
+        this.provisionAppCategory.set('collaboration');
+        this.provisionAppProtocol.set('Extension Autofill');
+        this.provisionAppIcon.set('🎨');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('Company design system & prototyping account provisioned by Admin');
+        break;
+      case 'facebook':
+        this.provisionAppName.set('Facebook / Meta Business');
+        this.provisionAppUrl.set('https://www.facebook.com/login');
+        this.provisionRegisterUrl.set('https://www.facebook.com/r.php');
+        this.provisionAppCategory.set('collaboration');
+        this.provisionAppProtocol.set('Extension Autofill');
+        this.provisionAppIcon.set('📘');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('Corporate social media & Meta Business Suite account');
+        break;
+      case 'github':
+        this.provisionAppName.set('GitHub Enterprise');
+        this.provisionAppUrl.set('https://github.com/login');
+        this.provisionRegisterUrl.set('https://github.com/signup');
+        this.provisionAppCategory.set('developer');
+        this.provisionAppProtocol.set('Extension Autofill');
+        this.provisionAppIcon.set('🐙');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('Engineering repository & CI/CD account provisioned by Admin');
+        break;
+      case 'aws':
+        this.provisionAppName.set('AWS Management Console');
+        this.provisionAppUrl.set('https://signin.aws.amazon.com/console');
+        this.provisionRegisterUrl.set('https://portal.aws.amazon.com/billing/signup');
+        this.provisionAppCategory.set('cloud');
+        this.provisionAppProtocol.set('Extension Autofill');
+        this.provisionAppIcon.set('☁️');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('Cloud infrastructure IAM account provisioned by Admin');
+        break;
+      case 'custom':
+        this.provisionAppName.set('');
+        this.provisionAppUrl.set('https://');
+        this.provisionRegisterUrl.set('https://');
+        this.provisionAppCategory.set('cloud');
+        this.provisionAppProtocol.set('Extension Autofill');
+        this.provisionAppIcon.set('🔑');
+        this.provisionUsername.set(defaultEmail);
+        this.provisionDescription.set('');
+        break;
+    }
+  }
+
+  generateProvisionPassword(): void {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
+    let pwd = 'Vg!';
+    for (let i = 0; i < 11; i++) {
+      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    this.provisionPassword.set(pwd);
+  }
+
+  openExternalRegisterPage(): void {
+    const url = this.provisionRegisterUrl().trim() || this.provisionAppUrl().trim();
+    if (url && typeof window !== 'undefined') {
+      window.open(url, '_blank');
+    }
+  }
+
+  submitProvisionAppAccount(): void {
+    this.provisionError.set(null);
+    this.provisionSuccess.set(null);
+
+    const target = this.provisionTargetUser();
+    if (!target) {
+      this.provisionError.set('Please select a target employee from the directory.');
+      return;
+    }
+    if (!this.provisionAppName().trim()) {
+      this.provisionError.set('Please enter the application name.');
+      return;
+    }
+    if (!this.provisionAppUrl().trim()) {
+      this.provisionError.set('Please enter the application login URL.');
+      return;
+    }
+    if (!this.provisionUsername().trim() || !this.provisionPassword()) {
+      this.provisionError.set('Please specify the employee account username and password created for this application.');
+      return;
+    }
+
+    this.dashboardService.provisionEmployeeAppAccount({
+      targetUserId: target.id,
+      targetUserEmail: target.email,
+      targetUserName: target.name,
+      appName: this.provisionAppName().trim(),
+      launchUrl: this.provisionAppUrl().trim(),
+      category: this.provisionAppCategory(),
+      protocol: this.provisionAppProtocol(),
+      icon: this.provisionAppIcon() || '🔑',
+      assignedUsername: this.provisionUsername().trim(),
+      assignedPassword: this.provisionPassword(),
+      description: this.provisionDescription().trim(),
+    });
+
+    this.provisionSuccess.set(
+      `Assigned ${this.provisionAppName().trim()} (${this.provisionUsername().trim()}) exclusively to ${target.name}. Only ${target.name} can see and launch this account in their dashboard.`,
+    );
+  }
+
+  getEmployeeProvisionedApps(user: DirectoryUser | null): SaaSApp[] {
+    if (!user) return [];
+    return this.dashboardService.getAppsProvisionedForEmployee(user.id, user.email);
+  }
+
+  revokeEmployeeApp(user: DirectoryUser, app: SaaSApp): void {
+    this.dashboardService.revokeEmployeeProvisionedApp(user.id, user.email, app.id);
+  }
+
 }

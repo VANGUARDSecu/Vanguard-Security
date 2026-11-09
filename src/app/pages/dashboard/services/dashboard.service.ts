@@ -1166,12 +1166,133 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.loadStored<SaaSApp[]>('vanguard_user_apps', [])
   );
 
+  // SCRUM-171: Per-employee provisioned application accounts (Admin-created accounts isolated per employee)
+  readonly employeeProvisionedApps = signal<SaaSApp[]>(
+    this.loadStored<SaaSApp[]>('vanguard_employee_provisioned_apps', [])
+  );
+
+  getAppsProvisionedForEmployee(userId?: string, userEmail?: string): SaaSApp[] {
+    const uid = (userId || '').trim();
+    const email = (userEmail || '').toLowerCase().trim();
+    if (!uid && !email) return [];
+    return this.employeeProvisionedApps().filter((a) => {
+      const matchId = uid && a.targetUserId && a.targetUserId === uid;
+      const matchEmail = email && a.targetUserEmail && a.targetUserEmail.toLowerCase().trim() === email;
+      return Boolean(matchId || matchEmail);
+    });
+  }
+
+  provisionEmployeeAppAccount(payload: {
+    targetUserId: string;
+    targetUserEmail: string;
+    targetUserName: string;
+    appName: string;
+    launchUrl: string;
+    category: SaaSApp['category'];
+    protocol: string;
+    icon: string;
+    assignedUsername: string;
+    assignedPassword: string;
+    description?: string;
+  }): SaaSApp {
+    const slug = payload.appName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const appId = `prov-${slug}-${payload.targetUserId || Date.now()}`;
+    const provisionedApp: SaaSApp = {
+      id: appId,
+      name: payload.appName.trim(),
+      category: payload.category || 'cloud',
+      description:
+        payload.description?.trim() ||
+        `Provisioned by Admin for ${payload.targetUserName} (${payload.assignedUsername})`,
+      icon: payload.icon || '🔑',
+      protocol: payload.protocol || 'Extension Autofill',
+      launchUrl: payload.launchUrl.trim(),
+      assigned: true,
+      status: 'Approved',
+      assignedUsername: payload.assignedUsername.trim(),
+      assignedPassword: payload.assignedPassword,
+      targetUserId: payload.targetUserId,
+      targetUserEmail: payload.targetUserEmail.toLowerCase().trim(),
+    };
+
+    const existing = this.employeeProvisionedApps().filter(
+      (a) =>
+        !(
+          ((a.targetUserId && a.targetUserId === payload.targetUserId) ||
+            (a.targetUserEmail &&
+              a.targetUserEmail.toLowerCase() === payload.targetUserEmail.toLowerCase().trim())) &&
+          a.name.toLowerCase() === payload.appName.trim().toLowerCase()
+        ),
+    );
+    const updated = [...existing, provisionedApp];
+    this.employeeProvisionedApps.set(updated);
+    this.saveStored('vanguard_employee_provisioned_apps', updated);
+
+    // Sync to backend (best-effort)
+    if (this.isBrowser) {
+      this.http
+        .post(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(payload.targetUserId)}`,
+          {
+            appId,
+            name: provisionedApp.name,
+            protocol: provisionedApp.protocol,
+            launchUrl: provisionedApp.launchUrl,
+            category: provisionedApp.category,
+            icon: provisionedApp.icon,
+            description: provisionedApp.description,
+            assignedUsername: provisionedApp.assignedUsername,
+            assignedPassword: provisionedApp.assignedPassword,
+            targetUserEmail: provisionedApp.targetUserEmail,
+          },
+        )
+        .subscribe({ error: () => {} });
+    }
+
+    this.logAuditEvent(
+      `Admin provisioned ${provisionedApp.name} account (${provisionedApp.assignedUsername}) exclusively for employee ${payload.targetUserName} (${payload.targetUserEmail})`,
+      provisionedApp.name,
+      provisionedApp.protocol,
+      'success',
+      'Low',
+    );
+    this.showAdminNotice(
+      `Provisioned ${provisionedApp.name} account (${provisionedApp.assignedUsername}) for ${payload.targetUserName}. Only ${payload.targetUserName} can see and launch this account.`,
+    );
+
+    return provisionedApp;
+  }
+
+  revokeEmployeeProvisionedApp(
+    targetUserId: string,
+    targetUserEmail: string,
+    appId: string,
+  ): void {
+    const updated = this.employeeProvisionedApps().filter(
+      (a) =>
+        !(
+          a.id === appId &&
+          ((targetUserId && a.targetUserId === targetUserId) ||
+            (targetUserEmail &&
+              a.targetUserEmail?.toLowerCase() === targetUserEmail.toLowerCase().trim()))
+        ),
+    );
+    this.employeeProvisionedApps.set(updated);
+    this.saveStored('vanguard_employee_provisioned_apps', updated);
+
+    if (this.isBrowser && targetUserId) {
+      this.http
+        .delete(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(targetUserId)}&appId=${encodeURIComponent(appId)}`,
+        )
+        .subscribe({ error: () => {} });
+    }
+  }
+
   /**
-   * SCRUM-94: Load the signed-in employee's company apps from the backend
+   * SCRUM-94 & SCRUM-171: Load the signed-in employee's company apps from the backend
    * (GET /apps/my), replacing the legacy localStorage source as the authoritative
-   * company catalog. Individuals (no tenant) resolve to an empty company list.
-   * Falls back silently to any cached apps on network failure so the UI degrades
-   * gracefully offline.
+   * company catalog and merging employee-isolated Admin-provisioned accounts.
    */
   loadCompanyApps(): void {
     if (!this.isBrowser) return;
@@ -1181,6 +1302,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.apps.set([]);
       return;
     }
+    const userEmail = u?.email?.toLowerCase().trim();
     // SCRUM-131: identity comes from the bearer token (auth interceptor); the
     // backend ignores any userId param (SCRUM-123).
     this.http
@@ -1197,24 +1319,49 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             launchUrl: r.launch_url || r.launchUrl || '',
             assigned: r.assigned !== false,
             inheritedViaGroup: r.inherited_via_group || undefined,
+            assignedUsername: r.assigned_username || r.assignedUsername || undefined,
+            assignedPassword: r.assigned_password || r.assignedPassword || undefined,
+            targetUserId: r.user_id || r.targetUserId || undefined,
+            targetUserEmail: r.target_user_email || r.targetUserEmail || undefined,
           }));
+          const localProvisioned = this.getAppsProvisionedForEmployee(userId, userEmail);
+          for (const p of localProvisioned) {
+            const idx = mapped.findIndex(
+              (m) => m.id === p.id || m.name.toLowerCase() === p.name.toLowerCase(),
+            );
+            if (idx >= 0) {
+              mapped[idx] = {
+                ...mapped[idx],
+                assignedUsername: p.assignedUsername || mapped[idx].assignedUsername,
+                assignedPassword: p.assignedPassword || mapped[idx].assignedPassword,
+                targetUserId: p.targetUserId || mapped[idx].targetUserId,
+                targetUserEmail: p.targetUserEmail || mapped[idx].targetUserEmail,
+              };
+            } else {
+              mapped.push(p);
+            }
+          }
           this.apps.set(mapped);
           this.saveStored('vanguard_user_apps', mapped);
         },
         error: () => {
-          // Keep whatever is cached; do not clear company apps on transient errors.
+          // On offline/network fallback, still ensure employee sees their isolated provisioned apps
+          const localProvisioned = this.getAppsProvisionedForEmployee(userId, userEmail);
+          if (localProvisioned.length > 0) {
+            this.apps.set(localProvisioned);
+          }
         },
       });
   }
 
   /**
-   * SCRUM-94: Admin hook to assign a company app to a specific employee or to
+   * SCRUM-94 & SCRUM-171: Admin hook to assign a company app to a specific employee or to
    * all members, via POST /apps/assign. Only meaningful for company admins; the
    * backend enforces the admin/manager role and tenant isolation.
    */
   assignCompanyApp(
     app: Partial<SaaSApp> & { appId: string; name: string },
-    target: { userId?: string; all?: boolean },
+    target: { userId?: string; all?: boolean; targetUserEmail?: string },
   ): Observable<{ assigned: number }> {
     // SCRUM-131: admin identity is derived from the bearer token server-side.
     return this.http.post<{ assigned: number }>(
@@ -1226,6 +1373,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         launchUrl: app.launchUrl,
         category: app.category,
         icon: app.icon,
+        description: app.description,
+        assignedUsername: app.assignedUsername,
+        assignedPassword: app.assignedPassword,
+        targetUserEmail: target.targetUserEmail || app.targetUserEmail,
         target: target.all ? 'all' : 'user',
         userId: target.all ? undefined : target.userId,
       },
@@ -1233,10 +1384,28 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   // Active apps source: personal apps when in personal workspace, company apps when in organization
-  // SCRUM-58 & SCRUM-159: Strict deduplication ensuring no application ever appears twice,
-  // and automatically including access requests that have been approved by administrators.
+  // SCRUM-58, SCRUM-159, & SCRUM-171: Strict deduplication + per-employee visibility isolation.
   readonly activeAppsList = computed<SaaSApp[]>(() => {
-    const source = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
+    const u = this.user();
+    const email = u?.email?.toLowerCase().trim();
+    const uid = u?.id;
+
+    const rawSource = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
+    // SCRUM-171: Filter out any company app explicitly targeted to a different employee
+    const source = this.isPersonalWorkspace()
+      ? rawSource
+      : rawSource.filter((app) => {
+          if (!app.targetUserId && !app.targetUserEmail) return true;
+          const matchId = uid && app.targetUserId === uid;
+          const matchEmail =
+            email && app.targetUserEmail?.toLowerCase().trim() === email;
+          return Boolean(matchId || matchEmail);
+        });
+
+    const provisionedForMe = !this.isPersonalWorkspace()
+      ? this.getAppsProvisionedForEmployee(uid, email)
+      : [];
+
     const seen = new Set<string>();
     const deduped: SaaSApp[] = [];
 
@@ -1245,9 +1414,6 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       ? this.appAccessRequests()
           .filter((r) => {
             if (r.status !== 'Approved') return false;
-            const u = this.user();
-            const email = u?.email?.toLowerCase();
-            const uid = u?.id;
             return (
               (email && r.userEmail?.toLowerCase() === email) ||
               (uid && r.userId === uid) ||
@@ -1267,7 +1433,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           }))
       : [];
 
-    for (const app of [...source, ...approvedRequests]) {
+    for (const app of [...provisionedForMe, ...source, ...approvedRequests]) {
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);

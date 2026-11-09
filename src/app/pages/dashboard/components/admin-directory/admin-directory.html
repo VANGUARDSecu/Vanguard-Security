@@ -4,7 +4,16 @@
               <h2 class="section-title">Central Directory Users & Groups</h2>
               <p class="section-subtitle">Manage identities, role assignments, user groups, and multi-factor enforcement across departments.</p>
             </div>
-            <div class="header-actions">
+            <div class="header-actions" style="display: flex; gap: 10px;">
+              <button
+                type="button"
+                class="btn-refresh-directory"
+                *ngIf="directoryActiveSubTab() === 'users'"
+                (click)="openProvisionAppModal()"
+                title="Register and assign an application account exclusively for a specific employee"
+              >
+                <span>🔑 Provision Employee App Account</span>
+              </button>
               <button
                 type="button"
                 class="btn-primary-action"
@@ -150,7 +159,17 @@
                             {{ g.name }}
                           </span>
                         </div>
-                        <span class="no-group-text" *ngIf="getUserGroups(u).length === 0">No groups</span>
+                        <div class="user-groups-preview" *ngIf="getEmployeeProvisionedApps(u).length > 0" style="margin-top: 4px;">
+                          <span
+                            class="user-group-tag"
+                            style="background: rgba(16, 185, 129, 0.14); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);"
+                            *ngFor="let pApp of getEmployeeProvisionedApps(u)"
+                            [title]="'Provisioned account: ' + (pApp.assignedUsername || u.email)"
+                          >
+                            {{ pApp.icon }} {{ pApp.name }}
+                          </span>
+                        </div>
+                        <span class="no-group-text" *ngIf="getUserGroups(u).length === 0 && getEmployeeProvisionedApps(u).length === 0">No groups / apps</span>
                       </td>
                       <td class="col-mfa">
                         <span class="mfa-badge" [class.mfa-active]="u.mfaStatus.includes('TOTP')">
@@ -175,6 +194,14 @@
                       <td class="col-time">{{ u.lastLogin }}</td>
                       <td>
                         <div class="row-actions">
+                          <button
+                            type="button"
+                            class="action-btn text-success"
+                            (click)="openProvisionAppModal(u)"
+                            title="Create / Register & Assign an Application Account exclusively for this employee"
+                          >
+                            🔑 Provision App
+                          </button>
                           <button
                             type="button"
                             class="action-btn action-btn-resend"
@@ -1006,6 +1033,192 @@
         <button type="button" class="btn-ghost" (click)="closeGroupModal()">Cancel</button>
         <button type="button" class="btn-primary-action" (click)="saveGroup()">
           {{ editingGroup() ? 'Save Changes' : 'Create Group' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL: PROVISION EMPLOYEE APPLICATION ACCOUNT (SCRUM-171)
+       ======================================================================== -->
+  <div class="modal-backdrop" *ngIf="showProvisionAppModal()">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">🔑 Provision Employee Application Account</h3>
+          <p class="modal-desc">
+            Decide which application account an employee can have, register their account credentials, and assign exclusive dashboard access visible only to that employee.
+          </p>
+        </div>
+        <button type="button" class="modal-close-btn" (click)="closeProvisionAppModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Step 1: Select Target Employee -->
+        <div class="form-group">
+          <label class="form-label">1. Select Target Employee *</label>
+          <select
+            class="form-input"
+            [ngModel]="provisionTargetUser()?.id || ''"
+            (ngModelChange)="onSelectProvisionTargetUserId($event)"
+          >
+            <option *ngFor="let emp of directoryUsers()" [value]="emp.id">
+              {{ emp.name }} ({{ emp.email }}) — {{ emp.department }} / {{ emp.role }}
+            </option>
+          </select>
+        </div>
+
+        <!-- Step 2: Application Presets -->
+        <div class="form-group">
+          <label class="form-label">2. Choose Application to Provision</label>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('figma')">🎨 Figma Enterprise</button>
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('facebook')">📘 Facebook Business</button>
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('github')">🐙 GitHub Enterprise</button>
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('dummy-web')">🏢 Acme Dummy Web</button>
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('aws')">☁️ AWS Console</button>
+            <button type="button" class="action-btn" (click)="applyProvisionAppPreset('custom')">🌐 Custom App</button>
+          </div>
+        </div>
+
+        <!-- Application Details -->
+        <div class="form-row" style="display: flex; gap: 12px;">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Application Name *</label>
+            <input
+              type="text"
+              class="form-input"
+              [ngModel]="provisionAppName()"
+              (ngModelChange)="provisionAppName.set($event)"
+              placeholder="e.g. Figma Enterprise"
+            />
+          </div>
+          <div class="form-group" style="width: 90px;">
+            <label class="form-label">Icon</label>
+            <input
+              type="text"
+              class="form-input"
+              [ngModel]="provisionAppIcon()"
+              (ngModelChange)="provisionAppIcon.set($event)"
+              placeholder="🔑"
+            />
+          </div>
+        </div>
+
+        <div class="form-row" style="display: flex; gap: 12px;">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Application Login URL *</label>
+            <input
+              type="url"
+              class="form-input"
+              [ngModel]="provisionAppUrl()"
+              (ngModelChange)="provisionAppUrl.set($event)"
+              placeholder="https://www.figma.com/login"
+            />
+          </div>
+          <div class="form-group" style="display: flex; align-items: flex-end;">
+            <button
+              type="button"
+              class="btn-refresh-directory"
+              style="height: 40px;"
+              (click)="openExternalRegisterPage()"
+              title="Open the application's registration page in a new tab to create the account"
+            >
+              <span>↗ Register Account on App</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 3: Employee Account Credentials Created by Admin -->
+        <div
+          style="padding: 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(59, 130, 246, 0.3); margin-top: 8px;"
+        >
+          <div style="font-size: 13px; font-weight: 700; color: #93c5fd; margin-bottom: 8px;">
+            3. Employee Account Credentials (Created by Admin for {{ provisionTargetUser()?.name || 'Employee' }})
+          </div>
+          <div class="form-row" style="display: flex; gap: 12px;">
+            <div class="form-group" style="flex: 1; margin-bottom: 8px;">
+              <label class="form-label">Registered Username / Email *</label>
+              <input
+                type="text"
+                class="form-input"
+                [ngModel]="provisionUsername()"
+                (ngModelChange)="provisionUsername.set($event)"
+                placeholder="employee@company.com"
+              />
+            </div>
+            <div class="form-group" style="flex: 1; margin-bottom: 8px;">
+              <label class="form-label">Registered Password *</label>
+              <div style="display: flex; gap: 6px;">
+                <input
+                  type="text"
+                  class="form-input"
+                  [ngModel]="provisionPassword()"
+                  (ngModelChange)="provisionPassword.set($event)"
+                  placeholder="Strong password"
+                />
+                <button
+                  type="button"
+                  class="action-btn"
+                  (click)="generateProvisionPassword()"
+                  title="Generate strong password"
+                >
+                  🎲
+                </button>
+              </div>
+            </div>
+          </div>
+          <div style="font-size: 11px; color: #94a3b8;">
+            🔒 Only <strong>{{ provisionTargetUser()?.name || 'this employee' }}</strong> ({{ provisionTargetUser()?.email }}) will see this application in their Vanguard Dashboard "My Applications" tab and auto-fill these credentials on launch.
+          </div>
+        </div>
+
+        <!-- Currently Provisioned Accounts for Selected Employee -->
+        <div
+          *ngIf="provisionTargetUser() as emp"
+          style="margin-top: 14px;"
+        >
+          <label class="form-label">
+            Assigned Accounts for {{ emp.name }} ({{ getEmployeeProvisionedApps(emp).length }})
+          </label>
+          <div *ngIf="getEmployeeProvisionedApps(emp).length === 0" style="font-size: 12px; color: #64748b;">
+            No isolated application accounts provisioned for {{ emp.name }} yet.
+          </div>
+          <div
+            *ngFor="let pApp of getEmployeeProvisionedApps(emp)"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.16); margin-top: 6px;"
+          >
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 18px;">{{ pApp.icon }}</span>
+              <div>
+                <div style="font-size: 13px; font-weight: 600; color: #f8fafc;">{{ pApp.name }}</div>
+                <div style="font-size: 11px; color: #94a3b8;">
+                  Account: <code style="color: #34d399;">{{ pApp.assignedUsername }}</code> • {{ pApp.launchUrl }}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="action-btn text-danger"
+              (click)="revokeEmployeeApp(emp, pApp)"
+            >
+              Revoke Access
+            </button>
+          </div>
+        </div>
+
+        <div class="form-error-text" *ngIf="provisionError()" style="margin-top: 10px;">
+          ⚠️ {{ provisionError() }}
+        </div>
+        <div class="form-success-banner" *ngIf="provisionSuccess()" style="margin-top: 10px;">
+          ✓ {{ provisionSuccess() }}
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost" (click)="closeProvisionAppModal()">Close</button>
+        <button type="button" class="btn-primary-action" (click)="submitProvisionAppAccount()">
+          ✓ Provision &amp; Assign to {{ provisionTargetUser()?.name || 'Employee' }}
         </button>
       </div>
     </div>

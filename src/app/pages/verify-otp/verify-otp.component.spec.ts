@@ -12,6 +12,9 @@ describe('VerifyOtpComponent', () => {
   let authService: AuthService;
 
   beforeEach(async () => {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.clear();
+    }
     await TestBed.configureTestingModule({
       imports: [VerifyOtpComponent],
       providers: [

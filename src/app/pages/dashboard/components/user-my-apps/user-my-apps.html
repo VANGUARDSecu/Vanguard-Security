@@ -937,9 +937,15 @@
                 type="password"
                 [ngModel]="launchCustomPassword()"
                 (ngModelChange)="launchCustomPassword.set($event)"
-                placeholder="••••••••••••"
+                placeholder="Enter application password to auto-fill"
                 class="form-input"
               />
+              <div *ngIf="!launchCustomPassword()" style="font-size: 11px; color: #fbbf24; margin-top: 4px;">
+                ⚠️ Enter password to auto-fill into {{ targetApp.name }}.
+              </div>
+              <div *ngIf="launchCustomPassword()" style="font-size: 11px; color: #34d399; margin-top: 4px;">
+                ✓ Password ready to auto-fill into {{ targetApp.name }}.
+              </div>
             </div>
           </div>
 

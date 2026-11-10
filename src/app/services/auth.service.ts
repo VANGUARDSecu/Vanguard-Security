@@ -818,9 +818,24 @@ export class AuthService {
       );
   }
 
-  enrollTotp(email: string): Observable<{ success: boolean; secret: string; qrImageUrl: string; message: string }> {
+  enrollTotp(friendlyNameOrEmail?: string): Observable<{
+    success: boolean;
+    factorId?: string;
+    secret: string;
+    qrImageUrl?: string;
+    uri?: string;
+    message?: string;
+  }> {
+    const friendlyName = friendlyNameOrEmail || 'Vanguard Authenticator';
     return this.http
-      .post<{ success: boolean; secret: string; qrImageUrl: string; message: string }>(`${this.API_URL}/enroll-totp`, { email })
+      .post<{
+        success: boolean;
+        factorId?: string;
+        secret: string;
+        qrImageUrl?: string;
+        uri?: string;
+        message?: string;
+      }>(`${this.API_URL}/mfa/enroll`, { friendlyName })
       .pipe(
         catchError((error: HttpErrorResponse) => {
           return throwError(() => new Error(error.error?.message || 'Failed to generate Authenticator QR code.'));
@@ -828,9 +843,15 @@ export class AuthService {
       );
   }
 
-  confirmEnrollTotp(email: string, code: string): Observable<{ success: boolean; message: string }> {
+  confirmEnrollTotp(
+    factorIdOrEmail: string,
+    code: string
+  ): Observable<{ success: boolean; message: string; session?: any }> {
     return this.http
-      .post<{ success: boolean; message: string }>(`${this.API_URL}/confirm-totp`, { email, code })
+      .post<{ success: boolean; message: string; session?: any }>(`${this.API_URL}/mfa/confirm`, {
+        factorId: factorIdOrEmail,
+        code: (code || '').trim(),
+      })
       .pipe(
         catchError((error: HttpErrorResponse) => {
           return throwError(() => new Error(error.error?.message || 'Failed to verify Authenticator code.'));

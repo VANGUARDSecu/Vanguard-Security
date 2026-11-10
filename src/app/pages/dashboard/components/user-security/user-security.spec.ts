@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -58,20 +59,22 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
   // 1. TOTP Authenticator Enrollment (RFC 6238)
   // ==========================================
   describe('TOTP Authenticator Enrollment', () => {
-    it('should open TOTP enrollment modal and load QR & secret', () => {
+    it('should open TOTP enrollment modal, load secret, and generate local Base64 QR code', async () => {
       vi.spyOn(authService, 'enrollTotp').mockReturnValue(
         of({
           success: true,
+          factorId: 'factor-test-123',
           secret: 'JBSWY3DPEHPK3PXP',
-          qrImageUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=test',
+          uri: 'otpauth://totp/Vanguard:user@vanguard.security?secret=JBSWY3DPEHPK3PXP&issuer=Vanguard',
           message: 'Scan QR code',
         })
       );
 
-      component.startEnrollTotp();
+      await component.startEnrollTotp();
       expect(component.showEnrollTotpModal()).toBe(true);
       expect(component.totpSecret()).toBe('JBSWY3DPEHPK3PXP');
-      expect(component.totpQrUrl()).toContain('https://api.qrserver.com');
+      expect(component.totpQrUrl()).toContain('data:image/png;base64');
+      expect(component.formatSecretKey('JBSWY3DPEHPK3PXP')).toBe('JBSW Y3DP EHPK 3PXP');
 
       component.closeEnrollTotpModal();
       expect(component.showEnrollTotpModal()).toBe(false);
@@ -97,7 +100,15 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       expect(localStorage.getItem('vanguard_user_has_totp')).toBe('true');
     });
 
-    it('should allow de-enrolling TOTP authenticator', () => {
+    it('should open and close de-enroll confirmation modal', () => {
+      component.openDeEnrollModal();
+      expect(component.showDeEnrollModal()).toBe(true);
+
+      component.closeDeEnrollModal();
+      expect(component.showDeEnrollModal()).toBe(false);
+    });
+
+    it('should allow de-enrolling TOTP authenticator when factor exists on backend', () => {
       vi.spyOn(authService, 'listMfaFactors').mockReturnValue(of({ success: true, factors: [{ id: 'factor-1', status: 'verified', type: 'totp' }] }));
       vi.spyOn(authService, 'unenrollTotp').mockReturnValue(of({ success: true, message: 'Unenrolled' }));
       component.dashboardService.hasTotpEnrolled.set(true);
@@ -106,6 +117,44 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       component.disableTotp();
       expect(component.hasTotpEnrolled()).toBe(false);
       expect(localStorage.getItem('vanguard_user_has_totp')).toBe('false');
+    });
+
+    it('should reliably de-enroll even when backend reports zero factors (fixing stuck enrolled bug)', () => {
+      vi.spyOn(authService, 'listMfaFactors').mockReturnValue(of({ success: true, factors: [] }));
+      component.dashboardService.hasTotpEnrolled.set(true);
+      expect(component.hasTotpEnrolled()).toBe(true);
+
+      component.disableTotp();
+      expect(component.hasTotpEnrolled()).toBe(false);
+      expect(localStorage.getItem('vanguard_user_has_totp')).toBe('false');
+      expect(component.showDeEnrollModal()).toBe(false);
+    });
+
+    it('should reliably de-enroll when backend returns error or session expired', () => {
+      vi.spyOn(authService, 'listMfaFactors').mockReturnValue(throwError(() => new Error('Unauthorized')));
+      component.dashboardService.hasTotpEnrolled.set(true);
+      expect(component.hasTotpEnrolled()).toBe(true);
+
+      component.disableTotp();
+      expect(component.hasTotpEnrolled()).toBe(false);
+      expect(localStorage.getItem('vanguard_user_has_totp')).toBe('false');
+      expect(component.showDeEnrollModal()).toBe(false);
+    });
+
+    it('should copy secret key and setup URI to clipboard', async () => {
+      const writeTextSpy = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText: writeTextSpy },
+      });
+
+      component.dashboardService.totpSecret.set('JBSWY3DPEHPK3PXP');
+      component.dashboardService.totpUri.set('otpauth://totp/Vanguard?secret=JBSWY3DPEHPK3PXP');
+
+      component.copySecretKey();
+      expect(writeTextSpy).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP');
+
+      component.copySetupUri();
+      expect(writeTextSpy).toHaveBeenCalledWith('otpauth://totp/Vanguard?secret=JBSWY3DPEHPK3PXP');
     });
   });
 

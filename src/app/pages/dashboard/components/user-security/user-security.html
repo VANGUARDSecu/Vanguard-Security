@@ -25,7 +25,7 @@
         <button type="button" class="btn-sec-action" (click)="startEnrollTotp()">
           {{ hasTotpEnrolled() ? 'Reconfigure Authenticator' : 'Enroll Authenticator App' }}
         </button>
-        <button type="button" class="btn-ghost-danger-sm" *ngIf="hasTotpEnrolled()" (click)="disableTotp()">
+        <button type="button" class="btn-ghost-danger-sm" *ngIf="hasTotpEnrolled()" (click)="openDeEnrollModal()">
           De-enroll
         </button>
       </div>
@@ -343,38 +343,82 @@
 </section>
 
 <!-- ========================================================================
-     MODAL: CONFIGURE AUTHENTICATOR APP (TOTP)
+     MODAL: CONFIGURE AUTHENTICATOR APP (TOTP) (SCRUM-181)
      ======================================================================== -->
 <div class="modal-backdrop" *ngIf="showEnrollTotpModal()">
-  <div class="modal-card">
+  <div class="modal-card modal-card-totp">
     <div class="modal-header">
-      <h3 class="modal-title">Configure Authenticator App (TOTP)</h3>
+      <div class="modal-header-meta">
+        <h3 class="modal-title">Pair Authenticator App</h3>
+        <span class="badge badge-accent">RFC 6238 Standard</span>
+      </div>
       <button type="button" class="modal-close-btn" (click)="closeEnrollTotpModal()">✕</button>
     </div>
 
     <div class="modal-body qr-modal-body">
       <p class="modal-desc">
-        Scan this QR code with <strong>Google Authenticator</strong>, <strong>JumpCloud Protect</strong>, or <strong>Microsoft Authenticator</strong>:
+        Scan this QR code with <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, <strong>1Password</strong>, <strong>Bitwarden</strong>, or any standard TOTP authenticator app:
       </p>
 
-      <div class="qr-container" *ngIf="totpQrUrl()">
-        <img [src]="totpQrUrl()" alt="Authenticator QR Code" class="qr-img" />
+      <!-- Local QR Code Rendering & Loading State -->
+      <div class="qr-preview-wrapper">
+        <div class="qr-loading-spinner" *ngIf="isGeneratingTotpQr()">
+          <div class="spinner-sm"></div>
+          <span>Generating QR code...</span>
+        </div>
+
+        <div class="qr-container" *ngIf="!isGeneratingTotpQr() && totpQrUrl()">
+          <img [src]="totpQrUrl()" alt="Authenticator QR Code" class="qr-img" />
+        </div>
       </div>
 
+      <!-- Secret Key & 1-Click Clipboard Actions -->
       <div class="secret-box" *ngIf="totpSecret()">
-        <span class="secret-label">Manual Secret Key:</span>
-        <code class="secret-code">{{ totpSecret() }}</code>
+        <div class="secret-header-row">
+          <span class="secret-label">Manual Setup Secret:</span>
+          <div class="secret-btn-group">
+            <button
+              type="button"
+              class="btn-copy-chip"
+              (click)="copySecretKey()"
+              [class.btn-copied]="copiedSecret()"
+              title="Copy secret key to clipboard"
+            >
+              {{ copiedSecret() ? '✓ Key Copied' : '📋 Copy Key' }}
+            </button>
+            <button
+              type="button"
+              class="btn-copy-chip"
+              *ngIf="totpUri()"
+              (click)="copySetupUri()"
+              [class.btn-copied]="copiedUri()"
+              title="Copy otpauth:// URI to clipboard"
+            >
+              {{ copiedUri() ? '✓ URI Copied' : '🔗 Copy URI' }}
+            </button>
+          </div>
+        </div>
+        <code class="secret-code">{{ formatSecretKey(totpSecret()) }}</code>
+        <span class="secret-hint">If your camera cannot scan, paste this key or URI into your authenticator app.</span>
       </div>
 
+      <!-- 6-Digit Verification Code -->
       <div class="verify-step-box">
-        <label class="form-label">Enter 6-digit code from authenticator app:</label>
-        <input
-          type="text"
-          [(ngModel)]="totpVerifyCode"
-          placeholder="e.g. 123456"
-          maxlength="6"
-          class="form-input totp-input"
-        />
+        <label class="form-label" for="totpVerifyInput">Enter 6-digit verification code from authenticator app:</label>
+        <div class="totp-input-wrapper">
+          <input
+            id="totpVerifyInput"
+            type="text"
+            [(ngModel)]="totpVerifyCode"
+            (keyup.enter)="confirmEnrollTotp()"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            placeholder="000000"
+            maxlength="6"
+            class="form-input totp-input"
+            autocomplete="one-time-code"
+          />
+        </div>
       </div>
 
       <div class="form-error-text" *ngIf="totpEnrollError()">
@@ -386,8 +430,53 @@
     </div>
 
     <div class="modal-footer">
-      <button type="button" class="btn-ghost" (click)="closeEnrollTotpModal()">Cancel</button>
-      <button type="button" class="btn-primary-action" (click)="confirmEnrollTotp()">Verify & Save</button>
+      <button type="button" class="btn-ghost" (click)="closeEnrollTotpModal()" [disabled]="isConfirmingTotp()">Cancel</button>
+      <button
+        type="button"
+        class="btn-primary-action"
+        (click)="confirmEnrollTotp()"
+        [disabled]="isConfirmingTotp() || !totpVerifyCode.trim()"
+      >
+        <span *ngIf="!isConfirmingTotp()">Verify &amp; Activate</span>
+        <span *ngIf="isConfirmingTotp()">Verifying Code...</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================
+     MODAL: CONFIRM DE-ENROLL TOTP AUTHENTICATOR (SCRUM-181)
+     ======================================================================== -->
+<div class="modal-backdrop" *ngIf="showDeEnrollModal()">
+  <div class="modal-card modal-card-sm modal-danger">
+    <div class="modal-header">
+      <div class="modal-header-meta">
+        <h3 class="modal-title">De-enroll Authenticator App</h3>
+        <span class="badge badge-orange">MFA Revocation</span>
+      </div>
+      <button type="button" class="modal-close-btn" (click)="closeDeEnrollModal()" [disabled]="isDeEnrollingTotp()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="de-enroll-warning-box">
+        <span class="warning-icon">⚠️</span>
+        <div class="warning-text">
+          <p class="warning-title">Are you sure you want to de-enroll your Authenticator App?</p>
+          <p class="warning-desc">
+            This will remove the TOTP factor from your account. You will no longer be prompted for authenticator codes when accessing sensitive resources. You can re-enroll at any time.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" (click)="closeDeEnrollModal()" [disabled]="isDeEnrollingTotp()">
+        Keep Authenticator
+      </button>
+      <button type="button" class="btn-danger-action" (click)="disableTotp()" [disabled]="isDeEnrollingTotp()">
+        <span *ngIf="!isDeEnrollingTotp()">Yes, De-enroll</span>
+        <span *ngIf="isDeEnrollingTotp()">Removing Factor...</span>
+      </button>
     </div>
   </div>
 </div>

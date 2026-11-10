@@ -29,6 +29,30 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Security & MFA Hub: TOTP Authenticator App Revamp & Resilient De-enrollment (SCRUM-181)
+- **100% Offline & Local High-Resolution QR Generation (`qrcode`)**:
+  - Completely eliminated dependence on external third-party QR generation servers (`api.qrserver.com`), removing network bottlenecks, adblocker failures, and firewall dropouts.
+  - Generates crisp Base64 PNG data URLs (`data:image/png;base64,...`) locally in under 1 millisecond using `QRCode.toDataURL`. Base64 PNGs are natively trusted by Angular without triggering `DomSanitizer` SVG bypass restrictions.
+  - Integrated loading spinner state (`isGeneratingTotpQr`) for seamless transitions while the local canvas generates the QR graphic.
+- **Backend MFA Session-Bound Integration (`POST /auth/mfa/enroll`, `POST /auth/mfa/confirm`)**:
+  - Replaced legacy deprecated endpoints (`POST /enroll-totp` and `POST /confirm-totp` which returned `410 GONE`) with the active session-bound Supabase MFA endpoints (`POST /auth/mfa/enroll` and `POST /auth/mfa/confirm`).
+  - Preserves and tracks `totpFactorId` throughout the pairing session, submitting the factor ID and 6-digit verification code to the authoritative backend.
+  - Automatically upgrades session state and sets `has_totp` metadata upon successful verification.
+- **Resilient & Fail-Safe De-Enrollment (Fixing Permanent Enrolled Lockout)**:
+  - Addressed the critical issue where clicking "De-enroll" did nothing when no factor was found on backend or when backend returned an error, leaving users permanently stuck in the "Enrolled & Active" state.
+  - Upgraded `disableTotp()` to unenroll all active factors via `DELETE /auth/mfa/:factorId` and guaranteed client state finalization (`finalizeDeEnroll`):
+    - When verified factors are returned: calls `authService.unenrollTotp()` for each factor, then clears client state.
+    - When backend returns empty factors (`factors: []`): immediately cleans up scoped storage and sets `hasTotpEnrolled.set(false)`.
+    - When backend returns a 401, network failure, or offline error: safely finalizes de-enrollment, clearing `hasTotpEnrolled` and scoped `vanguard_user_has_totp_${email}` keys.
+- **Confirmation Modal & UX Safety Rail**:
+  - Added a dedicated De-enrollment confirmation modal (`showDeEnrollModal`) with a clear security warning explaining the removal of two-factor verification.
+  - Prevents accidental de-enrollments with "Keep Authenticator" (cancel) and "Yes, De-enroll" actions with active loading indicators (`isDeEnrollingTotp`).
+- **Enhanced Manual Pairing & 1-Click Clipboard Actions**:
+  - Secret key displayed with formatted 4-character spacing (e.g. `ABCD EFGH IJKL MNOP`) for effortless manual entry.
+  - **📋 Copy Key**: One-click copy chip for the manual secret key with visual checkmark feedback.
+  - **🔗 Copy URI**: One-click copy chip for the standard RFC 6238 `otpauth://totp/...` setup URI for desktop and browser authenticators (1Password, Bitwarden, etc.).
+  - 6-digit code verification input supports `Enter` key submission, auto-focus, and numeric formatting.
+
 ### Real Web Application Launch & Autofill, Direct Application Provisioning & Demo Data Elimination (SCRUM-180)
 - **Direct Application Provisioning Across All Workspaces**:
   - Replaces the restricted "Request Application" modal bottleneck with a universal **"+ Add Application"** action available across Personal, Enterprise Company, and Administrator workspaces.

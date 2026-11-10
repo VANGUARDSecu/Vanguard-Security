@@ -53,11 +53,14 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 - **Universal 3rd-Party Authenticator Compatibility**:
   - Full RFC 6238 / RFC 4226 TOTP engine for any external application (**GitHub, Google, Microsoft, AWS, Discord, Cloudflare, Binance, Bitwarden**, etc.).
   - Generates standard 6-digit or 8-digit rolling one-time passwords with real-time countdown progress bar.
-- **Multi-Tier Webcam & Image QR Scanner Engine**:
-  - Employs a multi-tier scanning architecture:
+- **Drag-and-Drop & Clipboard Screenshot Paste QR Uploader**:
+  - Completely replaced the webcam scanner with a flexible, privacy-friendly multi-modal QR uploader:
+    - **Clipboard Screenshot Paste (`Ctrl + V`)**: Users can capture a screenshot of any 2FA QR code (e.g. using Windows Snipping Tool, `Win + Shift + S`, or macOS `Cmd + Shift + 4`), click into or focus the modal, and press `Ctrl + V`. The raw clipboard bitmap image is intercepted and processed immediately.
+    - **Interactive Drag & Drop**: Dedicated cyberpunk dropzone with animated hover and `dragover` states. Users can drag image files (`.png`, `.jpg`, `.webp`) straight from their file explorer or desktop into the browser.
+    - **One-Click File Browser**: Accessible file picker trigger for selecting image files from local storage.
+  - **Multi-Tier Decoding Engine**:
     1. **Native Chromium `BarcodeDetector`**: Leverages hardware-accelerated OS/browser barcode detection when available for near-instant QR recognition with strong tolerance for screen glare and angle skew.
-    2. **Multi-Pass `jsQR` Decoding**: Runs standard full-resolution pass, downsampled scaling pass (max 800px width for high-DPI desktop screenshots and monitor photos), center-crop targeting pass (focusing on the scanning reticle), and binarized high-contrast luminance thresholding pass.
-  - **Universal Camera Constraints & Layout Handshake**: Uses `{ ideal: 'environment' }` with graceful fallback to `{ video: true }` so desktop/laptop front-facing webcams and USB webcams start reliably without `OverconstrainedError`. Scanner viewport displays immediately during stream initialization to prevent zero-size canvas dimensions.
+    2. **Multi-Pass `jsQR` Decoding**: Runs standard full-resolution pass, downsampled scaling pass (max 800px width for high-DPI desktop screenshots and monitor photos), center-crop targeting pass, and binarized high-contrast luminance thresholding pass.
 - **Contained Card Box Layout & Overflow Prevention**:
   - Wrapped all card action buttons (`📷 QR`, `🔗 URI`, `✎`, and `✕`) in a dedicated `.card-actions` flex container.
   - Applied `box-sizing: border-box`, `overflow: hidden`, and flex-shrink containment with text ellipsis (`text-overflow: ellipsis`) across account titles and identifiers, ensuring the **Revoke 2FA Account** button stays strictly inside the card boundary.

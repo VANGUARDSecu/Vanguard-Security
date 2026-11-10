@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, OnDestroy, ViewChild, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -18,7 +18,7 @@ export interface AuthenticatorPreset {
   templateUrl: './user-authenticator.html',
   styleUrl: './user-authenticator.css',
 })
-export class UserAuthenticator implements OnDestroy {
+export class UserAuthenticator {
   readonly dashboardService = inject(DashboardService);
 
   readonly totpAccounts = this.dashboardService.totpAccounts;
@@ -84,18 +84,10 @@ export class UserAuthenticator implements OnDestroy {
   readonly formErrorMessage = signal<string | null>(null);
   readonly formSuccessMessage = signal<string | null>(null);
 
-  // Camera / QR Scanner state
-  @ViewChild('qrVideo') qrVideoRef?: ElementRef<HTMLVideoElement>;
-  readonly isCameraActive = signal<boolean>(false);
-  readonly isCameraLoading = signal<boolean>(false);
-  private cameraStream: MediaStream | null = null;
-  private scanFrameId: number | null = null;
-  private scanCanvas: HTMLCanvasElement | null = null;
+  // Drag & Drop / Clipboard Paste QR Uploader state
+  readonly isDraggingOver = signal<boolean>(false);
+  readonly isDecodingQr = signal<boolean>(false);
   private barcodeDetector: any = null;
-
-  ngOnDestroy(): void {
-    this.stopCameraScan();
-  }
 
   openAddModal(mode: 'manual' | 'uri' | 'qr' = 'manual'): void {
     this.editingAccountId.set(null);
@@ -130,7 +122,8 @@ export class UserAuthenticator implements OnDestroy {
   }
 
   closeAddModal(): void {
-    this.stopCameraScan();
+    this.isDraggingOver.set(false);
+    this.isDecodingQr.set(false);
     this.showAddModal.set(false);
     this.editingAccountId.set(null);
     this.previewCode.set(null);
@@ -363,23 +356,21 @@ export class UserAuthenticator implements OnDestroy {
   }
 
   handleQrScanSuccess(rawData: string): void {
-    this.stopCameraScan();
     this.formOtpAuthUri = rawData;
     if (this.applyOtpAuthUri(rawData)) {
       this.enrollMode.set('manual');
       this.formSuccessMessage.set(
-        `Successfully scanned 2FA QR code for ${this.formIssuer || 'application'}!`
+        `Successfully decoded 2FA QR code for ${this.formIssuer || 'application'}!`
       );
     }
   }
 
-  async onQrFileSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input?.files?.[0];
+  async processQrImageFile(file: File): Promise<void> {
     if (!file) return;
 
     this.formErrorMessage.set(null);
     this.formSuccessMessage.set(null);
+    this.isDecodingQr.set(true);
 
     try {
       const objectUrl = URL.createObjectURL(file);
@@ -397,136 +388,97 @@ export class UserAuthenticator implements OnDestroy {
       const rawData = await this.decodeQrImage(img, width, height);
       URL.revokeObjectURL(objectUrl);
 
+      this.isDecodingQr.set(false);
+
       if (rawData) {
         this.handleQrScanSuccess(rawData);
       } else {
         this.formErrorMessage.set(
-          'No QR code detected in this image. Please ensure the QR code is clearly visible and not blurry, or enter the secret key manually.'
+          'No 2FA QR code detected in this image. Please ensure the QR code is clearly visible and not blurry, or enter the secret key manually.'
         );
       }
     } catch (err: any) {
+      this.isDecodingQr.set(false);
       this.formErrorMessage.set(
         err?.message || 'Unable to decode QR image. Please paste the secret key manually.'
       );
     }
   }
 
-  async startCameraScan(videoEl?: HTMLVideoElement): Promise<void> {
-    this.stopCameraScan();
-    this.formErrorMessage.set(null);
-    this.formSuccessMessage.set(null);
+  async onQrFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input?.files?.[0];
+    if (!file) return;
+    await this.processQrImageFile(file);
+    input.value = '';
+  }
 
-    const videoElement = videoEl || this.qrVideoRef?.nativeElement;
-    if (!videoElement) {
-      this.formErrorMessage.set('Webcam video display element is not ready.');
-      return;
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
     }
+    this.isDraggingOver.set(true);
+  }
 
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      this.formErrorMessage.set('Webcam camera access is not supported in this browser environment.');
-      return;
-    }
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingOver.set(false);
+  }
 
-    this.isCameraLoading.set(true);
+  async onDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingOver.set(false);
 
-    try {
-      try {
-        this.cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
-          },
-        });
-      } catch {
-        this.cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
-      }
-
-      videoElement.srcObject = this.cameraStream;
-      videoElement.setAttribute('playsinline', 'true');
-      videoElement.muted = true;
-      await videoElement.play();
-
-      this.isCameraLoading.set(false);
-      this.isCameraActive.set(true);
-
-      const scanLoop = async () => {
-        if (!this.isCameraActive()) return;
-
-        try {
-          if (
-            videoElement.readyState >= (videoElement.HAVE_CURRENT_DATA || 2) &&
-            videoElement.videoWidth > 0 &&
-            videoElement.videoHeight > 0
-          ) {
-            // First check native BarcodeDetector if available
-            if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-              try {
-                if (!this.barcodeDetector) {
-                  this.barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-                }
-                const barcodes = await this.barcodeDetector.detect(videoElement);
-                if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
-                  this.handleQrScanSuccess(barcodes[0].rawValue);
-                  return;
-                }
-              } catch {}
-            }
-
-            // Fallback to multi-tier canvas decoding
-            if (!this.scanCanvas) {
-              this.scanCanvas = document.createElement('canvas');
-            }
-            const canvas = this.scanCanvas;
-            canvas.width = videoElement.videoWidth;
-            canvas.height = videoElement.videoHeight;
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            if (ctx) {
-              ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-              const rawData = await this.decodeQrImage(canvas, canvas.width, canvas.height);
-              if (rawData) {
-                this.handleQrScanSuccess(rawData);
-                return;
-              }
-            }
-          }
-        } catch {}
-
-        if (this.isCameraActive()) {
-          this.scanFrameId = requestAnimationFrame(scanLoop);
-        }
-      };
-
-      this.scanFrameId = requestAnimationFrame(scanLoop);
-    } catch (err: any) {
-      this.isCameraLoading.set(false);
-      this.isCameraActive.set(false);
-      const name = err?.name || '';
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        this.formErrorMessage.set(
-          'Camera permission denied. Please allow camera access in your browser or paste the secret key manually.'
-        );
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        this.formErrorMessage.set('No webcam device found on this system. Please enter the secret key manually.');
-      } else {
-        this.formErrorMessage.set('Could not initialize camera. Please paste the secret key manually.');
-      }
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      await this.processQrImageFile(file);
     }
   }
 
-  stopCameraScan(): void {
-    if (this.scanFrameId !== null && typeof cancelAnimationFrame !== 'undefined') {
-      cancelAnimationFrame(this.scanFrameId);
-      this.scanFrameId = null;
+  @HostListener('window:paste', ['$event'])
+  async onGlobalPaste(event: ClipboardEvent): Promise<void> {
+    // Only intercept paste when Add/Enroll modal is open and in QR mode
+    if (!this.showAddModal() || this.enrollMode() !== 'qr') {
+      return;
     }
-    if (this.cameraStream) {
-      this.cameraStream.getTracks().forEach((t) => t.stop());
-      this.cameraStream = null;
+    await this.handleClipboardEvent(event);
+  }
+
+  async handleClipboardEvent(event: ClipboardEvent): Promise<void> {
+    const items = event.clipboardData?.items;
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf('image') !== -1 || item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) {
+            event.preventDefault();
+            event.stopPropagation();
+            await this.processQrImageFile(file);
+            return;
+          }
+        }
+      }
     }
-    this.isCameraActive.set(false);
-    this.isCameraLoading.set(false);
+
+    // Also check if text was pasted in QR mode that is an otpauth:// URI or Base32 secret
+    const text = event.clipboardData?.getData('text')?.trim();
+    if (text && (text.toLowerCase().startsWith('otpauth:') || /^[A-Z2-7\s\-:]{16,}$/i.test(text))) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (text.toLowerCase().startsWith('otpauth:')) {
+        this.handleQrScanSuccess(text);
+      } else {
+        this.formSecret = text;
+        this.enrollMode.set('manual');
+        this.updatePreviewCode();
+        this.formSuccessMessage.set('Pasted 2FA secret key from clipboard!');
+      }
+    }
   }
 
   formatCode(code?: string): string {

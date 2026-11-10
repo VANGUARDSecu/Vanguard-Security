@@ -10,9 +10,9 @@
           </svg>
         </div>
         <div>
-          <h1 class="hero-heading">3rd-Party 2FA Authenticator Vault</h1>
+          <h1 class="hero-heading">2FA Authenticator Vault</h1>
           <p class="hero-subtitle">
-            Google Authenticator-compatible RFC 6238 TOTP generator for external apps (Google, GitHub, Facebook, Figma, AWS, Discord, and more).
+            Google Authenticator & RFC 6238-compatible one-time password generator for GitHub, Google, Microsoft, AWS, Discord, and all 3rd-party applications.
           </p>
         </div>
       </div>
@@ -27,12 +27,8 @@
         <span class="timer-label">Rolling Refresh</span>
       </div>
 
-      <button type="button" class="btn-cyber-primary" (click)="generateInstantTestAccount('Google')" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
-        <span>⚡ Instant Test 2FA Account</span>
-      </button>
-
       <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')" style="padding: 10px 14px; border-radius: 10px;">
-        <span>📷 Scan QR / URI</span>
+        <span>📷 Scan QR / Upload</span>
       </button>
 
       <button type="button" class="btn-cyber-primary" (click)="openAddModal('manual')">
@@ -54,28 +50,17 @@
     ></div>
   </div>
 
-  <!-- Search Bar & Quick Add Service Presets (SCRUM-166) -->
+  <!-- Search Bar -->
   <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 16px 0;">
     <div style="flex: 1; min-width: 240px;">
       <input
         type="text"
         [ngModel]="searchQuery()"
         (ngModelChange)="searchQuery.set($event)"
-        placeholder="Search 2FA accounts by service (e.g. Google, GitHub, Figma) or email..."
+        placeholder="Search 2FA accounts by application (e.g. GitHub, Google, AWS) or email..."
         class="cyber-input"
         style="width: 100%;"
       />
-    </div>
-    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-      <span style="font-size: 12px; color: #94a3b8; margin-right: 4px;">Quick Enroll:</span>
-      <button
-        *ngFor="let preset of servicePresets"
-        type="button"
-        (click)="openAddModal('manual'); selectPreset(preset)"
-        style="padding: 6px 10px; border-radius: 8px; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); color: #e2e8f0; font-size: 12px; cursor: pointer;"
-      >
-        {{ preset.icon }} {{ preset.issuer }}
-      </button>
     </div>
   </div>
 
@@ -90,13 +75,10 @@
       </div>
       <h3 class="empty-title">No 2FA accounts registered</h3>
       <p class="empty-desc">
-        Use Vanguard as your 3rd-party authenticator (just like Google Authenticator) for Google, GitHub, Facebook, Figma, AWS, or any TOTP-enabled application. Scan a QR code, paste an <code>otpauth://</code> URI, or enter a Base32 secret key.
+        Use Vanguard as your 2FA authenticator for GitHub, Google, Microsoft, AWS, Discord, or any application. Scan the QR code with your webcam, upload a QR screenshot, or enter the setup key.
       </p>
       <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-        <button type="button" class="btn-cyber-primary" (click)="generateInstantTestAccount('Google')" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.45); color: #34d399;">
-          ⚡ Generate Instant Test 2FA Account
-        </button>
-        <button type="button" class="btn-cyber-secondary" (click)="openAddModal('qr')">
+        <button type="button" class="btn-cyber-primary" (click)="openAddModal('qr')">
           📷 Scan / Upload QR Code
         </button>
         <button type="button" class="btn-cyber-secondary" (click)="openAddModal('manual')">
@@ -204,14 +186,23 @@
     <div class="modal-box cyber-modal" style="max-width: 560px;">
       <div class="modal-header">
         <h2 class="modal-heading">
-          {{ editingAccountId() ? 'Edit 2FA Authenticator Account' : 'Add 3rd-Party Authenticator Account' }}
+          {{ editingAccountId() ? 'Edit 2FA Authenticator Account' : 'Add 2FA Authenticator Account' }}
         </h2>
         <button type="button" class="modal-close-btn" (click)="closeAddModal()">✕</button>
       </div>
 
       <div class="modal-body">
         <!-- Enrollment Mode Tabs -->
-        <div *ngIf="!editingAccountId()" style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <div *ngIf="!editingAccountId()" style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <button
+            type="button"
+            (click)="enrollMode.set('qr')"
+            [style.background]="enrollMode() === 'qr' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(15, 23, 42, 0.6)'"
+            [style.borderColor]="enrollMode() === 'qr' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
+            style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
+          >
+            📷 Scan / Upload QR
+          </button>
           <button
             type="button"
             (click)="enrollMode.set('manual')"
@@ -219,7 +210,7 @@
             [style.borderColor]="enrollMode() === 'manual' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
             style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
           >
-            ⌨️ Manual Key
+            ⌨️ Manual Setup Key
           </button>
           <button
             type="button"
@@ -230,75 +221,75 @@
           >
             🔗 Paste otpauth:// URI
           </button>
-          <button
-            type="button"
-            (click)="enrollMode.set('qr')"
-            [style.background]="enrollMode() === 'qr' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(15, 23, 42, 0.6)'"
-            [style.borderColor]="enrollMode() === 'qr' ? '#3b82f6' : 'rgba(148, 163, 184, 0.2)'"
-            style="flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid; color: #f8fafc; font-size: 12px; font-weight: 600; cursor: pointer;"
-          >
-            📷 Scan / Upload QR
-          </button>
         </div>
 
         <div class="alert-error" *ngIf="formErrorMessage()">
           {{ formErrorMessage() }}
         </div>
-        <div *ngIf="formSuccessMessage()" style="padding: 10px 12px; margin-bottom: 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 12px;">
+        <div *ngIf="formSuccessMessage()" style="padding: 10px 12px; margin-bottom: 12px; border-radius: 8px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 12px;">
           {{ formSuccessMessage() }}
         </div>
 
-        <!-- TAB 2: PASTE OTPAUTH URI -->
-        <div *ngIf="enrollMode() === 'uri'" class="form-group" style="margin-bottom: 16px;">
-          <label class="form-label">Google Authenticator / TOTP URI (otpauth://totp/...)</label>
-          <div style="display: flex; gap: 8px;">
-            <input
-              type="text"
-              [(ngModel)]="formOtpAuthUri"
-              placeholder="otpauth://totp/GitHub:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"
-              class="cyber-input font-mono"
-              style="flex: 1;"
-            />
-            <button type="button" class="btn-cyber-secondary" (click)="applyOtpAuthUri()">
-              Parse URI
-            </button>
-          </div>
-          <span class="form-hint">Paste any standard <code>otpauth://totp/</code> link to auto-fill service, account, secret, and algorithm.</span>
-        </div>
-
-        <!-- TAB 3: SCAN / UPLOAD QR IMAGE -->
-        <div *ngIf="enrollMode() === 'qr'" style="margin-bottom: 16px; padding: 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.65); border: 1px dashed rgba(59, 130, 246, 0.45);">
-          <label class="form-label" style="display: block; margin-bottom: 8px;">Upload 2FA QR Code Image or Screenshot</label>
+        <!-- TAB 1: SCAN / UPLOAD QR IMAGE -->
+        <div *ngIf="enrollMode() === 'qr'" style="margin-bottom: 14px; padding: 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.65); border: 1px dashed rgba(59, 130, 246, 0.45);">
+          <label class="form-label" style="display: block; margin-bottom: 8px; font-weight: 600;">Upload 2FA QR Code Image / Screenshot</label>
           <input
             type="file"
             accept="image/*"
             (change)="onQrFileSelected($event)"
             class="cyber-input"
-            style="width: 100%; margin-bottom: 10px;"
+            style="width: 100%; margin-bottom: 12px;"
           />
-          <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
-            <button type="button" class="btn-cyber-secondary" (click)="startCameraScan(qrVideo)" *ngIf="!isCameraActive()">
-              📷 Start Webcam QR Scanner
+
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn-cyber-primary" (click)="startCameraScan()" *ngIf="!isCameraActive()">
+              📷 {{ isCameraLoading() ? 'Connecting Webcam...' : 'Start Webcam QR Scanner' }}
             </button>
             <button type="button" class="btn-cyber-secondary" (click)="stopCameraScan()" *ngIf="isCameraActive()">
               ⏹ Stop Webcam
             </button>
-            <button type="button" class="btn-cyber-secondary" (click)="loadSampleQrUri()" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
-              ⚡ Load Sample 2FA QR Data
-            </button>
           </div>
-          <video
-            #qrVideo
-            [style.display]="isCameraActive() ? 'block' : 'none'"
-            style="width: 100%; max-height: 220px; margin-top: 10px; border-radius: 8px; background: #000;"
-            muted
-            playsinline
-          ></video>
+
+          <!-- Video Viewport with Targeting Overlay -->
+          <div class="scanner-viewport-box" [style.display]="isCameraActive() ? 'flex' : 'none'">
+            <video
+              #qrVideo
+              class="scanner-video"
+              muted
+              playsinline
+            ></video>
+            <div class="scanner-overlay">
+              <div class="scanner-reticle">
+                <div class="scanner-laser"></div>
+              </div>
+            </div>
+          </div>
+          <span class="form-hint" *ngIf="isCameraActive()" style="display: block; margin-top: 8px; text-align: center; color: #38bdf8;">
+            Point your webcam at the 2FA QR code displayed on your screen.
+          </span>
         </div>
 
-        <!-- Preset Pills -->
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label class="form-label">Popular 3rd-Party Services (Click to Auto-Fill Preset & Sample Key)</label>
+        <!-- TAB 2: PASTE OTPAUTH URI -->
+        <div *ngIf="enrollMode() === 'uri'" class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label">Authenticator URI (otpauth://totp/...)</label>
+          <div style="display: flex; gap: 8px;">
+            <input
+              type="text"
+              [(ngModel)]="formOtpAuthUri"
+              placeholder="otpauth://totp/GitHub:octocat?secret=...&issuer=GitHub"
+              class="cyber-input font-mono"
+              style="flex: 1;"
+            />
+            <button type="button" class="btn-cyber-secondary" (click)="applyOtpAuthUri()">
+              Parse
+            </button>
+          </div>
+          <span class="form-hint">Paste standard <code>otpauth://totp/</code> link to auto-fill service, account identifier, and secret key.</span>
+        </div>
+
+        <!-- Quick Select Preset Names (Optional shortcut for common issuers) -->
+        <div class="form-group" style="margin-bottom: 10px;">
+          <label class="form-label">Select Service / Issuer (Optional)</label>
           <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button
               *ngFor="let preset of servicePresets"
@@ -317,7 +308,7 @@
           <input
             type="text"
             [(ngModel)]="formIssuer"
-            placeholder="e.g. Google, GitHub, Facebook, Figma, AWS"
+            placeholder="e.g. GitHub, Google, Microsoft, AWS, Discord"
             class="cyber-input"
           />
         </div>
@@ -327,7 +318,7 @@
           <input
             type="text"
             [(ngModel)]="formAccountName"
-            placeholder="e.g. user@example.com or username"
+            placeholder="e.g. username or user@example.com"
             class="cyber-input"
           />
         </div>
@@ -337,32 +328,41 @@
           <input
             type="text"
             [(ngModel)]="formSecret"
-            placeholder="e.g. JBSWY3DPEHPK3PXP"
+            (ngModelChange)="updatePreviewCode()"
+            placeholder="Paste setup key (e.g. HXDM VJEC JJWS RB3H ...)"
             class="cyber-input font-mono"
           />
-          <span class="form-hint">Paste the alphanumeric Base32 secret key provided when enabling 2FA on the external application.</span>
+          <span class="form-hint">Paste the setup key or Base32 secret provided by the external application.</span>
+        </div>
+
+        <!-- Live Code Preview (Confirms key validity before saving) -->
+        <div *ngIf="previewCode()" style="padding: 10px 14px; border-radius: 8px; background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.35); display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-size: 12px; color: #94a3b8;">Live Verification Code:</span>
+          <span style="font-size: 18px; font-weight: 800; color: #22d3ee; font-family: monospace; letter-spacing: 0.1em;">
+            {{ formatCode(previewCode()!) }}
+          </span>
         </div>
 
         <!-- Advanced RFC 6238 Parameters (Algorithm, Digits, Period) -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 4px;">
           <div class="form-group">
             <label class="form-label">Digits</label>
-            <select [(ngModel)]="formDigits" class="cyber-input">
+            <select [(ngModel)]="formDigits" (ngModelChange)="updatePreviewCode()" class="cyber-input">
               <option [ngValue]="6">6 Digits (Standard)</option>
               <option [ngValue]="8">8 Digits</option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Hash Algorithm</label>
-            <select [(ngModel)]="formAlgorithm" class="cyber-input">
+            <select [(ngModel)]="formAlgorithm" (ngModelChange)="updatePreviewCode()" class="cyber-input">
               <option value="SHA1">HMAC-SHA1</option>
               <option value="SHA256">HMAC-SHA256</option>
               <option value="SHA512">HMAC-SHA512</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Refresh Period</label>
-            <select [(ngModel)]="formPeriod" class="cyber-input">
+            <label class="form-label">Period</label>
+            <select [(ngModel)]="formPeriod" (ngModelChange)="updatePreviewCode()" class="cyber-input">
               <option [ngValue]="30">30 Seconds</option>
               <option [ngValue]="60">60 Seconds</option>
             </select>
@@ -379,7 +379,7 @@
     </div>
   </div>
 
-  <!-- QR CODE INSPECTOR MODAL (SCRUM-166) -->
+  <!-- QR CODE INSPECTOR MODAL -->
   @if (activeQrViewAccount(); as acc) {
     <div class="modal-backdrop">
       <div class="modal-box cyber-modal" style="max-width: 460px; text-align: center;">

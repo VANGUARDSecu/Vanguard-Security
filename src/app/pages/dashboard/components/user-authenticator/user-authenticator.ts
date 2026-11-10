@@ -1,14 +1,14 @@
-import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
+import { Component, inject, signal, computed, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
 import { TotpAccount } from '../../models/dashboard.models';
-import { base32Decode, parseOtpAuthUri, buildOtpAuthUri } from '../../../../shared/crypto/totp';
+import { base32Decode, parseOtpAuthUri, buildOtpAuthUri, generateTotp } from '../../../../shared/crypto/totp';
+import jsQR from 'jsqr';
 
 export interface AuthenticatorPreset {
   issuer: string;
   icon: string;
-  category: string;
 }
 
 @Component({
@@ -25,19 +25,18 @@ export class UserAuthenticator implements OnDestroy {
   readonly activeTotpAccounts = this.dashboardService.activeTotpAccounts;
   readonly totpSecondsRemaining = this.dashboardService.totpSecondsRemaining;
 
-  // Search & filter state (SCRUM-166: 3rd-Party Authenticator Parity)
+  // Search & filter state
   readonly searchQuery = signal<string>('');
-  readonly selectedCategory = signal<string>('all');
 
   readonly servicePresets: AuthenticatorPreset[] = [
-    { issuer: 'Google', icon: '🔍', category: 'cloud' },
-    { issuer: 'GitHub', icon: '🐙', category: 'developer' },
-    { issuer: 'Facebook', icon: '📘', category: 'social' },
-    { issuer: 'Figma', icon: '🎨', category: 'design' },
-    { issuer: 'AWS', icon: '☁️', category: 'cloud' },
-    { issuer: 'Microsoft', icon: '🪟', category: 'cloud' },
-    { issuer: 'Discord', icon: '💬', category: 'social' },
-    { issuer: 'Cloudflare', icon: '⚡', category: 'developer' },
+    { issuer: 'GitHub', icon: '🐙' },
+    { issuer: 'Google', icon: '🔍' },
+    { issuer: 'Microsoft', icon: '🪟' },
+    { issuer: 'AWS', icon: '☁️' },
+    { issuer: 'Discord', icon: '💬' },
+    { issuer: 'Cloudflare', icon: '⚡' },
+    { issuer: 'Facebook', icon: '📘' },
+    { issuer: 'Binance', icon: '🪙' },
   ];
 
   readonly filteredTotpAccounts = computed<TotpAccount[]>(() => {
@@ -62,8 +61,11 @@ export class UserAuthenticator implements OnDestroy {
 
   // Add / Edit Account Modal
   readonly showAddModal = signal<boolean>(false);
-  readonly enrollMode = signal<'manual' | 'uri' | 'qr'>('qr');
+  readonly enrollMode = signal<'manual' | 'uri' | 'qr'>('manual');
   readonly editingAccountId = signal<string | null>(null);
+
+  // Live preview code for secret validation
+  readonly previewCode = signal<string | null>(null);
 
   // QR Code Inspector Modal State
   readonly activeQrViewAccount = signal<TotpAccount | null>(null);
@@ -80,15 +82,18 @@ export class UserAuthenticator implements OnDestroy {
   readonly formSuccessMessage = signal<string | null>(null);
 
   // Camera / QR Scanner state
+  @ViewChild('qrVideo') qrVideoRef?: ElementRef<HTMLVideoElement>;
   readonly isCameraActive = signal<boolean>(false);
+  readonly isCameraLoading = signal<boolean>(false);
   private cameraStream: MediaStream | null = null;
   private scanFrameId: number | null = null;
+  private scanCanvas: HTMLCanvasElement | null = null;
 
   ngOnDestroy(): void {
     this.stopCameraScan();
   }
 
-  openAddModal(mode: 'manual' | 'uri' | 'qr' = 'qr'): void {
+  openAddModal(mode: 'manual' | 'uri' | 'qr' = 'manual'): void {
     this.editingAccountId.set(null);
     this.enrollMode.set(mode);
     this.formIssuer = '';
@@ -98,6 +103,7 @@ export class UserAuthenticator implements OnDestroy {
     this.formPeriod = 30;
     this.formAlgorithm = 'SHA1';
     this.formOtpAuthUri = '';
+    this.previewCode.set(null);
     this.formErrorMessage.set(null);
     this.formSuccessMessage.set(null);
     this.showAddModal.set(true);
@@ -113,6 +119,7 @@ export class UserAuthenticator implements OnDestroy {
     this.formPeriod = acc.period || 30;
     this.formAlgorithm = acc.algorithm || 'SHA1';
     this.formOtpAuthUri = buildOtpAuthUri(acc);
+    this.updatePreviewCode();
     this.formErrorMessage.set(null);
     this.formSuccessMessage.set(null);
     this.showAddModal.set(true);
@@ -122,6 +129,7 @@ export class UserAuthenticator implements OnDestroy {
     this.stopCameraScan();
     this.showAddModal.set(false);
     this.editingAccountId.set(null);
+    this.previewCode.set(null);
     this.formErrorMessage.set(null);
     this.formSuccessMessage.set(null);
   }
@@ -143,45 +151,56 @@ export class UserAuthenticator implements OnDestroy {
     return buildOtpAuthUri(acc);
   }
 
-  generateInstantTestAccount(serviceName = 'Google'): void {
-    const service = serviceName.trim() || 'Google';
-    const email = `${service.toLowerCase()}.user@vanguard.security`;
-    const secret = 'JBSWY3DPEHPK3PXP'; // RFC 6238 Base32 test secret ("Hello!\xDE\xAD\xBE\xEF")
-    this.dashboardService.addTotpAccount({
-      issuer: service,
-      accountName: email,
-      secret,
-      digits: 6,
-      period: 30,
-      algorithm: 'SHA1',
-    });
-    this.searchQuery.set('');
-  }
-
-  loadSampleQrUri(): void {
-    const sampleUri =
-      'otpauth://totp/Google:user@gmail.com?secret=JBSWY3DPEHPK3PXP&issuer=Google&algorithm=SHA1&digits=6&period=30';
-    this.formOtpAuthUri = sampleUri;
-    this.applyOtpAuthUri(sampleUri);
-  }
-
   selectPreset(preset: AuthenticatorPreset): void {
     this.formIssuer = preset.issuer;
-    this.formAccountName = `${preset.issuer.toLowerCase()}.user@example.com`;
-    this.formSecret = 'JBSWY3DPEHPK3PXP';
-    this.formDigits = 6;
-    this.formPeriod = 30;
-    this.formAlgorithm = 'SHA1';
     this.formErrorMessage.set(null);
     this.formSuccessMessage.set(
-      `Selected ${preset.issuer}! Sample Base32 secret pre-filled. Click "Enroll Authenticator" to add immediately.`
+      `Selected ${preset.issuer}. Enter your account identifier and paste the secret key from ${preset.issuer}.`
     );
+  }
+
+  async updatePreviewCode(): Promise<void> {
+    const rawSecret = this.formSecret.trim();
+    if (!rawSecret) {
+      this.previewCode.set(null);
+      return;
+    }
+
+    // Auto-detect if user pasted otpauth:// URI into secret field
+    if (rawSecret.toLowerCase().startsWith('otpauth:')) {
+      this.applyOtpAuthUri(rawSecret);
+      if (this.formSecret) {
+        try {
+          const code = await generateTotp(this.formSecret, {
+            digits: this.formDigits,
+            period: this.formPeriod,
+            algorithm: this.formAlgorithm,
+          });
+          this.previewCode.set(code);
+        } catch {}
+      }
+      return;
+    }
+
+    const cleanSecret = rawSecret.replace(/[\s\-:_]/g, '').toUpperCase();
+    try {
+      base32Decode(cleanSecret);
+      const code = await generateTotp(cleanSecret, {
+        digits: this.formDigits,
+        period: this.formPeriod,
+        algorithm: this.formAlgorithm,
+      });
+      this.previewCode.set(code);
+      this.formErrorMessage.set(null);
+    } catch {
+      this.previewCode.set(null);
+    }
   }
 
   applyOtpAuthUri(uriInput?: string): boolean {
     const raw = (uriInput ?? this.formOtpAuthUri).trim();
     if (!raw) {
-      this.formErrorMessage.set('Please paste an otpauth://totp/... URI first.');
+      this.formErrorMessage.set('Please enter a secret key or paste an otpauth:// URI.');
       return false;
     }
     try {
@@ -194,11 +213,20 @@ export class UserAuthenticator implements OnDestroy {
       this.formAlgorithm = parsed.algorithm;
       this.formErrorMessage.set(null);
       this.formSuccessMessage.set(
-        `Parsed ${parsed.issuer} (${parsed.accountName}) — ${parsed.digits} digits, ${parsed.algorithm}, ${parsed.period}s period.`
+        `Parsed ${parsed.issuer} (${parsed.accountName}) — ${parsed.digits} digits, ${parsed.algorithm}, ${parsed.period}s.`
       );
+      void generateTotp(parsed.secret, {
+        digits: parsed.digits,
+        period: parsed.period,
+        algorithm: parsed.algorithm,
+      }).then((code) => {
+        this.previewCode.set(code);
+      }).catch(() => {
+        this.previewCode.set(null);
+      });
       return true;
     } catch (err: any) {
-      this.formErrorMessage.set(err?.message || 'Could not parse otpauth:// URI.');
+      this.formErrorMessage.set(err?.message || 'Could not parse URI or secret key.');
       return false;
     }
   }
@@ -212,80 +240,137 @@ export class UserAuthenticator implements OnDestroy {
     this.formSuccessMessage.set(null);
 
     try {
-      // 1. Check if BarcodeDetector API is available in browser (Chrome/Edge/Android/macOS)
-      if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-        const bitmap = await createImageBitmap(file);
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-        const codes = await detector.detect(bitmap);
-        if (codes && codes.length > 0 && codes[0].rawValue) {
-          this.formOtpAuthUri = codes[0].rawValue;
-          if (this.applyOtpAuthUri(codes[0].rawValue)) {
-            this.enrollMode.set('manual');
-            return;
-          }
-        }
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load image file.'));
+        img.src = objectUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(objectUrl);
+        throw new Error('Canvas 2D context unavailable.');
       }
 
-      // 2. Fallback: Check if file text/name or metadata embeds an otpauth URI
-      const text = await file.text().catch(() => '');
-      const match = text.match(/otpauth:\/\/totp\/[^\s"'<>]+/i);
-      if (match) {
-        this.formOtpAuthUri = match[0];
-        if (this.applyOtpAuthUri(match[0])) {
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(objectUrl);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const decodeFn = (jsQR as any)?.default || jsQR;
+      const code = decodeFn(imageData.data, canvas.width, canvas.height, {
+        inversionAttempts: 'attemptBoth',
+      });
+
+      if (code && code.data) {
+        this.formOtpAuthUri = code.data;
+        if (this.applyOtpAuthUri(code.data)) {
           this.enrollMode.set('manual');
-          return;
+          this.formSuccessMessage.set(`Successfully decoded 2FA QR code for ${this.formIssuer}!`);
         }
+      } else {
+        this.formErrorMessage.set(
+          'No QR code detected in this image. Please ensure the QR code is clearly visible and not blurry, or enter the secret key manually.'
+        );
       }
-
+    } catch (err: any) {
       this.formErrorMessage.set(
-        'Could not detect a QR code in this image or browser BarcodeDetector is unsupported. Please paste the otpauth:// URI or Base32 secret key.'
-      );
-    } catch {
-      this.formErrorMessage.set(
-        'Unable to decode QR image. Please paste the otpauth:// URI or Base32 secret key.'
+        err?.message || 'Unable to decode QR image. Please paste the secret key manually.'
       );
     }
   }
 
-  async startCameraScan(videoElement: HTMLVideoElement): Promise<void> {
+  async startCameraScan(videoEl?: HTMLVideoElement): Promise<void> {
+    this.stopCameraScan();
     this.formErrorMessage.set(null);
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      this.formErrorMessage.set('Camera access is not supported in this browser environment.');
+    this.formSuccessMessage.set(null);
+
+    const videoElement = videoEl || this.qrVideoRef?.nativeElement;
+    if (!videoElement) {
+      this.formErrorMessage.set('Webcam video display element is not ready.');
       return;
     }
 
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      this.formErrorMessage.set('Webcam camera access is not supported in this browser environment.');
+      return;
+    }
+
+    this.isCameraLoading.set(true);
+
     try {
       this.cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
       });
+
       videoElement.srcObject = this.cameraStream;
+      videoElement.setAttribute('playsinline', 'true');
       await videoElement.play();
+
+      this.isCameraLoading.set(false);
       this.isCameraActive.set(true);
 
-      if ('BarcodeDetector' in window) {
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
-        const scanLoop = async () => {
-          if (!this.isCameraActive()) return;
-          try {
-            const codes = await detector.detect(videoElement);
-            if (codes && codes.length > 0 && codes[0].rawValue) {
+      if (!this.scanCanvas) {
+        this.scanCanvas = document.createElement('canvas');
+      }
+      const canvas = this.scanCanvas;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const decodeFn = (jsQR as any)?.default || jsQR;
+
+      const scanLoop = () => {
+        if (!this.isCameraActive()) return;
+
+        if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA && videoElement.videoWidth > 0) {
+          canvas.width = videoElement.videoWidth;
+          canvas.height = videoElement.videoHeight;
+
+          if (ctx) {
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = decodeFn(imageData.data, canvas.width, canvas.height, {
+              inversionAttempts: 'attemptBoth',
+            });
+
+            if (code && code.data) {
               this.stopCameraScan();
-              this.formOtpAuthUri = codes[0].rawValue;
-              if (this.applyOtpAuthUri(codes[0].rawValue)) {
+              this.formOtpAuthUri = code.data;
+              if (this.applyOtpAuthUri(code.data)) {
                 this.enrollMode.set('manual');
+                this.formSuccessMessage.set(
+                  `Successfully scanned 2FA QR code for ${this.formIssuer || 'application'}!`
+                );
               }
               return;
             }
-          } catch {}
-          this.scanFrameId = requestAnimationFrame(scanLoop);
-        };
+          }
+        }
+
         this.scanFrameId = requestAnimationFrame(scanLoop);
-      }
-    } catch {
-      this.formErrorMessage.set('Camera permission denied or no camera available.');
+      };
+
+      this.scanFrameId = requestAnimationFrame(scanLoop);
+    } catch (err: any) {
+      this.isCameraLoading.set(false);
       this.isCameraActive.set(false);
+      const name = err?.name || '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        this.formErrorMessage.set(
+          'Camera permission denied. Please allow camera access in your browser or paste the secret key manually.'
+        );
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        this.formErrorMessage.set('No webcam device found on this system. Please enter the secret key manually.');
+      } else {
+        this.formErrorMessage.set('Could not initialize camera. Please paste the secret key manually.');
+      }
     }
   }
 
@@ -299,6 +384,7 @@ export class UserAuthenticator implements OnDestroy {
       this.cameraStream = null;
     }
     this.isCameraActive.set(false);
+    this.isCameraLoading.set(false);
   }
 
   formatCode(code?: string): string {
@@ -348,22 +434,30 @@ export class UserAuthenticator implements OnDestroy {
   }
 
   saveAccount(): void {
+    // If on URI mode, ensure parsed
     if (this.enrollMode() === 'uri' && this.formOtpAuthUri.trim() && !this.formSecret.trim()) {
       if (!this.applyOtpAuthUri(this.formOtpAuthUri)) {
         return;
       }
     }
 
+    // Auto-detect if user pasted otpauth:// URI into secret input field
+    if (this.formSecret.trim().toLowerCase().startsWith('otpauth:')) {
+      if (!this.applyOtpAuthUri(this.formSecret.trim())) {
+        return;
+      }
+    }
+
     const issuer = this.formIssuer.trim();
-    const accountName = this.formAccountName.trim();
-    const secret = this.formSecret.trim().replace(/\s+/g, '').toUpperCase();
+    const accountName = this.formAccountName.trim() || 'Primary Account';
+    const secret = this.formSecret.trim().replace(/[\s\-:_]/g, '').toUpperCase();
 
     if (!issuer) {
-      this.formErrorMessage.set('Service/Issuer name is required.');
+      this.formErrorMessage.set('Service or Application name is required (e.g. GitHub, Google, AWS).');
       return;
     }
     if (!secret) {
-      this.formErrorMessage.set('Secret key is required.');
+      this.formErrorMessage.set('Secret key is required. Paste the setup key from your application.');
       return;
     }
 
@@ -371,7 +465,7 @@ export class UserAuthenticator implements OnDestroy {
       base32Decode(secret);
     } catch {
       this.formErrorMessage.set(
-        'Invalid Base32 secret key. Only letters A-Z and digits 2-7 are allowed.'
+        'Invalid Base32 secret key. Allowed characters are letters A-Z and digits 2-7.'
       );
       return;
     }
@@ -380,7 +474,7 @@ export class UserAuthenticator implements OnDestroy {
     if (editId) {
       this.dashboardService.updateTotpAccount(editId, {
         issuer,
-        accountName: accountName || 'Primary Account',
+        accountName,
         secret,
         digits: this.formDigits,
         period: this.formPeriod,
@@ -389,7 +483,7 @@ export class UserAuthenticator implements OnDestroy {
     } else {
       this.dashboardService.addTotpAccount({
         issuer,
-        accountName: accountName || 'Primary Account',
+        accountName,
         secret,
         digits: this.formDigits,
         period: this.formPeriod,

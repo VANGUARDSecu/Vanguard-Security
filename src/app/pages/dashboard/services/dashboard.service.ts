@@ -2207,11 +2207,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             if (idx !== -1) {
               merged[idx] = {
                 ...merged[idx],
+                name: b.name || merged[idx].name,
                 accountStatus: b.accountStatus,
                 lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : merged[idx].lastLogin),
                 mfaStatus: b.mfaStatus || merged[idx].mfaStatus,
                 role: b.role || merged[idx].role,
                 department: b.department || merged[idx].department,
+                initials: b.initials || merged[idx].initials,
+                invitedAt: b.invitedAt || merged[idx].invitedAt,
+                expiresAt: b.expiresAt || merged[idx].expiresAt,
               };
             } else {
               merged.push({
@@ -6301,18 +6305,36 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
-  // SCRUM-50: TOTP 2FA Authenticator State & Actions (Zero Hardcoded Initial State)
+  // SCRUM-50 & SCRUM-178: TOTP 2FA Authenticator State & Actions
   // ==========================================
+  private getTotpStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim();
+    return email ? `vanguard_user_totp_accounts_${email}` : 'vanguard_user_totp_accounts';
+  }
+
   private initTotpAccounts(): TotpAccount[] {
-    return this.loadStored<TotpAccount[]>('vanguard_user_totp_accounts', []);
+    const userKey = this.getTotpStorageKey();
+    const stored = this.loadStored<TotpAccount[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
+    // Fallback to legacy global key if user key is empty
+    const legacy = this.loadStored<TotpAccount[]>('vanguard_user_totp_accounts', []);
+    return legacy || [];
+  }
+
+  private persistTotpAccounts(): void {
+    const accounts = this.totpAccounts();
+    const key = this.getTotpStorageKey();
+    this.saveStored(key, accounts);
+    this.saveStored('vanguard_user_totp_accounts', accounts);
   }
 
   readonly totpAccounts = signal<TotpAccount[]>(this.initTotpAccounts());
   readonly totpSecondsRemaining = signal<number>(30);
   readonly totpTick = signal<number>(0);
   private totpIntervalId: any = null;
+  private lastTotpStep = Math.floor(Date.now() / 1000 / 30);
 
-  // SCRUM-116: real RFC 6238 codes, computed asynchronously (HMAC-SHA1 is async
+  // SCRUM-116 & SCRUM-178: real RFC 6238 codes, computed asynchronously (HMAC-SHA1 is async
   // via Web Crypto) and cached per account id for synchronous template reads.
   readonly totpCodes = signal<Record<string, string>>({});
 
@@ -6357,14 +6379,17 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   private startTotpTimer(): void {
     if (!this.isBrowser) return;
     if (this.totpIntervalId) clearInterval(this.totpIntervalId);
-    // SCRUM-116: compute real codes once now, then refresh each new 30s window.
     void this.refreshTotpCodes();
 
     const updateTimer = () => {
-      const currentSeconds = Math.floor(Date.now() / 1000) % 30;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const currentSeconds = nowSec % 30;
       const remaining = 30 - currentSeconds;
       this.totpSecondsRemaining.set(remaining);
-      if (remaining === 30 || remaining === 1) {
+
+      const currentStep = Math.floor(nowSec / 30);
+      if (currentStep !== this.lastTotpStep) {
+        this.lastTotpStep = currentStep;
         this.totpTick.update((t) => t + 1);
         void this.refreshTotpCodes();
       }
@@ -6372,6 +6397,28 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     updateTimer();
     this.totpIntervalId = setInterval(updateTimer, 1000);
+
+    // Refresh immediately when window or tab regains focus (prevents tab throttling stale codes)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => {
+        const nowStep = Math.floor(Date.now() / 1000 / 30);
+        if (nowStep !== this.lastTotpStep) {
+          this.lastTotpStep = nowStep;
+          this.totpTick.update((t) => t + 1);
+        }
+        void this.refreshTotpCodes();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          const nowStep = Math.floor(Date.now() / 1000 / 30);
+          if (nowStep !== this.lastTotpStep) {
+            this.lastTotpStep = nowStep;
+            this.totpTick.update((t) => t + 1);
+          }
+          void this.refreshTotpCodes();
+        }
+      });
+    }
   }
 
   addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
@@ -6383,7 +6430,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       id: 'totp-acc-' + Date.now()
     };
     this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     void this.refreshTotpCodes();
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
   }
@@ -6392,7 +6439,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.totpAccounts.update((accounts) =>
       accounts.map((acc) => (acc.id === id ? { ...acc, ...updates } : acc))
     );
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     void this.refreshTotpCodes();
     this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
   }
@@ -6400,7 +6447,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   deleteTotpAccount(id: string): void {
     const acc = this.totpAccounts().find((a) => a.id === id);
     this.totpAccounts.update((accounts) => accounts.filter((a) => a.id !== id));
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     if (acc) {
       this.logAuditEvent(`Removed 2FA Authenticator token: ${acc.issuer}`, 'TOTP Authenticator', 'Revoke', 'success', 'Low');
     }

@@ -29,6 +29,23 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Real Web Application Launch & Autofill, Direct Application Provisioning & Demo Data Elimination (SCRUM-180)
+- **Direct Application Provisioning Across All Workspaces**:
+  - Replaces the restricted "Request Application" modal bottleneck with a universal **"+ Add Application"** action available across Personal, Enterprise Company, and Administrator workspaces.
+  - Users and administrators can directly configure bookmarks and login endpoints for any web service (Figma, Facebook, GitHub, Jira, AWS, Notion, custom portals) without requiring a multi-stage approval queue for personal bookmarks.
+  - Applications added via `DashboardService.addApplication()` are unified across `personalApps` and `apps` signals and displayed immediately on the My Applications launchpad (`activeAppsList`).
+  - Automatically associates assigned credentials into the personal vault (`vaultItems`), linking the target launch URL and title for persistent extension autofill.
+- **Real-World Launch & Extension Autofill Integration**:
+  - Clicking **"Launch & Auto Fill"** initiates zero-trust pre-launch security verification (Master Password / PIN / biometric / 2FA) to decrypt and prepare credentials.
+  - Directs the browser to the real external login URL (e.g., `https://www.facebook.com/login`, `https://www.figma.com/login`, `https://github.com/login`) appended with the encrypted verified launch payload `#vg_autofill=1&vg_u=...&vg_p=...`.
+  - **Instant Clipboard Fallback**: Automatically copies the password to the user's clipboard (`navigator.clipboard.writeText`) on launch, enabling instant `Ctrl + V` pasting if the browser extension is not loaded.
+  - **React-Controlled Input Setter Parity (`extension-vanguard`)**: Modern Single-Page Applications (SPAs) like Facebook, Twitter, and Figma override `HTMLInputElement.prototype.value` getters/setters, causing direct `.value = ...` mutations to be ignored by React's internal state. The extension now uses native property descriptors (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)`) and dispatches bubbling `input`, `change`, and `blur` events so credentials stick into React form state.
+  - **Asynchronous SPA Form Polling**: Injects a polling retry loop (30 attempts × 150ms = 4.5s) in `content.ts` to detect dynamically rendered login inputs (e.g. `#email`, `#pass`, `input[type="password"]`) as soon as the SPA finishes client-side hydration, before wiping the URL hash.
+- **Complete Elimination of Fake / Hardcoded Demo Data**:
+  - Removed all `⚡ Quick Add Demo Apps` buttons from the launchpad header and empty states.
+  - Removed all hardcoded demo accounts (`designer@acme.corp`, `social.lead@acme.corp`, `P@sswordFigma2026!`, `MetaSecure#2026`).
+  - Service presets (Figma, Facebook, GitHub, Notion, Google) now act exclusively as template shortcuts for names and login URLs, leaving username and password fields blank for users to input real credentials.
+
 ### Dynamic Responsive Dashboard & Mobile Navigation Drawer (SCRUM-179)
 - **Viewport Resilience & Minimized Window Layout**:
   - Eliminates all layout breakage, overlapping header elements, and horizontal document overflow when minimizing, restoring, or resizing the browser window down to split-screen, tablet, or mobile viewports ($320\text{px} - 1024\text{px}$).

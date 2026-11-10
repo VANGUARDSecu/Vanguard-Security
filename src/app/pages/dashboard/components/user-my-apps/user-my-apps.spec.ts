@@ -735,5 +735,119 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(dashboardService.personalApps().length).toBe(2);
     });
   });
+
+  // ==========================================================================
+  // SCRUM-180: Direct Application Addition & Real-World Autofill Launch Parity
+  // ==========================================================================
+  describe('SCRUM-180 Direct Application Addition & Demo Elimination', () => {
+    it('opens add app modal regardless of whether workspace is personal or company', () => {
+      // 1. Personal workspace
+      dashboardService.switchWorkspace('personal');
+      component.openAddAppModal();
+      expect(component.showAddPersonalAppModal()).toBe(true);
+      component.closeAddPersonalAppModal();
+      expect(component.showAddPersonalAppModal()).toBe(false);
+
+      // 2. Company workspace
+      authService.currentUser.set({
+        id: 'usr-admin-1',
+        email: 'admin@acme.corp',
+        role: 'admin',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.switchWorkspace('org_root');
+      component.openAddAppModal();
+      expect(component.showAddPersonalAppModal()).toBe(true);
+    });
+
+    it('clears demo passwords when applying service presets (Figma, Facebook, etc.)', () => {
+      component.openAddAppModal();
+      component.applyPreset('facebook');
+      expect(component.newAppName).toBe('Facebook');
+      expect(component.newAppUrl).toBe('https://www.facebook.com/login');
+      // Must not pre-fill hardcoded/fake demo credentials
+      expect(component.newAppUsername).toBe('');
+      expect(component.newAppPassword).toBe('');
+
+      component.applyPreset('figma');
+      expect(component.newAppName).toBe('Figma');
+      expect(component.newAppUsername).toBe('');
+      expect(component.newAppPassword).toBe('');
+    });
+
+    it('provisions added application directly to activeAppsList and stores credentials in vault', () => {
+      authService.currentUser.set({
+        id: 'usr-admin-1',
+        email: 'admin@acme.corp',
+        role: 'admin',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.switchWorkspace('org_root');
+
+      component.openAddAppModal();
+      component.newAppName = 'Real Facebook App';
+      component.newAppUrl = 'https://www.facebook.com/login';
+      component.newAppCategory = 'collaboration';
+      component.newAppUsername = 'myrealuser@example.com';
+      component.newAppPassword = 'SuperSecretPassword#123';
+      component.submitAddPersonalApp();
+
+      expect(component.showAddPersonalAppModal()).toBe(false);
+      // App appears in activeAppsList
+      const added = component.activeAppsList().find((a) => a.name === 'Real Facebook App');
+      expect(added).toBeDefined();
+      expect(added?.launchUrl).toBe('https://www.facebook.com/login');
+      expect(added?.assignedUsername).toBe('myrealuser@example.com');
+      expect(added?.assignedPassword).toBe('SuperSecretPassword#123');
+
+      // Credentials stored in personal vault
+      const vaultMatch = dashboardService.vaultItems().find((v) => v.url === 'https://www.facebook.com/login');
+      expect(vaultMatch).toBeDefined();
+      expect(vaultMatch?.username).toBe('myrealuser@example.com');
+      expect(vaultMatch?.password).toBe('SuperSecretPassword#123');
+    });
+
+    it('copies password to clipboard upon verified launch and triggers launch payload', () => {
+      vi.useFakeTimers();
+      const writeTextFn = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: {
+          writeText: writeTextFn,
+        },
+      });
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null as any);
+
+      const realApp = {
+        id: 'app-real-fb',
+        name: 'Facebook Real',
+        category: 'collaboration' as const,
+        description: 'Facebook Account',
+        icon: '📘',
+        protocol: 'Extension Autofill' as const,
+        launchUrl: 'https://www.facebook.com/login',
+        assigned: true,
+        assignedUsername: 'user@facebook.com',
+        assignedPassword: 'SecretPassword987!',
+      };
+
+      component.initiateSecureAppLaunch(realApp);
+      component.launchVerifySecret.set('MyMasterPass123!');
+      component.confirmSecureAppLaunch();
+
+      expect(writeTextFn).toHaveBeenCalledWith('SecretPassword987!');
+      expect(dashboardService.activeAutofillToast()?.username).toBe('user@facebook.com');
+
+      vi.advanceTimersByTime(1500);
+      expect(openSpy).toHaveBeenCalled();
+      const launchedUrl = openSpy.mock.calls[0][0] as string;
+      expect(launchedUrl).toContain('https://www.facebook.com/login#vg_autofill=1');
+      expect(launchedUrl).toContain('vg_u=user%40facebook.com');
+
+      openSpy.mockRestore();
+      vi.useRealTimers();
+    });
+  });
   });
 });

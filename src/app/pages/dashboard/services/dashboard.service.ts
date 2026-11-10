@@ -1493,7 +1493,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const email = u?.email?.toLowerCase().trim();
     const uid = u?.id;
 
-    const rawSource = this.isPersonalWorkspace() ? this.personalApps() : this.apps();
+    const rawSource = this.isPersonalWorkspace()
+      ? this.personalApps()
+      : [...this.personalApps(), ...this.apps()];
     // SCRUM-171: Filter out any company app explicitly targeted to a different employee
     const source = this.isPersonalWorkspace()
       ? rawSource
@@ -5398,24 +5400,24 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   resolveAppCredentials(app: SaaSApp): { username: string; password: string } | null {
-    if (app.assignedUsername) {
-      return {
-        username: app.assignedUsername,
-        password: app.assignedPassword || '',
-      };
+    let username = app.assignedUsername || app.requestedUsername || '';
+    let password = app.assignedPassword || '';
+
+    // If either username or password is not directly on the app, look up from personal vault by URL or app name
+    if (!username || !password) {
+      const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
+      if (matched.length > 0) {
+        if (!username) {
+          username = matched[0].username || matched[0].title || '';
+        }
+        if (!password) {
+          password = matched[0].password || '';
+        }
+      }
     }
-    const matched = this.findCredentialsForDomain(app.launchUrl || app.name);
-    if (matched.length > 0) {
-      return {
-        username: matched[0].username || matched[0].title || '',
-        password: matched[0].password || '',
-      };
-    }
-    if (app.requestedUsername) {
-      return {
-        username: app.requestedUsername,
-        password: '',
-      };
+
+    if (username || password) {
+      return { username, password };
     }
     return null;
   }
@@ -5619,9 +5621,12 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const targetApp = currentApps.find((a) => a.id === appId) || this.activeAppsList().find((a) => a.id === appId);
     const targetName = targetApp?.name?.toLowerCase().trim();
 
-    // 1. Remove from apps signal
+    // 1. Remove from apps and personalApps signals
     this.apps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
     this.saveStored('vanguard_user_apps', this.apps());
+
+    this.personalApps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
+    this.saveStored('vanguard_personal_apps', this.personalApps());
 
     // 2. Clean up from appAccessRequests for current user so activeAppsList computed signal does not keep displaying it
     const u = this.user();
@@ -7035,33 +7040,88 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
-  // SCRUM-52: Personal Applications Management
+  // SCRUM-180 / SCRUM-52: Web & Personal Applications Management
   // ==========================================
-  addPersonalApp(app: { name: string; category: 'cloud' | 'developer' | 'collaboration'; launchUrl: string; description?: string; icon?: string }): void {
+  addApplication(app: {
+    name: string;
+    category: SaaSApp['category'];
+    launchUrl: string;
+    description?: string;
+    icon?: string;
+    username?: string;
+    password?: string;
+  }): SaaSApp {
+    const u = this.user();
+    const uid = u?.id;
+    const email = u?.email?.toLowerCase().trim();
+
     const newApp: SaaSApp = {
-      id: 'papp-' + Date.now(),
+      id: 'app-' + Date.now(),
       name: app.name.trim(),
-      category: app.category,
+      category: app.category || 'cloud',
       launchUrl: app.launchUrl.trim(),
-      description: app.description?.trim() || `${app.name} web application`,
+      description: app.description?.trim() || `${app.name.trim()} web application`,
       icon: app.icon || '🌐',
-      protocol: 'Web Auth',
-      status: 'Online',
+      protocol: 'Extension Autofill',
+      status: 'Approved',
       assigned: true,
+      assignedUsername: app.username?.trim() || undefined,
+      assignedPassword: app.password || undefined,
+      targetUserId: uid,
+      targetUserEmail: email,
     };
-    this.personalApps.update((list) => [newApp, ...list]);
+
+    // Update both personalApps and apps stores so it is immediately visible in any workspace view
+    this.personalApps.update((list) => [
+      newApp,
+      ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
+    ]);
     this.saveStored('vanguard_personal_apps', this.personalApps());
-    this.logAuditEvent(`Added personal application bookmark: ${newApp.name}`, 'Personal Workspace', 'App Launcher', 'success', 'Low');
-    this.showAdminNotice(`Added ${newApp.name} to personal applications.`);
+
+    this.apps.update((list) => [
+      newApp,
+      ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
+    ]);
+    this.saveStored('vanguard_user_apps', this.apps());
+
+    // Save credentials to personal vault if provided
+    if (app.username?.trim() || app.password) {
+      this.addVaultItem({
+        title: app.name.trim(),
+        category: 'Login',
+        username: app.username?.trim() || '',
+        password: app.password || '',
+        url: app.launchUrl.trim(),
+        notes: `Linked auto-fill credentials for ${app.name.trim()}`,
+      });
+    }
+
+    this.logAuditEvent(`Added application: ${newApp.name}`, 'Applications', 'App Launcher', 'success', 'Low');
+    this.showAdminNotice(`Added ${newApp.name} to applications.`);
+    return newApp;
+  }
+
+  addPersonalApp(app: { name: string; category: 'cloud' | 'developer' | 'collaboration'; launchUrl: string; description?: string; icon?: string; username?: string; password?: string }): void {
+    this.addApplication(app);
   }
 
   deletePersonalApp(id: string): void {
-    const app = this.personalApps().find((a) => a.id === id);
-    this.personalApps.update((list) => list.filter((a) => a.id !== id));
+    const app = this.personalApps().find((a) => a.id === id) || this.apps().find((a) => a.id === id);
+    const targetName = app?.name?.toLowerCase().trim();
+
+    this.personalApps.update((list) =>
+      list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
+    );
     this.saveStored('vanguard_personal_apps', this.personalApps());
+
+    this.apps.update((list) =>
+      list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
+    );
+    this.saveStored('vanguard_user_apps', this.apps());
+
     if (app) {
-      this.logAuditEvent(`Removed personal application bookmark: ${app.name}`, 'Personal Workspace', 'App Launcher', 'success', 'Low');
-      this.showAdminNotice(`Removed ${app.name} from personal applications.`);
+      this.logAuditEvent(`Removed application: ${app.name}`, 'Applications', 'App Launcher', 'success', 'Low');
+      this.showAdminNotice(`Removed ${app.name} from applications.`);
     }
   }
 

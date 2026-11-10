@@ -5433,13 +5433,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
   extractDomain(domainOrUrl: string): string {
     if (!domainOrUrl) return '';
-    return domainOrUrl
+    const hostWithPort = domainOrUrl
       .toLowerCase()
       .trim()
       .replace(/^(https?:\/\/)?(www\.)?/, '')
       .split('/')[0]
       .split('?')[0]
       .split('#')[0];
+    // Strip port number (e.g. localhost:4000 -> localhost) to match location.hostname
+    return hostWithPort.split(':')[0];
   }
 
   normalizeLoginUrl(rawUrl: string): string {
@@ -5604,12 +5606,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       'Low',
     );
 
+    // Browser Popup-Safety (SCRUM-180): Call window.open synchronously to preserve transient
+    // user activation so modern popup blockers (Chrome/Firefox/Edge) do not block the target tab.
+    if (this.isBrowser && targetLaunchUrl) {
+      window.open(targetLaunchUrl, '_blank');
+    }
+
     setTimeout(() => {
       this.ssoLaunchingNotice.set(null);
-      if (this.isBrowser && targetLaunchUrl) {
-        window.open(targetLaunchUrl, '_blank');
-      }
-    }, 1200);
+    }, 2500);
   }
 
   openRequestAppModal(): void {

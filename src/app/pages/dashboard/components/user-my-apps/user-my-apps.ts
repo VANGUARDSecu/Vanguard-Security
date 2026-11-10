@@ -79,7 +79,7 @@ export class UserMyApps {
   // SCRUM-169: Pre-Launch Security Verification & Auto-Fill State
   readonly showLaunchVerifyModal = signal<boolean>(false);
   readonly pendingLaunchApp = signal<SaaSApp | null>(null);
-  readonly launchVerifyMethod = signal<'password' | 'pin' | 'quick'>('password');
+  readonly launchVerifyMethod = signal<'password' | 'pin' | 'quick'>('quick');
   readonly launchVerifySecret = signal<string>('');
   readonly launchVerifyError = signal<string | null>(null);
   readonly launchCustomUsername = signal<string>('');
@@ -251,7 +251,7 @@ export class UserMyApps {
 
     const resolved = this.dashboardService.resolveAppCredentials(app);
     this.pendingLaunchApp.set(app);
-    this.launchVerifyMethod.set('password');
+    this.launchVerifyMethod.set('quick');
     this.launchVerifySecret.set('');
     this.launchVerifyError.set(null);
     this.launchCustomUsername.set(resolved?.username || '');

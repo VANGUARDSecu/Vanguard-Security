@@ -5431,15 +5431,58 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     return null;
   }
 
-  buildAutofillLaunchUrl(baseUrl: string, username?: string, password?: string): string {
+  extractDomain(domainOrUrl: string): string {
+    if (!domainOrUrl) return '';
+    return domainOrUrl
+      .toLowerCase()
+      .trim()
+      .replace(/^(https?:\/\/)?(www\.)?/, '')
+      .split('/')[0]
+      .split('?')[0]
+      .split('#')[0];
+  }
+
+  normalizeLoginUrl(rawUrl: string): string {
+    if (!rawUrl) return '';
+    let url = rawUrl.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+      const path = parsed.pathname.replace(/\/+$/, '');
+      if (!path || path === '') {
+        const map: Record<string, string> = {
+          'roblox.com': '/login',
+          'facebook.com': '/login',
+          'figma.com': '/login',
+          'github.com': '/login',
+          'notion.so': '/login',
+          'reddit.com': '/login',
+          'discord.com': '/login',
+          'spotify.com': '/login',
+          'netflix.com': '/login',
+          'steampowered.com': '/login',
+          'steamcommunity.com': '/login',
+        };
+        if (map[host]) {
+          parsed.pathname = map[host];
+          return parsed.toString();
+        }
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  buildAutofillLaunchUrl(baseUrl: string, _username?: string, _password?: string): string {
     if (!baseUrl) return '';
-    if (!username && !password) return baseUrl;
+    // Security Fix (SCRUM-180): Never expose credentials in the URL.
+    // Hash fragments with passwords are strictly scrubbed to prevent leak.
     const baseWithoutHash = baseUrl.split('#')[0];
-    const params = new URLSearchParams();
-    params.set('vg_autofill', '1');
-    if (username) params.set('vg_u', username);
-    if (password) params.set('vg_p', password);
-    return `${baseWithoutHash}#${params.toString()}`;
+    return baseWithoutHash;
   }
 
   verifyLaunchIdentity(
@@ -5506,21 +5549,16 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
           }
         : this.resolveAppCredentials(app);
 
-    let targetLaunchUrl = app.launchUrl;
+    let targetLaunchUrl = this.normalizeLoginUrl(this.buildAutofillLaunchUrl(app.launchUrl));
 
     if (!alreadyLoggedIn && resolvedCreds && (resolvedCreds.username || resolvedCreds.password)) {
-      targetLaunchUrl = this.buildAutofillLaunchUrl(
-        app.launchUrl,
-        resolvedCreds.username,
-        resolvedCreds.password,
-      );
       this.ssoLaunchingNotice.set(
         `Verified & Launching ${app.name}. Auto-filling credentials for ${resolvedCreds.username || app.name}!`
       );
       this.activeAutofillToast.set({
         appId: app.id,
         appName: app.name,
-        launchUrl: app.launchUrl,
+        launchUrl: targetLaunchUrl,
         username: resolvedCreds.username,
         password: resolvedCreds.password,
       });
@@ -5529,17 +5567,19 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       }
       if (this.isBrowser && typeof window !== 'undefined') {
         try {
-          window.postMessage(
-            {
-              type: 'VANGUARD_AUTOFILL_LAUNCH',
-              appId: app.id,
-              appName: app.name,
-              targetUrl: app.launchUrl,
-              username: resolvedCreds.username,
-              password: resolvedCreds.password,
-            },
-            '*',
-          );
+          const payload = {
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_AUTOFILL_LAUNCH',
+            appId: app.id,
+            appName: app.name,
+            targetUrl: targetLaunchUrl,
+            targetDomain: this.extractDomain(targetLaunchUrl),
+            username: resolvedCreds.username,
+            password: resolvedCreds.password,
+            timestamp: Date.now(),
+          };
+          window.postMessage(payload, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-autofill-launch', { detail: payload }));
         } catch {
           // ignore postMessage errors in restricted contexts
         }

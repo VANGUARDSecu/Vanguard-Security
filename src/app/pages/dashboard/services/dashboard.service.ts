@@ -132,30 +132,52 @@ export class DashboardService {
     const userEmail = u?.email?.toLowerCase().trim();
 
     const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (stored && stored.length > 0 && userEmail) {
-      // SCRUM-153: Verify that stored users belong to the current authenticated account
-      const currentUserInStore = stored.some((usr) => usr.email?.toLowerCase().trim() === userEmail);
-      if (currentUserInStore) {
-        const seen = new Set<string>();
-        const now = Date.now();
-        const updated = stored
-          .filter((usr) => {
-            const email = usr.email?.toLowerCase().trim();
-            if (!email || seen.has(email)) return false;
-            seen.add(email);
-            return true;
-          })
-          .map((usr) => {
-            if (usr.accountStatus === 'Pending' && usr.expiresAt) {
-              const exp = new Date(usr.expiresAt).getTime();
-              if (exp < now) {
-                return { ...usr, accountStatus: 'Expired' as const };
-              }
+    if (stored && stored.length > 0) {
+      const seen = new Set<string>();
+      const now = Date.now();
+      const updated = stored
+        .filter((usr) => {
+          const email = usr.email?.toLowerCase().trim();
+          if (!email || seen.has(email)) return false;
+          seen.add(email);
+          return true;
+        })
+        .map((usr) => {
+          if (usr.accountStatus === 'Pending' && usr.expiresAt) {
+            const exp = new Date(usr.expiresAt).getTime();
+            if (exp < now) {
+              return { ...usr, accountStatus: 'Expired' as const };
             }
-            return usr;
-          });
-        return updated;
+          }
+          return usr;
+        });
+
+      if (userEmail && !seen.has(userEmail) && u && u.email) {
+        const name = u.firstName && u.lastName
+          ? `${u.firstName} ${u.lastName}`
+          : (u.firstName || u.email.split('@')[0]);
+        const initials = (u.firstName && u.lastName)
+          ? (u.firstName[0] + u.lastName[0]).toUpperCase()
+          : u.email.substring(0, 2).toUpperCase();
+        const role = u.role === 'admin'
+          ? 'Super Administrator'
+          : u.role === 'security_officer'
+            ? 'Security Officer'
+            : 'Directory Member';
+
+        updated.unshift({
+          id: u.id || 'usr-root',
+          name,
+          email: u.email,
+          department: 'Security Ops',
+          role,
+          mfaStatus: u.user_metadata?.['has_totp'] ? 'Enrolled (TOTP)' : 'Email OTP Only',
+          accountStatus: 'Active',
+          lastLogin: 'Just now',
+          initials,
+        });
       }
+      return updated;
     }
     if (u && u.email) {
       const name = u.firstName && u.lastName
@@ -1994,6 +2016,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
         }
+        this.loadDirectoryUsers();
         }
       }
 
@@ -2149,11 +2172,27 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly isDirectoryLoading = signal<boolean>(false);
 
   /**
-   * SCRUM-156: Synchronize directory users and activation statuses with the backend.
+   * SCRUM-156 & SCRUM-177: Synchronize directory users and activation statuses with the backend.
    */
   loadDirectoryUsers(): void {
     if (!this.isBrowser) return;
-    const tenantId = this.activeOrganizationId();
+    let tenantId = this.activeOrganizationId();
+    if (!tenantId || tenantId === 'org_root' || tenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        tenantId = realOrg.id;
+        this.activeOrganizationId.set(realOrg.id);
+        this.saveStored('vanguard_active_org_id', realOrg.id);
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) {
+          tenantId = userTenant;
+          this.activeOrganizationId.set(userTenant);
+          this.saveStored('vanguard_active_org_id', userTenant);
+        }
+      }
+    }
     this.isDirectoryLoading.set(true);
     this.authService.getDirectoryUsers(tenantId).subscribe({
       next: (backendUsers) => {
@@ -2773,6 +2812,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.inviteError.set(null);
     this.showAdminNotice(`Provisioning employee and dispatching email to ${newUser.email}...`);
 
+    let targetTenantId = this.activeOrganizationId();
+    if (!targetTenantId || targetTenantId === 'org_root' || targetTenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        targetTenantId = realOrg.id;
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) targetTenantId = userTenant;
+      }
+    }
+
     this.authService
       .sendInviteEmail({
         email: newUser.email,
@@ -2781,7 +2832,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: newUser.department,
         temporaryPassword: newUser.temporaryPassword || this.invitePassword.trim(),
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
-        tenantId: this.activeOrganizationId(),
+        tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {
@@ -2817,6 +2868,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const user = this.inviteCreatedUser();
     if (!user) return;
     this.inviteEmailStatus.set('sending');
+    let targetTenantId = this.activeOrganizationId();
+    if (!targetTenantId || targetTenantId === 'org_root' || targetTenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        targetTenantId = realOrg.id;
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) targetTenantId = userTenant;
+      }
+    }
+
     this.authService
       .sendInviteEmail({
         email: user.email,
@@ -2825,7 +2888,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: user.department,
         temporaryPassword: user.temporaryPassword || '',
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
-        tenantId: this.activeOrganizationId(),
+        tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {

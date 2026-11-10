@@ -29,6 +29,14 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Admin Directory Users Employee List Display & Multi-Tenant Synchronization (SCRUM-177)
+- **Directory Employee State Preservation**:
+  - `DashboardService.initDirectoryUsers()` preserves all cached directory users and created employees across refreshes while ensuring the current admin profile is always present as Super Administrator.
+- **Authoritative Cloud Tenant ID Resolution**:
+  - `loadDirectoryUsers()`, `submitInviteUser()`, and `retryInviteEmail()` resolve the true tenant UUID if `activeOrganizationId()` is undefined, synthetic (`'org_root'`), or starts with `'org_'`.
+  - Once `initSupabaseSync()` finishes loading cloud tenants, it automatically re-triggers `this.loadDirectoryUsers()` to populate live employees from Supabase.
+- **Seamless Local & Cloud Reconciliation**:
+  - Merges backend users received from `GET /auth/directory-users` with local directory storage, ensuring newly invited employees and activated accounts are immediately visible in the Directory Users table.
 ### SSO Google OAuth Redirection, Dashboard Approval Challenge & Post-Auth MFA Method Selection (SCRUM-176)
 - **Google OAuth SSO Callback Preservation**:
   - Google OAuth redirect URI defaults to `/login` rather than `/dashboard`, ensuring that OAuth tokens and codes are processed by `checkForOAuthCallback()` without route guard interruption.

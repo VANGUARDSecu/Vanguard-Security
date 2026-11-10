@@ -277,18 +277,8 @@ export class UserMyApps {
     const username = this.launchCustomUsername().trim();
     const password = this.launchCustomPassword();
 
-    if (this.launchSaveToVault() && username && password) {
-      const existing = this.dashboardService.findCredentialsForDomain(app.launchUrl || app.name);
-      if (existing.length === 0) {
-        this.dashboardService.addVaultItem({
-          title: app.name,
-          category: 'Login',
-          username,
-          password,
-          url: app.launchUrl,
-          notes: `Saved during verified launch of ${app.name}`,
-        });
-      }
+    if (this.launchSaveToVault() && (username || password)) {
+      this.dashboardService.updateAppCredentials(app.id, username, password);
     }
 
     this.showLaunchVerifyModal.set(false);

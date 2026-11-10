@@ -3,6 +3,7 @@ import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse } from '../../services/auth.service';
+import { DashboardService } from '../dashboard/services/dashboard.service';
 
 export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval';
 
@@ -19,6 +20,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
+  private readonly dashboardService = inject(DashboardService);
 
   @ViewChildren('otpInput') otpInputs!: QueryList<ElementRef<HTMLInputElement>>;
 
@@ -930,6 +932,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         this.router.navigate(['/reset-password']);
       }, 800);
       return;
+    }
+
+    // SCRUM-180: Unlock zero-knowledge personal vault automatically with verified login password
+    if (typeof sessionStorage !== 'undefined') {
+      const pendingVaultPwd = sessionStorage.getItem('vg_vault_pwd');
+      if (pendingVaultPwd) {
+        sessionStorage.removeItem('vg_vault_pwd');
+        void this.dashboardService.unlockVault(pendingVaultPwd).catch(() => {});
+      }
     }
 
     this.showNotification('success', 'Verification successful! Redirecting...', 3000);

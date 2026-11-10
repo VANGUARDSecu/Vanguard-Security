@@ -70,6 +70,9 @@ export class UserAuthenticator implements OnDestroy {
   // QR Code Inspector Modal State
   readonly activeQrViewAccount = signal<TotpAccount | null>(null);
 
+  // Revoke / Lockout Warning Modal State
+  readonly accountPendingRevocation = signal<TotpAccount | null>(null);
+
   formIssuer = '';
   formAccountName = '';
   formSecret = '';
@@ -88,6 +91,7 @@ export class UserAuthenticator implements OnDestroy {
   private cameraStream: MediaStream | null = null;
   private scanFrameId: number | null = null;
   private scanCanvas: HTMLCanvasElement | null = null;
+  private barcodeDetector: any = null;
 
   ngOnDestroy(): void {
     this.stopCameraScan();
@@ -140,6 +144,21 @@ export class UserAuthenticator implements OnDestroy {
 
   closeQrView(): void {
     this.activeQrViewAccount.set(null);
+  }
+
+  openRevokeModal(acc: TotpAccount): void {
+    this.accountPendingRevocation.set(acc);
+  }
+
+  closeRevokeModal(): void {
+    this.accountPendingRevocation.set(null);
+  }
+
+  confirmRevokeAccount(): void {
+    const acc = this.accountPendingRevocation();
+    if (!acc) return;
+    this.dashboardService.deleteTotpAccount(acc.id);
+    this.accountPendingRevocation.set(null);
   }
 
   getQrCodeUrl(acc: TotpAccount): string {
@@ -231,6 +250,129 @@ export class UserAuthenticator implements OnDestroy {
     }
   }
 
+  /**
+   * Multi-tier QR decoder:
+   * 1. Native Chromium BarcodeDetector (GPU-accelerated, handles glare, scale, rotation, dark mode)
+   * 2. jsQR on base canvas
+   * 3. jsQR on downsampled canvas (max 800px) for high-res desktop screenshots
+   * 4. jsQR on center crop (targeting reticle area)
+   * 5. jsQR on high-contrast binarized canvas (monitor glare / washed out webcam feed)
+   */
+  async decodeQrImage(
+    source: CanvasImageSource,
+    width: number,
+    height: number
+  ): Promise<string | null> {
+    if (width <= 0 || height <= 0) return null;
+
+    // Tier 1: Hardware-accelerated BarcodeDetector if supported in browser
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        if (!this.barcodeDetector) {
+          this.barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        }
+        const barcodes = await this.barcodeDetector.detect(source);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          return barcodes[0].rawValue;
+        }
+      } catch {}
+    }
+
+    const decodeFn = (jsQR as any)?.default || jsQR;
+    if (typeof decodeFn !== 'function') return null;
+
+    const tryJsQrOnCanvas = (c: HTMLCanvasElement): string | null => {
+      try {
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        if (!ctx || c.width <= 0 || c.height <= 0) return null;
+        const imgData = ctx.getImageData(0, 0, c.width, c.height);
+        const code = decodeFn(imgData.data, c.width, c.height, {
+          inversionAttempts: 'attemptBoth',
+        });
+        return code?.data || null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Tier 2: jsQR on base canvas
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = width;
+    baseCanvas.height = height;
+    const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
+    if (!baseCtx) return null;
+    baseCtx.drawImage(source, 0, 0, width, height);
+
+    let result = tryJsQrOnCanvas(baseCanvas);
+    if (result) return result;
+
+    // Tier 3: Downsampled canvas if image is large (e.g. desktop full-screen screenshots > 800px)
+    if (width > 800 || height > 800) {
+      const scale = Math.min(800 / width, 800 / height);
+      const scaledW = Math.max(10, Math.round(width * scale));
+      const scaledH = Math.max(10, Math.round(height * scale));
+      const scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = scaledW;
+      scaledCanvas.height = scaledH;
+      const sCtx = scaledCanvas.getContext('2d', { willReadFrequently: true });
+      if (sCtx) {
+        sCtx.drawImage(baseCanvas, 0, 0, scaledW, scaledH);
+        result = tryJsQrOnCanvas(scaledCanvas);
+        if (result) return result;
+      }
+    }
+
+    // Tier 4: Center crop (targeting zone)
+    const cropSize = Math.round(Math.min(width, height) * 0.7);
+    if (cropSize >= 50) {
+      const cropX = Math.round((width - cropSize) / 2);
+      const cropY = Math.round((height - cropSize) / 2);
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = cropSize;
+      cropCanvas.height = cropSize;
+      const cropCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+      if (cropCtx) {
+        cropCtx.drawImage(baseCanvas, cropX, cropY, cropSize, cropSize, 0, 0, cropSize, cropSize);
+        result = tryJsQrOnCanvas(cropCanvas);
+        if (result) return result;
+      }
+    }
+
+    // Tier 5: High-contrast binarization (helps with monitor glare / washed out webcam feed)
+    try {
+      const grayData = baseCtx.getImageData(0, 0, width, height);
+      const d = grayData.data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        sum += (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      }
+      const avg = sum / (d.length / 4);
+      for (let i = 0; i < d.length; i += 4) {
+        const v = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+        const bw = v > avg ? 255 : 0;
+        d[i] = bw;
+        d[i + 1] = bw;
+        d[i + 2] = bw;
+      }
+      baseCtx.putImageData(grayData, 0, 0);
+      result = tryJsQrOnCanvas(baseCanvas);
+      if (result) return result;
+    } catch {}
+
+    return null;
+  }
+
+  handleQrScanSuccess(rawData: string): void {
+    this.stopCameraScan();
+    this.formOtpAuthUri = rawData;
+    if (this.applyOtpAuthUri(rawData)) {
+      this.enrollMode.set('manual');
+      this.formSuccessMessage.set(
+        `Successfully scanned 2FA QR code for ${this.formIssuer || 'application'}!`
+      );
+    }
+  }
+
   async onQrFileSelected(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input?.files?.[0];
@@ -249,30 +391,14 @@ export class UserAuthenticator implements OnDestroy {
         img.src = objectUrl;
       });
 
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || img.width;
-      canvas.height = img.naturalHeight || img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        URL.revokeObjectURL(objectUrl);
-        throw new Error('Canvas 2D context unavailable.');
-      }
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
 
-      ctx.drawImage(img, 0, 0);
+      const rawData = await this.decodeQrImage(img, width, height);
       URL.revokeObjectURL(objectUrl);
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const decodeFn = (jsQR as any)?.default || jsQR;
-      const code = decodeFn(imageData.data, canvas.width, canvas.height, {
-        inversionAttempts: 'attemptBoth',
-      });
-
-      if (code && code.data) {
-        this.formOtpAuthUri = code.data;
-        if (this.applyOtpAuthUri(code.data)) {
-          this.enrollMode.set('manual');
-          this.formSuccessMessage.set(`Successfully decoded 2FA QR code for ${this.formIssuer}!`);
-        }
+      if (rawData) {
+        this.handleQrScanSuccess(rawData);
       } else {
         this.formErrorMessage.set(
           'No QR code detected in this image. Please ensure the QR code is clearly visible and not blurry, or enter the secret key manually.'
@@ -304,57 +430,73 @@ export class UserAuthenticator implements OnDestroy {
     this.isCameraLoading.set(true);
 
     try {
-      this.cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
+      try {
+        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+          },
+        });
+      } catch {
+        this.cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+      }
 
       videoElement.srcObject = this.cameraStream;
       videoElement.setAttribute('playsinline', 'true');
+      videoElement.muted = true;
       await videoElement.play();
 
       this.isCameraLoading.set(false);
       this.isCameraActive.set(true);
 
-      if (!this.scanCanvas) {
-        this.scanCanvas = document.createElement('canvas');
-      }
-      const canvas = this.scanCanvas;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      const decodeFn = (jsQR as any)?.default || jsQR;
-
-      const scanLoop = () => {
+      const scanLoop = async () => {
         if (!this.isCameraActive()) return;
 
-        if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA && videoElement.videoWidth > 0) {
-          canvas.width = videoElement.videoWidth;
-          canvas.height = videoElement.videoHeight;
+        try {
+          if (
+            videoElement.readyState >= (videoElement.HAVE_CURRENT_DATA || 2) &&
+            videoElement.videoWidth > 0 &&
+            videoElement.videoHeight > 0
+          ) {
+            // First check native BarcodeDetector if available
+            if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+              try {
+                if (!this.barcodeDetector) {
+                  this.barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+                }
+                const barcodes = await this.barcodeDetector.detect(videoElement);
+                if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                  this.handleQrScanSuccess(barcodes[0].rawValue);
+                  return;
+                }
+              } catch {}
+            }
 
-          if (ctx) {
-            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = decodeFn(imageData.data, canvas.width, canvas.height, {
-              inversionAttempts: 'attemptBoth',
-            });
-
-            if (code && code.data) {
-              this.stopCameraScan();
-              this.formOtpAuthUri = code.data;
-              if (this.applyOtpAuthUri(code.data)) {
-                this.enrollMode.set('manual');
-                this.formSuccessMessage.set(
-                  `Successfully scanned 2FA QR code for ${this.formIssuer || 'application'}!`
-                );
+            // Fallback to multi-tier canvas decoding
+            if (!this.scanCanvas) {
+              this.scanCanvas = document.createElement('canvas');
+            }
+            const canvas = this.scanCanvas;
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (ctx) {
+              ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+              const rawData = await this.decodeQrImage(canvas, canvas.width, canvas.height);
+              if (rawData) {
+                this.handleQrScanSuccess(rawData);
+                return;
               }
-              return;
             }
           }
-        }
+        } catch {}
 
-        this.scanFrameId = requestAnimationFrame(scanLoop);
+        if (this.isCameraActive()) {
+          this.scanFrameId = requestAnimationFrame(scanLoop);
+        }
       };
 
       this.scanFrameId = requestAnimationFrame(scanLoop);
@@ -424,11 +566,10 @@ export class UserAuthenticator implements OnDestroy {
   }
 
   deleteAccount(id: string, issuer: string): void {
-    if (
-      confirm(
-        `Are you sure you want to remove the 2FA authenticator code for ${issuer}? You will no longer be able to generate one-time codes for this account.`
-      )
-    ) {
+    const acc = this.activeTotpAccounts().find((a) => a.id === id);
+    if (acc) {
+      this.openRevokeModal(acc);
+    } else {
       this.dashboardService.deleteTotpAccount(id);
     }
   }

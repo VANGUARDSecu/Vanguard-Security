@@ -189,4 +189,37 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     expect(component.formIssuer).toBe('AWS');
     expect(component.formSecret).toBe('');
   });
+
+  it('SCRUM-178: should open revoke modal with lockout warning and safe cancellation', () => {
+    dashboardService.addTotpAccount({
+      issuer: 'GitHub',
+      accountName: 'octocat',
+      secret: 'HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ',
+    });
+    const acc = component.activeTotpAccounts()[0];
+
+    component.deleteAccount(acc.id, acc.issuer);
+    expect(component.accountPendingRevocation()).toEqual(acc);
+
+    // Cancel revocation
+    component.closeRevokeModal();
+    expect(component.accountPendingRevocation()).toBeNull();
+    expect(component.activeTotpAccounts().length).toBe(1);
+  });
+
+  it('SCRUM-178: should confirm revocation and remove account from store', () => {
+    dashboardService.addTotpAccount({
+      issuer: 'GitHub',
+      accountName: 'octocat',
+      secret: 'HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ',
+    });
+    const acc = component.activeTotpAccounts()[0];
+
+    component.openRevokeModal(acc);
+    expect(component.accountPendingRevocation()).toEqual(acc);
+
+    component.confirmRevokeAccount();
+    expect(component.accountPendingRevocation()).toBeNull();
+    expect(component.activeTotpAccounts().length).toBe(0);
+  });
 });

@@ -95,33 +95,31 @@
               {{ acc.issuer.substring(0, 1).toUpperCase() }}
             </div>
             <div class="issuer-meta">
-              <h3 class="issuer-title">{{ acc.issuer }}</h3>
-              <span class="account-name">{{ acc.accountName }}</span>
+              <h3 class="issuer-title" [title]="acc.issuer">{{ acc.issuer }}</h3>
+              <span class="account-name" [title]="acc.accountName">{{ acc.accountName }}</span>
             </div>
           </div>
 
-          <div style="display: flex; gap: 6px; align-items: center;">
+          <div class="card-actions">
             <button
               type="button"
-              class="btn-revoke-acc"
+              class="card-action-btn"
               (click)="openQrView(acc)"
               title="View QR Code for this 2FA account"
-              style="font-size: 11px; padding: 4px 8px; color: #60a5fa;"
             >
               📷 QR
             </button>
             <button
               type="button"
-              class="btn-revoke-acc"
+              class="card-action-btn"
               (click)="copyOtpAuthUri(acc)"
               title="Copy otpauth:// URI for backup/export"
-              style="font-size: 11px; padding: 4px 8px;"
             >
-              {{ copiedUriAccountId() === acc.id ? '✓ URI' : '🔗 URI' }}
+              {{ copiedUriAccountId() === acc.id ? '✓' : '🔗' }}
             </button>
             <button
               type="button"
-              class="btn-revoke-acc"
+              class="card-action-btn"
               (click)="openEditModal(acc)"
               title="Edit 2FA Account"
             >
@@ -129,8 +127,8 @@
             </button>
             <button
               type="button"
-              class="btn-revoke-acc"
-              (click)="deleteAccount(acc.id, acc.issuer)"
+              class="card-action-btn btn-danger"
+              (click)="openRevokeModal(acc)"
               title="Revoke 2FA Account"
             >
               ✕
@@ -251,14 +249,18 @@
           </div>
 
           <!-- Video Viewport with Targeting Overlay -->
-          <div class="scanner-viewport-box" [style.display]="isCameraActive() ? 'flex' : 'none'">
+          <div class="scanner-viewport-box" [style.display]="(isCameraActive() || isCameraLoading()) ? 'flex' : 'none'">
+            <div *ngIf="isCameraLoading()" style="position: absolute; z-index: 2; color: #38bdf8; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+              <div class="pulse-ring" style="width: 14px; height: 14px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+              Connecting to webcam device...
+            </div>
             <video
               #qrVideo
               class="scanner-video"
               muted
               playsinline
             ></video>
-            <div class="scanner-overlay">
+            <div class="scanner-overlay" *ngIf="isCameraActive()">
               <div class="scanner-reticle">
                 <div class="scanner-laser"></div>
               </div>
@@ -417,6 +419,82 @@
             {{ copiedUriAccountId() === acc.id ? '✓ Copied URI!' : '🔗 Copy otpauth:// URI' }}
           </button>
           <button type="button" class="btn-cyber-primary" (click)="closeQrView()">Close</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- REVOKE 2FA ACCOUNT CONFIRMATION MODAL -->
+  @if (accountPendingRevocation(); as acc) {
+    <div class="modal-backdrop">
+      <div class="modal-box cyber-modal" style="max-width: 520px;">
+        <div class="modal-header" style="border-bottom-color: rgba(239, 68, 68, 0.3);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">⚠️</span>
+            <h2 class="modal-heading" style="color: #f87171;">
+              Revoke 2FA Account: {{ acc.issuer }}
+            </h2>
+          </div>
+          <button type="button" class="modal-close-btn" (click)="closeRevokeModal()">✕</button>
+        </div>
+
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px;">
+          <!-- Critical Lockout Warning Alert Box -->
+          <div style="padding: 12px 14px; border-radius: 8px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.45); color: #fca5a5; font-size: 13px; line-height: 1.5;">
+            <div style="font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; color: #ef4444;">
+              <span>🚨</span>
+              <span>DANGER: YOU COULD GET LOCKED OUT OF {{ acc.issuer.toUpperCase() }}</span>
+            </div>
+            <p style="margin: 0 0 8px 0;">
+              Revoking this token <strong>only removes it from your Vanguard Authenticator</strong>. It <strong>does NOT disable 2FA on {{ acc.issuer }}</strong>!
+            </p>
+            <p style="margin: 0;">
+              Your {{ acc.issuer }} account will <strong>still demand a 6-digit one-time code to sign in</strong>. If you revoke this before turning off 2FA in your <strong>{{ acc.issuer }} Account Settings</strong> or without saving your emergency recovery codes, <strong>you will lose access to your {{ acc.issuer }} account</strong>.
+            </p>
+          </div>
+
+          <!-- Account Summary and Emergency Backup URI -->
+          <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div>
+                <span style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Account</span>
+                <div style="font-size: 13px; font-weight: 600; color: #f1f5f9;">{{ acc.issuer }} ({{ acc.accountName }})</div>
+              </div>
+              <button
+                type="button"
+                class="btn-cyber-secondary"
+                (click)="copyOtpAuthUri(acc)"
+                style="padding: 4px 8px; font-size: 11px;"
+              >
+                {{ copiedUriAccountId() === acc.id ? '✓ Copied Backup URI' : '📋 Copy Backup URI' }}
+              </button>
+            </div>
+            <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Secret Key (Save Before Revoking)</div>
+            <div style="font-size: 12px; font-family: monospace; color: #38bdf8; word-break: break-all;">{{ acc.secret }}</div>
+          </div>
+
+          <div style="font-size: 12px; color: #94a3b8;">
+            <strong>Recommended safe procedure:</strong>
+            <ol style="margin: 6px 0 0 16px; padding: 0;">
+              <li>Log in to <strong>{{ acc.issuer }}</strong> in another tab.</li>
+              <li>Navigate to Security / Two-Factor Authentication settings.</li>
+              <li>Disable 2FA or switch to a new authenticator before revoking this token.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button type="button" class="btn-cyber-primary" (click)="closeRevokeModal()" style="font-weight: 600;">
+            🛡️ Keep 2FA Token (Safe)
+          </button>
+          <button
+            type="button"
+            class="btn-cyber-secondary"
+            (click)="confirmRevokeAccount()"
+            style="border-color: rgba(239, 68, 68, 0.6); color: #f87171; background: rgba(239, 68, 68, 0.1);"
+          >
+            🗑️ I have disabled 2FA on {{ acc.issuer }} (Revoke)
+          </button>
         </div>
       </div>
     </div>

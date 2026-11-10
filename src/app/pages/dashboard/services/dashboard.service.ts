@@ -107,6 +107,23 @@ export class DashboardService {
   // Active navigation tab
   readonly activeTab = signal<string>(this.isIndividual() ? 'personal-vault' : (this.isAdmin() ? 'overview' : 'my-apps'));
 
+  // ==========================================
+  // Responsive Mobile Navigation Drawer State (SCRUM-179)
+  // ==========================================
+  readonly isMobileSidebarOpen = signal<boolean>(false);
+
+  toggleMobileSidebar(): void {
+    this.isMobileSidebarOpen.update((v) => !v);
+  }
+
+  openMobileSidebar(): void {
+    this.isMobileSidebarOpen.set(true);
+  }
+
+  closeMobileSidebar(): void {
+    this.isMobileSidebarOpen.set(false);
+  }
+
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
   readonly sessionRevoked = signal<boolean>(false);
@@ -2616,6 +2633,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   setActiveTab(tab: string): void {
+    this.closeMobileSidebar();
     const userTabs = [
       'personal-vault', 'my-apps', 'authenticator', 'user-security',
       'user-network', 'user-ssh', 'user-activity', 'user-devices'
@@ -3535,6 +3553,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   openAccessRequestsQueue(): void {
+    this.closeMobileSidebar();
     this.viewMode.set('admin');
     this.activeTab.set('access-requests');
   }

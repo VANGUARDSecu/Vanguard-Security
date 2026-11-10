@@ -517,7 +517,7 @@ export class UserMyApps {
     this.addAppError.set(null);
   }
 
-  applyPreset(preset: 'figma' | 'facebook' | 'github' | 'notion' | 'google' | 'custom'): void {
+  applyPreset(preset: 'figma' | 'facebook' | 'github' | 'notion' | 'google' | 'roblox' | 'custom'): void {
     this.addAppError.set(null);
     this.newAppUsername = '';
     this.newAppPassword = '';
@@ -557,6 +557,13 @@ export class UserMyApps {
         this.newAppIcon = '🔍';
         this.newAppDescription = 'Google workspace, Drive, and identity authentication';
         break;
+      case 'roblox':
+        this.newAppName = 'Roblox';
+        this.newAppUrl = 'https://www.roblox.com/login';
+        this.newAppCategory = 'collaboration';
+        this.newAppIcon = '🎮';
+        this.newAppDescription = 'Roblox gaming platform & developer creator studio';
+        break;
       case 'custom':
         this.newAppName = '';
         this.newAppUrl = 'https://';
@@ -585,10 +592,7 @@ export class UserMyApps {
       return;
     }
 
-    let formattedUrl = this.newAppUrl.trim();
-    if (!/^https?:\/\//i.test(formattedUrl)) {
-      formattedUrl = 'https://' + formattedUrl;
-    }
+    const formattedUrl = this.dashboardService.normalizeLoginUrl(this.newAppUrl.trim());
 
     this.dashboardService.addApplication({
       name: this.newAppName.trim(),

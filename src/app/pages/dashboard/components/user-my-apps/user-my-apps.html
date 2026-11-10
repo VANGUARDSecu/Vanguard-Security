@@ -202,10 +202,10 @@
                 <span>⚡ Verified Launch & Credential Auto-Fill Active for {{ toast.appName }}</span>
               </div>
               <div style="font-size: 12px; color: #94a3b8; margin-top: 3px;">
-                Auto-filling username <strong style="color: #e2e8f0;">{{ toast.username }}</strong> and password into <code style="color: #93c5fd;">{{ toast.launchUrl }}</code> via Vanguard Extension / Launch Payload.
+                Auto-filling username <strong style="color: #e2e8f0;">{{ toast.username }}</strong> and password into <code style="color: #93c5fd;">{{ toast.launchUrl }}</code> via Vanguard Extension in-memory IPC.
               </div>
               <div style="font-size: 11px; color: #38bdf8; margin-top: 3px;">
-                ✓ Password automatically copied to clipboard (Ctrl+V) for instant pasting if browser extension is not loaded.
+                ✓ Zero URL credential exposure: Plaintext credentials are strictly excluded from URLs, safely dispatched via Extension Storage, and copied to clipboard (Ctrl+V) for instant pasting.
               </div>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -475,6 +475,7 @@
             <button type="button" class="preset-pill" (click)="applyPreset('figma')">🎨 Figma</button>
             <button type="button" class="preset-pill" (click)="applyPreset('facebook')">📘 Facebook</button>
             <button type="button" class="preset-pill" (click)="applyPreset('github')">🐙 GitHub</button>
+            <button type="button" class="preset-pill" (click)="applyPreset('roblox')">🎮 Roblox</button>
             <button type="button" class="preset-pill" (click)="applyPreset('notion')">📝 Notion</button>
             <button type="button" class="preset-pill" (click)="applyPreset('google')">🔍 Google</button>
             <button type="button" class="preset-pill" (click)="applyPreset('custom')">🌐 Custom</button>

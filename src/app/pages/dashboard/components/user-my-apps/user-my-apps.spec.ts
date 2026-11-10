@@ -632,16 +632,16 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(dashboardService.ssoLaunchingNotice()).toContain('Session active for Facebook');
     });
 
-    it('builds #vg_autofill=1 hash payload URL for extension auto-fill injection', () => {
+    it('SCRUM-180: builds clean launch URL with zero password leakage into URL hash', () => {
       const url = dashboardService.buildAutofillLaunchUrl(
         'https://www.figma.com/login',
         'designer@acme.com',
         'MyPass123!',
       );
-      expect(url).toContain('https://www.figma.com/login#');
-      expect(url).toContain('vg_autofill=1');
-      expect(url).toContain('vg_u=designer%40acme.com');
-      expect(url).toContain('vg_p=MyPass123');
+      // Zero credential leak: plain passwords must never appear in the URL
+      expect(url).toBe('https://www.figma.com/login');
+      expect(url).not.toContain('vg_p');
+      expect(url).not.toContain('MyPass123');
     });
   });
 
@@ -842,11 +842,27 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       vi.advanceTimersByTime(1500);
       expect(openSpy).toHaveBeenCalled();
       const launchedUrl = openSpy.mock.calls[0][0] as string;
-      expect(launchedUrl).toContain('https://www.facebook.com/login#vg_autofill=1');
-      expect(launchedUrl).toContain('vg_u=user%40facebook.com');
+      // Zero password leakage in URL: destination is pure clean URL
+      expect(launchedUrl).toBe('https://www.facebook.com/login');
+      expect(launchedUrl).not.toContain('vg_p');
+      expect(launchedUrl).not.toContain('SecretPassword987');
 
       openSpy.mockRestore();
       vi.useRealTimers();
+    });
+
+    it('applies Roblox preset and normalizes bare roblox.com domain to /login', () => {
+      component.openAddAppModal();
+      component.applyPreset('roblox');
+      expect(component.newAppName).toBe('Roblox');
+      expect(component.newAppUrl).toBe('https://www.roblox.com/login');
+      expect(component.newAppIcon).toBe('🎮');
+
+      // Test URL normalization
+      expect(dashboardService.normalizeLoginUrl('roblox.com')).toBe('https://roblox.com/login');
+      expect(dashboardService.normalizeLoginUrl('https://www.roblox.com')).toBe('https://www.roblox.com/login');
+      expect(dashboardService.normalizeLoginUrl('https://www.roblox.com/')).toBe('https://www.roblox.com/login');
+      expect(dashboardService.normalizeLoginUrl('https://www.roblox.com/games/123')).toBe('https://www.roblox.com/games/123');
     });
   });
   });

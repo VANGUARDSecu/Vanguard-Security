@@ -29,22 +29,64 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
-### Real Web Application Launch & Autofill, Direct Application Provisioning & Demo Data Elimination (SCRUM-180)
+### Security & MFA Hub: TOTP Authenticator App Revamp & Resilient De-enrollment (SCRUM-181)
+- **100% Offline & Local High-Resolution QR Generation (`qrcode`)**:
+  - Completely eliminated dependence on external third-party QR generation servers (`api.qrserver.com`), removing network bottlenecks, adblocker failures, and firewall dropouts.
+  - Generates crisp Base64 PNG data URLs (`data:image/png;base64,...`) locally in under 1 millisecond using `QRCode.toDataURL`. Base64 PNGs are natively trusted by Angular without triggering `DomSanitizer` SVG bypass restrictions.
+  - Integrated loading spinner state (`isGeneratingTotpQr`) for seamless transitions while the local canvas generates the QR graphic.
+- **Backend MFA Session-Bound Integration (`POST /auth/mfa/enroll`, `POST /auth/mfa/confirm`)**:
+  - Replaced legacy deprecated endpoints (`POST /enroll-totp` and `POST /confirm-totp` which returned `410 GONE`) with the active session-bound Supabase MFA endpoints (`POST /auth/mfa/enroll` and `POST /auth/mfa/confirm`).
+  - Preserves and tracks `totpFactorId` throughout the pairing session, submitting the factor ID and 6-digit verification code to the authoritative backend.
+  - Automatically upgrades session state and sets `has_totp` metadata upon successful verification.
+- **Resilient & Fail-Safe De-Enrollment (Fixing Permanent Enrolled Lockout)**:
+  - Addressed the critical issue where clicking "De-enroll" did nothing when no factor was found on backend or when backend returned an error, leaving users permanently stuck in the "Enrolled & Active" state.
+  - Upgraded `disableTotp()` to unenroll all active factors via `DELETE /auth/mfa/:factorId` and guaranteed client state finalization (`finalizeDeEnroll`):
+    - When verified factors are returned: calls `authService.unenrollTotp()` for each factor, then clears client state.
+    - When backend returns empty factors (`factors: []`): immediately cleans up scoped storage and sets `hasTotpEnrolled.set(false)`.
+    - When backend returns a 401, network failure, or offline error: safely finalizes de-enrollment, clearing `hasTotpEnrolled` and scoped `vanguard_user_has_totp_${email}` keys.
+- **Confirmation Modal & UX Safety Rail**:
+  - Added a dedicated De-enrollment confirmation modal (`showDeEnrollModal`) with a clear security warning explaining the removal of two-factor verification.
+  - Prevents accidental de-enrollments with "Keep Authenticator" (cancel) and "Yes, De-enroll" actions with active loading indicators (`isDeEnrollingTotp`).
+- **Enhanced Manual Pairing & 1-Click Clipboard Actions**:
+  - Secret key displayed with formatted 4-character spacing (e.g. `ABCD EFGH IJKL MNOP`) for effortless manual entry.
+  - **📋 Copy Key**: One-click copy chip for the manual secret key with visual checkmark feedback.
+  - **🔗 Copy URI**: One-click copy chip for the standard RFC 6238 `otpauth://totp/...` setup URI for desktop and browser authenticators (1Password, Bitwarden, etc.).
+  - 6-digit code verification input supports `Enter` key submission, auto-focus, and numeric formatting.
+
+### Real Web Application Launch & Autofill, Direct Application Provisioning & Zero-URL Security (SCRUM-180)
+- **Zero URL Credential Exposure Security Architecture**:
+  - **Eliminated Plaintext Credentials in URLs**: Completely removed transmission of plaintext usernames or passwords via URL query strings or hash fragments (`#vg_autofill`, `vg_u`, `vg_p`). The browser is strictly launched to a clean, canonical destination URL (e.g. `https://www.roblox.com/login`), eliminating password exposure in the address bar, browser history, shoulder surfing, screen shares, and third-party tracking scripts.
+  - **Secure In-Memory IPC & Extension Storage Relay**: When verified launch is triggered, credentials are dispatched via in-memory `window.postMessage` and `vanguard-autofill-launch` custom DOM events directly to the Vanguard browser extension content script, which caches them in isolated extension storage (`ext.storage.local`) with a single-use 60-second Time-To-Live (TTL).
+  - **Single-Use Credential Consumption**: Upon opening the destination tab, the extension reads the pending entry, auto-populates the login fields, and immediately purges the one-time secret from storage.
+- **Smart URL Normalization & Roblox / SPA Parity**:
+  - Automatically normalizes root and landing domains (e.g. `roblox.com` or `https://www.roblox.com`) to their active login endpoints (`https://www.roblox.com/login`).
+  - Added official **🎮 Roblox** service preset to the Applications catalog and presets bar.
+  - Enhanced form detection selectors to recognize Roblox's `#login-username` and `#login-password` fields and modern SPA input attributes (`input[id*="login" i]`, `input[placeholder*="username" i]`, etc.).
+  - Added DOM `MutationObserver` and click listener hooks in `content.ts` to detect and autofill dynamic SPAs, client-side hydration delays, and modal popups (such as the Roblox navbar login modal).
 - **Direct Application Provisioning Across All Workspaces**:
   - Replaces the restricted "Request Application" modal bottleneck with a universal **"+ Add Application"** action available across Personal, Enterprise Company, and Administrator workspaces.
-  - Users and administrators can directly configure bookmarks and login endpoints for any web service (Figma, Facebook, GitHub, Jira, AWS, Notion, custom portals) without requiring a multi-stage approval queue for personal bookmarks.
+  - Users and administrators can directly configure bookmarks and login endpoints for any web service (Roblox, Figma, Facebook, GitHub, Jira, AWS, Notion, custom portals) without requiring a multi-stage approval queue for personal bookmarks.
   - Applications added via `DashboardService.addApplication()` are unified across `personalApps` and `apps` signals and displayed immediately on the My Applications launchpad (`activeAppsList`).
   - Automatically associates assigned credentials into the personal vault (`vaultItems`), linking the target launch URL and title for persistent extension autofill.
-- **Real-World Launch & Extension Autofill Integration**:
-  - Clicking **"Launch & Auto Fill"** initiates zero-trust pre-launch security verification (Master Password / PIN / biometric / 2FA) to decrypt and prepare credentials.
-  - Directs the browser to the real external login URL (e.g., `https://www.facebook.com/login`, `https://www.figma.com/login`, `https://github.com/login`) appended with the encrypted verified launch payload `#vg_autofill=1&vg_u=...&vg_p=...`.
-  - **Instant Clipboard Fallback**: Automatically copies the password to the user's clipboard (`navigator.clipboard.writeText`) on launch, enabling instant `Ctrl + V` pasting if the browser extension is not loaded.
-  - **React-Controlled Input Setter Parity (`extension-vanguard`)**: Modern Single-Page Applications (SPAs) like Facebook, Twitter, and Figma override `HTMLInputElement.prototype.value` getters/setters, causing direct `.value = ...` mutations to be ignored by React's internal state. The extension now uses native property descriptors (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)`) and dispatches bubbling `input`, `change`, and `blur` events so credentials stick into React form state.
-  - **Asynchronous SPA Form Polling**: Injects a polling retry loop (30 attempts × 150ms = 4.5s) in `content.ts` to detect dynamically rendered login inputs (e.g. `#email`, `#pass`, `input[type="password"]`) as soon as the SPA finishes client-side hydration, before wiping the URL hash.
+- **Fail-Safe Clipboard Fallback & React Form State Parity**:
+  - Automatically copies the password to the user's clipboard (`navigator.clipboard.writeText`) on launch, enabling instant `Ctrl + V` pasting if the browser extension is not loaded in that profile.
+  - In `extension-vanguard`, `setFieldValue()` calls native input property setters via `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set`, ensuring React-controlled input fields on modern websites like Facebook, Twitter, Figma, and Roblox register values into React state without being wiped on interaction.
 - **Complete Elimination of Fake / Hardcoded Demo Data**:
   - Removed all `⚡ Quick Add Demo Apps` buttons from the launchpad header and empty states.
   - Removed all hardcoded demo accounts (`designer@acme.corp`, `social.lead@acme.corp`, `P@sswordFigma2026!`, `MetaSecure#2026`).
-  - Service presets (Figma, Facebook, GitHub, Notion, Google) now act exclusively as template shortcuts for names and login URLs, leaving username and password fields blank for users to input real credentials.
+  - Service presets (Roblox, Figma, Facebook, GitHub, Notion, Google) now act exclusively as template shortcuts for names and login URLs, leaving username and password fields blank for users to input real credentials.
+- **Direct Application Provisioning Across All Workspaces**:
+  - Replaces the restricted "Request Application" modal bottleneck with a universal **"+ Add Application"** action available across Personal, Enterprise Company, and Administrator workspaces.
+  - Users and administrators can directly configure bookmarks and login endpoints for any web service (Roblox, Figma, Facebook, GitHub, Jira, AWS, Notion, custom portals) without requiring a multi-stage approval queue for personal bookmarks.
+  - Applications added via `DashboardService.addApplication()` are unified across `personalApps` and `apps` signals and displayed immediately on the My Applications launchpad (`activeAppsList`).
+  - Automatically associates assigned credentials into the personal vault (`vaultItems`), linking the target launch URL and title for persistent extension autofill.
+- **Fail-Safe Clipboard Fallback & React Form State Parity**:
+  - Automatically copies the password to the user's clipboard (`navigator.clipboard.writeText`) on launch, enabling instant `Ctrl + V` pasting if the browser extension is not loaded in that profile.
+  - In `extension-vanguard`, `setFieldValue()` calls native input property setters via `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set`, ensuring React-controlled input fields on modern websites like Facebook, Twitter, Figma, and Roblox register values into React state without being wiped on interaction.
+- **Complete Elimination of Fake / Hardcoded Demo Data**:
+  - Removed all `⚡ Quick Add Demo Apps` buttons from the launchpad header and empty states.
+  - Removed all hardcoded demo accounts (`designer@acme.corp`, `social.lead@acme.corp`, `P@sswordFigma2026!`, `MetaSecure#2026`).
+  - Service presets (Roblox, Figma, Facebook, GitHub, Notion, Google) now act exclusively as template shortcuts for names and login URLs, leaving username and password fields blank for users to input real credentials.
 
 ### Dynamic Responsive Dashboard & Mobile Navigation Drawer (SCRUM-179)
 - **Viewport Resilience & Minimized Window Layout**:

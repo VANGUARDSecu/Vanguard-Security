@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile } from '../../services/auth.service';
+import { DashboardService } from '../dashboard/services/dashboard.service';
 
 @Component({
   selector: 'app-login',
@@ -16,6 +17,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   readonly authService = inject(AuthService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly dashboardService = inject(DashboardService);
 
   // Form group definition
   readonly loginForm: FormGroup = this.fb.group({
@@ -229,6 +231,11 @@ export class LoginComponent implements OnInit, OnDestroy {
     const { email, password, rememberMe } = this.loginForm.value;
     const sso = this.ssoParams();
 
+    // Preserve password in session storage strictly during auth/OTP to unlock zero-knowledge vault
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('vg_vault_pwd', password);
+    }
+
     this.authService.login({ email: email.trim(), password, isSso: !!sso }).subscribe({
       next: (response) => {
         this.isLoading.set(false);
@@ -273,6 +280,10 @@ export class LoginComponent implements OnInit, OnDestroy {
             }, 600);
             return;
           }
+          void this.dashboardService.unlockVault(password).catch(() => {});
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem('vg_vault_pwd');
+          }
           this.showNotification('success', 'Login successful! Redirecting...', 3000);
           setTimeout(() => {
             this.router.navigate(['/dashboard']);
@@ -281,6 +292,9 @@ export class LoginComponent implements OnInit, OnDestroy {
       },
       error: (err: Error) => {
         this.isLoading.set(false);
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('vg_vault_pwd');
+        }
         this.showNotification('error', err.message || 'Invalid email or password.');
       },
     });

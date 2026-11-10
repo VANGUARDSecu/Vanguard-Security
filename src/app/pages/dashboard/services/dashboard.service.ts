@@ -2195,6 +2195,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.initSupabaseSync();
     this.startTotpTimer();
     this.fetchConnectedApps();
+
+    // SCRUM-180: Listen for Vanguard browser extension presence and sync applications
+    if (this.isBrowser && typeof window !== 'undefined') {
+      window.addEventListener('message', (event) => {
+        if (event.data?.source === 'VANGUARD_EXTENSION' && event.data?.type === 'VANGUARD_EXTENSION_READY') {
+          this.broadcastAppsSync();
+        }
+      });
+      setTimeout(() => this.broadcastAppsSync(), 500);
+    }
   }
 
   readonly isDirectoryLoading = signal<boolean>(false);
@@ -5721,6 +5731,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       'Low'
     );
     this.showAdminNotice(`Removed "${targetApp?.name || 'Application'}" from your launchpad. You can re-request it anytime.`);
+    this.broadcastAppsSync();
   }
 
   withdrawAccessRequest(requestId: string): void {
@@ -7215,21 +7226,84 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     ]);
     this.saveStored('vanguard_user_apps', this.apps());
 
-    // Save credentials to personal vault if provided
-    if (app.username?.trim() || app.password) {
-      this.addVaultItem({
-        title: app.name.trim(),
-        category: 'Login',
-        username: app.username?.trim() || '',
-        password: app.password || '',
-        url: app.launchUrl.trim(),
-        notes: `Linked auto-fill credentials for ${app.name.trim()}`,
-      });
-    }
+    // Save credentials to personal vault
+    this.addVaultItem({
+      title: app.name.trim(),
+      category: 'Login',
+      username: app.username?.trim() || '',
+      password: app.password || '',
+      url: app.launchUrl.trim(),
+      notes: `Linked auto-fill credentials for ${app.name.trim()}`,
+    });
+
+    this.broadcastAppsSync();
 
     this.logAuditEvent(`Added application: ${newApp.name}`, 'Applications', 'App Launcher', 'success', 'Low');
     this.showAdminNotice(`Added ${newApp.name} to applications.`);
     return newApp;
+  }
+
+  /**
+   * SCRUM-180: Synchronize all active applications and credentials with the Vanguard browser extension.
+   */
+  broadcastAppsSync(): void {
+    if (!this.isBrowser || typeof window === 'undefined') return;
+    try {
+      const apps = this.activeAppsList().map((a) => {
+        const creds = this.resolveAppCredentials(a);
+        return {
+          id: a.id,
+          title: a.name,
+          name: a.name,
+          username: creds?.username || a.assignedUsername || '',
+          password: creds?.password || a.assignedPassword || '',
+          url: a.launchUrl,
+          launchUrl: a.launchUrl,
+          icon: a.icon || '🌐',
+          category: a.category,
+        };
+      });
+      const payload = {
+        source: 'VANGUARD_WEB_APP',
+        type: 'VANGUARD_APPS_SYNC',
+        apps,
+        timestamp: Date.now(),
+      };
+      window.postMessage(payload, '*');
+      window.dispatchEvent(new CustomEvent('vanguard-apps-sync', { detail: payload }));
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * SCRUM-180: Update application credentials and synchronize to extension and personal vault.
+   */
+  updateAppCredentials(appId: string, username?: string, password?: string): void {
+    if (!appId) return;
+    this.personalApps.update((list) =>
+      list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
+    );
+    this.saveStored('vanguard_personal_apps', this.personalApps());
+
+    this.apps.update((list) =>
+      list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
+    );
+    this.saveStored('vanguard_user_apps', this.apps());
+
+    const app = this.activeAppsList().find((a) => a.id === appId);
+    if (app && (username || password)) {
+      this.addVaultItem({
+        title: app.name,
+        category: 'Login',
+        username: username || app.assignedUsername || '',
+        password: password || app.assignedPassword || '',
+        url: app.launchUrl,
+        notes: `Credentials updated for ${app.name}`,
+      });
+    }
+
+    this.broadcastAppsSync();
   }
 
   addPersonalApp(app: { name: string; category: 'cloud' | 'developer' | 'collaboration'; launchUrl: string; description?: string; icon?: string; username?: string; password?: string }): void {
@@ -7249,6 +7323,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
     );
     this.saveStored('vanguard_user_apps', this.apps());
+    this.broadcastAppsSync();
 
     if (app) {
       this.logAuditEvent(`Removed application: ${app.name}`, 'Applications', 'App Launcher', 'success', 'Low');

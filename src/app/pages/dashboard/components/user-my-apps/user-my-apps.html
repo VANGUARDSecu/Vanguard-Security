@@ -22,19 +22,20 @@
               <button
                 type="button"
                 class="btn-primary-action"
-                style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399;"
-                (click)="quickAddDemoApps()"
-                title="Quickly add Figma, Facebook, and GitHub with pre-filled credentials for testing verified launch"
+                (click)="openAddAppModal()"
               >
-                <span>⚡ Quick Add Demo Apps</span>
+                <span class="btn-plus">+</span>
+                <span>Add Application</span>
               </button>
               <button
                 type="button"
-                class="btn-primary-action"
-                (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
+                class="btn-ghost"
+                *ngIf="!isPersonalWorkspace()"
+                (click)="openRequestAppModal()"
+                title="Request corporate SaaS integration from catalog"
+                style="font-size: 12px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.25); color: #cbd5e1;"
               >
-                <span class="btn-plus">+</span>
-                <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
+                <span>Request Enterprise Access</span>
               </button>
             </div>
           </div>
@@ -203,6 +204,9 @@
               <div style="font-size: 12px; color: #94a3b8; margin-top: 3px;">
                 Auto-filling username <strong style="color: #e2e8f0;">{{ toast.username }}</strong> and password into <code style="color: #93c5fd;">{{ toast.launchUrl }}</code> via Vanguard Extension / Launch Payload.
               </div>
+              <div style="font-size: 11px; color: #38bdf8; margin-top: 3px;">
+                ✓ Password automatically copied to clipboard (Ctrl+V) for instant pasting if browser extension is not loaded.
+              </div>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
               <button
@@ -315,24 +319,25 @@
               <p class="empty-desc">
                 {{ isPersonalWorkspace()
                   ? 'Add your favorite web applications (Figma, Facebook, GitHub, AWS, etc.) for dynamic autofill via the Vanguard browser extension.'
-                  : 'You do not have any single sign-on applications assigned to your account. You can request access or load demo apps below.' }}
+                  : 'You do not have any applications configured on your launchpad yet. Click "+ Add Application" below to add your web applications.' }}
               </p>
               <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                 <button
                   type="button"
                   class="btn-primary-action btn-sm"
-                  style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399;"
-                  (click)="quickAddDemoApps()"
+                  (click)="openAddAppModal()"
                 >
-                  ⚡ Quick Add Demo Apps (Figma & Facebook)
+                  <span class="btn-plus">+</span>
+                  <span>Add Application</span>
                 </button>
                 <button
                   type="button"
-                  class="btn-primary-action btn-sm"
-                  (click)="isPersonalWorkspace() ? openAddPersonalAppModal() : openRequestAppModal()"
+                  class="btn-ghost btn-sm"
+                  *ngIf="!isPersonalWorkspace()"
+                  (click)="openRequestAppModal()"
+                  style="border: 1px solid rgba(148, 163, 184, 0.25); color: #cbd5e1;"
                 >
-                  <span class="btn-plus">+</span>
-                  <span>{{ isPersonalWorkspace() ? 'Add Application' : 'Request Application' }}</span>
+                  <span>Request Enterprise Access</span>
                 </button>
               </div>
             </div>
@@ -456,7 +461,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <div>
-          <h3 class="modal-title">Add Personal Application</h3>
+          <h3 class="modal-title">{{ isPersonalWorkspace() ? 'Add Personal Application' : 'Add Web Application' }}</h3>
           <p class="modal-desc" style="margin: 4px 0 0 0; font-size: 12px;">Configure a web app bookmark for browser extension autofill</p>
         </div>
         <button type="button" class="modal-close-btn" (click)="closeAddPersonalAppModal()">✕</button>
@@ -465,7 +470,7 @@
       <div class="modal-body">
         <!-- Quick Presets -->
         <div class="preset-section">
-          <label class="form-label">Quick Presets (Click to Auto-Fill App & Demo Credentials)</label>
+          <label class="form-label">Service Presets (Optional Template)</label>
           <div class="preset-pill-group">
             <button type="button" class="preset-pill" (click)="applyPreset('figma')">🎨 Figma</button>
             <button type="button" class="preset-pill" (click)="applyPreset('facebook')">📘 Facebook</button>

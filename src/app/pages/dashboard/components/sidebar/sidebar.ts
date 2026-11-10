@@ -42,9 +42,21 @@ export class DashboardSidebar {
   readonly totpAccounts = this.dashboardService.totpAccounts;
   readonly pendingAccessRequests = this.dashboardService.pendingAccessRequests;
   readonly samlSubTab = this.dashboardService.samlSubTab;
+  readonly isMobileSidebarOpen = this.dashboardService.isMobileSidebarOpen;
 
-  setActiveTab(tab: string) { this.dashboardService.setActiveTab(tab); }
-  openAccessRequestsQueue() { this.dashboardService.openAccessRequestsQueue(); }
+  setActiveTab(tab: string) {
+    this.dashboardService.setActiveTab(tab);
+    this.dashboardService.closeMobileSidebar();
+  }
+
+  openAccessRequestsQueue() {
+    this.dashboardService.openAccessRequestsQueue();
+    this.dashboardService.closeMobileSidebar();
+  }
+
+  closeMobileSidebar() {
+    this.dashboardService.closeMobileSidebar();
+  }
 
 }
 

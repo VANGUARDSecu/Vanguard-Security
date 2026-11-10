@@ -29,13 +29,43 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
-### Real-World 2FA Authenticator Vault, Universal App Parity & Webcam Scanner (SCRUM-178)
+### Dynamic Responsive Dashboard & Mobile Navigation Drawer (SCRUM-179)
+- **Viewport Resilience & Minimized Window Layout**:
+  - Eliminates all layout breakage, overlapping header elements, and horizontal document overflow when minimizing, restoring, or resizing the browser window down to split-screen, tablet, or mobile viewports ($320\text{px} - 1024\text{px}$).
+  - Applied `max-width: 100vw`, `overflow-x: hidden`, and dynamic viewport padding (`12px 10px` on mobile, `16px 14px` on tablet, `24px clamp(...)` on desktop) to `.dashboard-wrapper`, `.dashboard-layout`, and `.dashboard-viewport`.
+- **Slide-Out Cyber Navigation Drawer**:
+  - Replaces rigid vertical column trap at $\le 1024\text{px}$ with a responsive off-canvas drawer (`transform: translateX(-100%)`) with animated slide-in transition (`transform: translateX(0)`), high z-index overlay (`z-index: 1100`), and dark blurred backdrop (`backdrop-filter: blur(4px)`).
+  - Tapping outside on the backdrop or clicking any navigation tab automatically selects the view and closes the mobile drawer.
+  - Dedicated mobile drawer header with prominent title and close button (`[✕]`).
+- **Dynamic Adaptive Header**:
+  - **Mobile Menu Toggle**: Adds an accessible hamburger menu toggle button (`mobile-menu-toggle-btn`) with `aria-expanded` and interactive SVG icon transitions (`☰` / `✕`) visible on screens $\le 1024\text{px}$.
+  - **Graceful Header Compression**:
+    - At $\le 1024\text{px}$: Hides decorative binary lines, secondary brand subtitles, and keyboard shortcut tags (`⌘K`); centers search gracefully down to 320px.
+    - At $\le 768\text{px}$: Compresses the search input; transforms user profile to initials avatar circle; hides text on "Sign Out" button to display a clean square icon button; condenses organization switcher and account scope badges.
+    - At $\le 520\text{px}$: Prioritizes essential actions (hamburger, logo, avatar, and logout icon) to maintain a sleek 52px topbar with zero horizontal clipping.
+- **Card, Grid & Modal Adaptability**:
+  - Responsive auto-fill grids: `.vault-cards-grid`, `.totp-grid`, and `.apps-grid` upgraded from rigid pixel minimums to fluid `repeat(auto-fill, minmax(min(100%, 260px - 280px), 1fr))`, guaranteeing clean wrapping without card truncation on narrow viewports.
+  - Hero banners (`.vault-hero-banner`, `.auth-hero-banner`, `.hero-banner`) stack actions and descriptions dynamically below $768\text{px}$.
+  - Interactive SSO challenge banner and number-match button grid stack vertically on mobile screens without overflowing.
+  - Modals adapt with `max-width: min(94vw, 500px)`, `max-height: 92vh`, and responsive internal padding.
+
+### Real-World 2FA Authenticator Vault, Universal App Parity, Multi-Tier QR Scanner & Lockout Protection (SCRUM-178)
 - **Universal 3rd-Party Authenticator Compatibility**:
   - Full RFC 6238 / RFC 4226 TOTP engine for any external application (**GitHub, Google, Microsoft, AWS, Discord, Cloudflare, Binance, Bitwarden**, etc.).
   - Generates standard 6-digit or 8-digit rolling one-time passwords with real-time countdown progress bar.
-- **Robust Client-Side Webcam QR Scanner & Image Decoding**:
-  - Powered by `jsqr`, decoding QR codes directly from HTML5 Canvas video streams and uploaded screenshots/images across all browsers (Chrome, Edge, Firefox, Safari) on Windows, macOS, and Linux without depending on the browser-restricted `BarcodeDetector` API.
-  - Features a cyberpunk targeting reticle with animated laser scanning overlay, camera permission error handling, and instant auto-fill upon QR detection.
+- **Multi-Tier Webcam & Image QR Scanner Engine**:
+  - Employs a multi-tier scanning architecture:
+    1. **Native Chromium `BarcodeDetector`**: Leverages hardware-accelerated OS/browser barcode detection when available for near-instant QR recognition with strong tolerance for screen glare and angle skew.
+    2. **Multi-Pass `jsQR` Decoding**: Runs standard full-resolution pass, downsampled scaling pass (max 800px width for high-DPI desktop screenshots and monitor photos), center-crop targeting pass (focusing on the scanning reticle), and binarized high-contrast luminance thresholding pass.
+  - **Universal Camera Constraints & Layout Handshake**: Uses `{ ideal: 'environment' }` with graceful fallback to `{ video: true }` so desktop/laptop front-facing webcams and USB webcams start reliably without `OverconstrainedError`. Scanner viewport displays immediately during stream initialization to prevent zero-size canvas dimensions.
+- **Contained Card Box Layout & Overflow Prevention**:
+  - Wrapped all card action buttons (`📷 QR`, `🔗 URI`, `✎`, and `✕`) in a dedicated `.card-actions` flex container.
+  - Applied `box-sizing: border-box`, `overflow: hidden`, and flex-shrink containment with text ellipsis (`text-overflow: ellipsis`) across account titles and identifiers, ensuring the **Revoke 2FA Account** button stays strictly inside the card boundary.
+- **Account Revocation Safety & GitHub Lockout Prevention**:
+  - Replaced browser `confirm()` with a dedicated **Revoke 2FA Account Safety Modal**.
+  - Clearly explains that revoking the local 2FA token from Vanguard does **NOT** disable two-factor authentication on GitHub or third-party providers.
+  - Warns users to disable 2FA in GitHub settings first or ensure active recovery codes are stored.
+  - Provides a 1-click **Copy Backup URI** button directly inside the modal so users can back up their secret before revocation.
 - **Elimination of Mock / Hardcoded Test Artifacts**:
   - Completely purged all test generator buttons (`⚡ Instant Test 2FA Account`, `⚡ Generate Instant Test 2FA Account`, `⚡ Load Sample 2FA QR Data`), hardcoded test secrets (`JBSWY3DPEHPK3PXP`), and dummy emails.
   - Service preset buttons now exclusively fill the service name (e.g. "GitHub", "AWS") without pre-populating dummy credentials.

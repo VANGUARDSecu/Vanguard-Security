@@ -35,7 +35,7 @@
 
 .apps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 18px;
 }
 
@@ -1173,4 +1173,27 @@
   background: rgba(239, 68, 68, 0.22);
   color: #ffffff;
   border-color: #ef4444;
+}
+
+/* ==========================================================================
+   DYNAMIC RESPONSIVE ADJUSTMENTS (SCRUM-179)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .category-filter-bar {
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .cat-pill {
+    padding: 6px 12px;
+    font-size: 11.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .apps-grid {
+    grid-template-columns: 1fr;
+  }
+  .app-card {
+    padding: 16px;
+  }
 }

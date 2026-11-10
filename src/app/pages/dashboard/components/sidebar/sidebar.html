@@ -1,4 +1,33 @@
-    <aside class="dashboard-sidebar">
+    <!-- Mobile Drawer Backdrop Overlay (SCRUM-179) -->
+    <div
+      class="sidebar-backdrop"
+      [class.backdrop-active]="isMobileSidebarOpen()"
+      (click)="closeMobileSidebar()"
+      aria-hidden="true"
+    ></div>
+
+    <aside class="dashboard-sidebar" [class.sidebar-open]="isMobileSidebarOpen()">
+      <!-- Mobile Drawer Header with Close Button (SCRUM-179) -->
+      <div class="sidebar-mobile-header">
+        <div class="sidebar-mobile-title">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <span>NAVIGATION MENU</span>
+        </div>
+        <button
+          type="button"
+          class="sidebar-close-btn"
+          (click)="closeMobileSidebar()"
+          aria-label="Close navigation menu"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="close-icon">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
       <div class="sidebar-section-label">
         {{ isIndividual() ? 'PERSONAL SECURITY SUITE' : (isPersonalWorkspace() ? 'PERSONAL WORKSPACE' : (viewMode() === 'admin' ? 'GOVERNANCE & PROTOCOLS' : 'ORGANIZATION PORTAL')) }}
       </div>

@@ -23,12 +23,20 @@ export class UserSecurity {
   readonly user = this.dashboardService.user;
   readonly hasTotpEnrolled = this.dashboardService.hasTotpEnrolled;
   readonly showEnrollTotpModal = this.dashboardService.showEnrollTotpModal;
+  readonly showDeEnrollModal = this.dashboardService.showDeEnrollModal;
   readonly totpQrUrl = this.dashboardService.totpQrUrl;
   readonly totpSecret = this.dashboardService.totpSecret;
+  readonly totpUri = this.dashboardService.totpUri;
   readonly totpEnrollError = this.dashboardService.totpEnrollError;
   readonly totpEnrollSuccess = this.dashboardService.totpEnrollSuccess;
+  readonly isGeneratingTotpQr = this.dashboardService.isGeneratingTotpQr;
+  readonly isConfirmingTotp = this.dashboardService.isConfirmingTotp;
+  readonly isDeEnrollingTotp = this.dashboardService.isDeEnrollingTotp;
   readonly recoveryCodes = this.dashboardService.recoveryCodes;
   readonly copiedCodes = this.dashboardService.copiedCodes;
+
+  readonly copiedSecret = signal<boolean>(false);
+  readonly copiedUri = signal<boolean>(false);
 
   // SCRUM-57: Connected & Integrated Applications
   readonly connectedApps = this.dashboardService.connectedApps;
@@ -96,10 +104,35 @@ export class UserSecurity {
   get totpVerifyCode() { return this.dashboardService.totpVerifyCode; }
   set totpVerifyCode(v: string) { this.dashboardService.totpVerifyCode = v; }
 
-  startEnrollTotp(): void { this.dashboardService.startEnrollTotp(); }
+  startEnrollTotp(): Promise<void> { return this.dashboardService.startEnrollTotp(); }
   closeEnrollTotpModal(): void { this.dashboardService.closeEnrollTotpModal(); }
   confirmEnrollTotp(): void { this.dashboardService.confirmEnrollTotp(); }
+  openDeEnrollModal(): void { this.dashboardService.openDeEnrollModal(); }
+  closeDeEnrollModal(): void { this.dashboardService.closeDeEnrollModal(); }
   disableTotp(): void { this.dashboardService.disableTotp(); }
+
+  copySecretKey(): void {
+    const secret = this.totpSecret();
+    if (!secret || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard.writeText(secret).then(() => {
+      this.copiedSecret.set(true);
+      setTimeout(() => this.copiedSecret.set(false), 2500);
+    });
+  }
+
+  copySetupUri(): void {
+    const uri = this.totpUri();
+    if (!uri || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    navigator.clipboard.writeText(uri).then(() => {
+      this.copiedUri.set(true);
+      setTimeout(() => this.copiedUri.set(false), 2500);
+    });
+  }
+
+  formatSecretKey(secret: string): string {
+    if (!secret) return '';
+    return secret.replace(/(.{4})/g, '$1 ').trim();
+  }
 
   // Recovery Codes Actions
   copyRecoveryCodes(): void { this.dashboardService.copyRecoveryCodes(); }

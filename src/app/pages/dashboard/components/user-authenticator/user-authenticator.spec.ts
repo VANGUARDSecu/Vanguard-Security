@@ -222,4 +222,92 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     expect(component.accountPendingRevocation()).toBeNull();
     expect(component.activeTotpAccounts().length).toBe(0);
   });
+
+  it('SCRUM-178: should handle dragover, dragleave and drop state on QR dropzone', async () => {
+    component.openAddModal('qr');
+    expect(component.enrollMode()).toBe('qr');
+    expect(component.isDraggingOver()).toBe(false);
+
+    const dragEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      dataTransfer: { dropEffect: '' },
+    } as unknown as DragEvent;
+
+    component.onDragOver(dragEvent);
+    expect(dragEvent.preventDefault).toHaveBeenCalled();
+    expect(component.isDraggingOver()).toBe(true);
+
+    const leaveEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    } as unknown as DragEvent;
+
+    component.onDragLeave(leaveEvent);
+    expect(component.isDraggingOver()).toBe(false);
+
+    // Drop with mock file
+    const dropEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      dataTransfer: {
+        files: [new File(['dummy'], 'qr.png', { type: 'image/png' })],
+      },
+    } as unknown as DragEvent;
+
+    // Spy on processQrImageFile
+    const spy = vi.spyOn(component, 'processQrImageFile').mockResolvedValue();
+    await component.onDrop(dropEvent);
+    expect(dropEvent.preventDefault).toHaveBeenCalled();
+    expect(component.isDraggingOver()).toBe(false);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('SCRUM-178: should handle clipboard paste event with image file', async () => {
+    component.openAddModal('qr');
+
+    const mockFile = new File(['fake-qr'], 'qr.png', { type: 'image/png' });
+    const clipboardEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      clipboardData: {
+        items: [
+          {
+            type: 'image/png',
+            kind: 'file',
+            getAsFile: () => mockFile,
+          },
+        ],
+        getData: vi.fn().mockReturnValue(''),
+      },
+    } as unknown as ClipboardEvent;
+
+    const spy = vi.spyOn(component, 'processQrImageFile').mockResolvedValue();
+    await component.handleClipboardEvent(clipboardEvent);
+
+    expect(clipboardEvent.preventDefault).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledWith(mockFile);
+  });
+
+  it('SCRUM-178: should handle clipboard paste event with otpauth URI text in QR mode', async () => {
+    component.openAddModal('qr');
+
+    const uri = 'otpauth://totp/GitHub:octocat?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=GitHub';
+    const clipboardEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      clipboardData: {
+        items: [],
+        getData: vi.fn().mockReturnValue(uri),
+      },
+    } as unknown as ClipboardEvent;
+
+    await component.handleClipboardEvent(clipboardEvent);
+
+    expect(clipboardEvent.preventDefault).toHaveBeenCalled();
+    expect(component.formIssuer).toBe('GitHub');
+    expect(component.formAccountName).toBe('octocat');
+    expect(component.formSecret).toBe('HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ');
+    expect(component.enrollMode()).toBe('manual');
+  });
 });

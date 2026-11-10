@@ -117,4 +117,51 @@ describe('DashboardSidebar Component (SCRUM-54 Individual Security Suite)', () =
     expect(buttonTexts.some((t) => t.includes('Device Fleet'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Personal Vault'))).toBe(false);
   });
+
+  it('should toggle mobile drawer and handle backdrop clicks and auto-close on navigation (SCRUM-179)', () => {
+    const sidebarEl: HTMLElement = fixture.nativeElement.querySelector('.dashboard-sidebar');
+    const backdropEl: HTMLElement = fixture.nativeElement.querySelector('.sidebar-backdrop');
+    const closeBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.sidebar-close-btn');
+
+    expect(sidebarEl).toBeTruthy();
+    expect(backdropEl).toBeTruthy();
+    expect(closeBtn).toBeTruthy();
+
+    // Initial state: closed
+    expect(component.isMobileSidebarOpen()).toBe(false);
+    expect(sidebarEl.classList.contains('sidebar-open')).toBe(false);
+    expect(backdropEl.classList.contains('backdrop-active')).toBe(false);
+
+    // Open mobile sidebar
+    dashboardService.openMobileSidebar();
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(true);
+    expect(sidebarEl.classList.contains('sidebar-open')).toBe(true);
+    expect(backdropEl.classList.contains('backdrop-active')).toBe(true);
+
+    // Clicking close button closes the drawer
+    closeBtn.click();
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(false);
+    expect(sidebarEl.classList.contains('sidebar-open')).toBe(false);
+
+    // Open again and click backdrop
+    dashboardService.openMobileSidebar();
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(true);
+
+    backdropEl.click();
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(false);
+
+    // Open again and select a tab -> auto-closes
+    dashboardService.openMobileSidebar();
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(true);
+
+    component.setActiveTab('authenticator');
+    fixture.detectChanges();
+    expect(component.isMobileSidebarOpen()).toBe(false);
+    expect(component.activeTab()).toBe('authenticator');
+  });
 });

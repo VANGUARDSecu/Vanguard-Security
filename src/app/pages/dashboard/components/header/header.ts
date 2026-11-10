@@ -22,6 +22,11 @@ export class DashboardHeader {
   readonly userInitials = this.dashboardService.userInitials;
   readonly userRoleLabel = this.dashboardService.userRoleLabel;
   readonly isIndividual = this.dashboardService.isIndividual;
+  readonly isMobileSidebarOpen = this.dashboardService.isMobileSidebarOpen;
+
+  toggleMobileSidebar(): void {
+    this.dashboardService.toggleMobileSidebar();
+  }
 
   // SCRUM-50: Upgrade Personal Vault to Organization
   readonly showUpgradeModal = signal<boolean>(false);

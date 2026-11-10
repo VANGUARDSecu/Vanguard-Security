@@ -209,4 +209,23 @@ describe('DashboardHeader Component (SCRUM-28 Header Org Switcher)', () => {
     expect(fixture.nativeElement.querySelector('.individual-vault-indicator')).toBeNull();
     expect(fixture.nativeElement.querySelector('.org-switcher-container')).toBeNull();
   });
+
+  it('should toggle mobile sidebar drawer via mobile menu toggle button (SCRUM-179)', () => {
+    const toggleBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.mobile-menu-toggle-btn');
+    expect(toggleBtn).toBeTruthy();
+    expect(component.isMobileSidebarOpen()).toBe(false);
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('false');
+
+    toggleBtn.click();
+    fixture.detectChanges();
+
+    expect(component.isMobileSidebarOpen()).toBe(true);
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('true');
+
+    toggleBtn.click();
+    fixture.detectChanges();
+
+    expect(component.isMobileSidebarOpen()).toBe(false);
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('false');
+  });
 });

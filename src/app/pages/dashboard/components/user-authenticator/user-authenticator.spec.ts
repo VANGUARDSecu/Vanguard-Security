@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -151,5 +152,41 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     component.saveAccount();
 
     expect(component.filteredTotpAccounts()[0].accountName).toBe('lead.designer@vanguard.dev');
+  });
+
+  it('SCRUM-178: should enroll real GitHub setup key with spaces and hyphens', async () => {
+    component.openAddModal('manual');
+    component.formIssuer = 'GitHub';
+    component.formAccountName = 'octocat';
+    // Realistic GitHub secret formatted with spaces
+    component.formSecret = 'HXDM VJEC JJWS RB3H WIZR 4IFU GFTM XBOZ';
+
+    await component.saveAccount();
+    await dashboardService.refreshTotpCodes();
+    fixture.detectChanges();
+
+    const githubAcc = component.activeTotpAccounts().find((a) => a.issuer === 'GitHub');
+    expect(githubAcc).toBeDefined();
+    expect(githubAcc?.secret).toBe('HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ');
+    expect(githubAcc?.currentCode).toMatch(/^\d{6}$/);
+  });
+
+  it('SCRUM-178: should auto-detect and parse when otpauth:// URI is pasted in secret field', async () => {
+    component.openAddModal('manual');
+    component.formSecret =
+      'otpauth://totp/GitHub:octocat?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&issuer=GitHub';
+
+    await component.updatePreviewCode();
+    expect(component.formIssuer).toBe('GitHub');
+    expect(component.formAccountName).toBe('octocat');
+    expect(component.formSecret).toBe('HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ');
+    expect(component.previewCode()).toMatch(/^\d{6}$/);
+  });
+
+  it('SCRUM-178: selectPreset should only populate issuer name without fake hardcoded secrets', () => {
+    component.openAddModal('manual');
+    component.selectPreset({ issuer: 'AWS', icon: '☁️' });
+    expect(component.formIssuer).toBe('AWS');
+    expect(component.formSecret).toBe('');
   });
 });

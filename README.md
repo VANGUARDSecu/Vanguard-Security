@@ -29,6 +29,32 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 
 ## Workspaces & Features
 
+### Real-World 2FA Authenticator Vault, Universal App Parity & Webcam Scanner (SCRUM-178)
+- **Universal 3rd-Party Authenticator Compatibility**:
+  - Full RFC 6238 / RFC 4226 TOTP engine for any external application (**GitHub, Google, Microsoft, AWS, Discord, Cloudflare, Binance, Bitwarden**, etc.).
+  - Generates standard 6-digit or 8-digit rolling one-time passwords with real-time countdown progress bar.
+- **Robust Client-Side Webcam QR Scanner & Image Decoding**:
+  - Powered by `jsqr`, decoding QR codes directly from HTML5 Canvas video streams and uploaded screenshots/images across all browsers (Chrome, Edge, Firefox, Safari) on Windows, macOS, and Linux without depending on the browser-restricted `BarcodeDetector` API.
+  - Features a cyberpunk targeting reticle with animated laser scanning overlay, camera permission error handling, and instant auto-fill upon QR detection.
+- **Elimination of Mock / Hardcoded Test Artifacts**:
+  - Completely purged all test generator buttons (`⚡ Instant Test 2FA Account`, `⚡ Generate Instant Test 2FA Account`, `⚡ Load Sample 2FA QR Data`), hardcoded test secrets (`JBSWY3DPEHPK3PXP`), and dummy emails.
+  - Service preset buttons now exclusively fill the service name (e.g. "GitHub", "AWS") without pre-populating dummy credentials.
+- **Intelligent Input Parsing & Sanitization**:
+  - Accepts raw Base32 setup keys formatted with spaces or hyphens (standard GitHub format `abcd efgh ijkl mnop ...` and Microsoft format `xxxx-xxxx-xxxx-xxxx`), automatically stripping spaces, hyphens, and colons.
+  - Gracefully detects when a full `otpauth://totp/...` URI is pasted into either the URI field or the secret key input field.
+  - Displays a live verification preview code in the modal before saving, enabling users to verify their code against GitHub/Google's 2FA setup screen immediately.
+- **Tab-Throttling Drift Prevention & Per-User Vault Scoping**:
+  - Re-evaluates 30-second time-step windows on every second tick and immediately upon browser window focus or visibility change (`document.visibilityState === 'visible'`), ensuring codes are never stale when switching between tabs.
+  - Scopes 2FA authenticator vault tokens per user account in `localStorage` (`vanguard_user_totp_accounts_<email>`), ensuring individual accounts reliably retain their authenticator tokens across logins and sessions.
+
+### Admin Directory Users Employee List Display & Multi-Tenant Synchronization (SCRUM-177)
+- **Directory Employee State Preservation**:
+  - `DashboardService.initDirectoryUsers()` preserves all cached directory users and created employees across refreshes while ensuring the current admin profile is always present as Super Administrator.
+- **Authoritative Cloud Tenant ID Resolution**:
+  - `loadDirectoryUsers()`, `submitInviteUser()`, and `retryInviteEmail()` resolve the true tenant UUID if `activeOrganizationId()` is undefined, synthetic (`'org_root'`), or starts with `'org_'`.
+  - Once `initSupabaseSync()` finishes loading cloud tenants, it automatically re-triggers `this.loadDirectoryUsers()` to populate live employees from Supabase.
+- **Seamless Local & Cloud Reconciliation**:
+  - Merges backend users received from `GET /auth/directory-users` with local directory storage, ensuring newly invited employees and activated accounts are immediately visible in the Directory Users table.
 ### SSO Google OAuth Redirection, Dashboard Approval Challenge & Post-Auth MFA Method Selection (SCRUM-176)
 - **Google OAuth SSO Callback Preservation**:
   - Google OAuth redirect URI defaults to `/login` rather than `/dashboard`, ensuring that OAuth tokens and codes are processed by `checkForOAuthCallback()` without route guard interruption.

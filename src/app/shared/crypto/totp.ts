@@ -7,7 +7,7 @@
 
 export function base32Decode(input: string): Uint8Array {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const clean = (input || '').toUpperCase().replace(/=+$/g, '').replace(/\s+/g, '');
+  const clean = (input || '').toUpperCase().replace(/=+$/g, '').replace(/[\s\-:_]/g, '');
   let bits = 0;
   let value = 0;
   const out: number[] = [];
@@ -41,23 +41,47 @@ export interface ParsedOtpAuthUri {
 }
 
 /**
- * SCRUM-166: Parse a standard Google Authenticator / RFC 6238 otpauth://totp/ URI
- * from 3rd-party applications (Google, GitHub, Facebook, Figma, AWS, Discord, etc.).
+ * Parse a standard Google Authenticator / RFC 6238 otpauth://totp/ URI
+ * from 3rd-party applications (Google, GitHub, Facebook, Figma, AWS, Discord, etc.)
+ * or raw Base32 secret keys.
  */
 export function parseOtpAuthUri(rawUri: string): ParsedOtpAuthUri {
   const trimmed = (rawUri || '').trim();
-  if (!trimmed.toLowerCase().startsWith('otpauth://')) {
-    throw new Error('Invalid URI format. Must start with otpauth://totp/...');
+  if (!trimmed) {
+    throw new Error('URI or secret key is required.');
   }
+
+  // Gracefully support pasting raw Base32 secret keys directly
+  if (!trimmed.toLowerCase().startsWith('otpauth:')) {
+    const cleanSecret = trimmed.toUpperCase().replace(/=+$/g, '').replace(/[\s\-:_]/g, '');
+    try {
+      base32Decode(cleanSecret);
+      return {
+        issuer: 'External Service',
+        accountName: 'Primary Account',
+        secret: cleanSecret,
+        digits: 6,
+        period: 30,
+        algorithm: 'SHA1',
+      };
+    } catch {
+      throw new Error('Invalid URI or secret key format. Must be an otpauth://totp/... URI or Base32 secret key.');
+    }
+  }
+
+  // Normalize URI to ensure standard otpauth://totp/ prefix
+  const normalizedUri = trimmed
+    .replace(/^otpauth:\/+(totp\/)?/i, 'otpauth://totp/')
+    .replace(/^otpauth:totp\//i, 'otpauth://totp/');
 
   let parsed: URL;
   try {
-    parsed = new URL(trimmed);
+    parsed = new URL(normalizedUri);
   } catch {
     throw new Error('Malformed otpauth:// URI.');
   }
 
-  const secretParam = (parsed.searchParams.get('secret') || '').replace(/\s+/g, '').toUpperCase();
+  const secretParam = (parsed.searchParams.get('secret') || '').replace(/[\s\-:_]/g, '').toUpperCase();
   if (!secretParam) {
     throw new Error('otpauth:// URI is missing the required secret parameter.');
   }
@@ -73,7 +97,17 @@ export function parseOtpAuthUri(rawUri: string): ParsedOtpAuthUri {
     accountName = rest.join(':').trim();
   }
 
-  const issuer = (parsed.searchParams.get('issuer') || issuerFromLabel || 'External Service').trim();
+  let issuer = (parsed.searchParams.get('issuer') || issuerFromLabel).trim();
+  if (!issuer) {
+    if (accountName.includes('@')) {
+      const domain = accountName.split('@')[1];
+      const match = domain.split('.')[0];
+      issuer = match ? match.charAt(0).toUpperCase() + match.slice(1) : 'External Service';
+    } else {
+      issuer = 'External Service';
+    }
+  }
+
   const digitsRaw = Number(parsed.searchParams.get('digits') || '6');
   const digits: 6 | 8 = digitsRaw === 8 ? 8 : 6;
   const periodRaw = Number(parsed.searchParams.get('period') || '30');
@@ -136,10 +170,10 @@ export async function generateTotp(base32Secret: string, opts: TotpOptions = {})
   const hmac = new Uint8Array(await subtle.sign('HMAC', key, counterBytes as unknown as BufferSource));
   const offset = hmac[hmac.length - 1] & 0x0f;
   const binary =
-    ((hmac[offset] & 0x7f) << 24) |
+    (((hmac[offset] & 0x7f) << 24) |
     ((hmac[offset + 1] & 0xff) << 16) |
     ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
+    (hmac[offset + 3] & 0xff)) >>> 0;
   return (binary % 10 ** digits).toString().padStart(digits, '0');
 }
 

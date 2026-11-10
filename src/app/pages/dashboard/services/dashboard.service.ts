@@ -132,30 +132,52 @@ export class DashboardService {
     const userEmail = u?.email?.toLowerCase().trim();
 
     const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    if (stored && stored.length > 0 && userEmail) {
-      // SCRUM-153: Verify that stored users belong to the current authenticated account
-      const currentUserInStore = stored.some((usr) => usr.email?.toLowerCase().trim() === userEmail);
-      if (currentUserInStore) {
-        const seen = new Set<string>();
-        const now = Date.now();
-        const updated = stored
-          .filter((usr) => {
-            const email = usr.email?.toLowerCase().trim();
-            if (!email || seen.has(email)) return false;
-            seen.add(email);
-            return true;
-          })
-          .map((usr) => {
-            if (usr.accountStatus === 'Pending' && usr.expiresAt) {
-              const exp = new Date(usr.expiresAt).getTime();
-              if (exp < now) {
-                return { ...usr, accountStatus: 'Expired' as const };
-              }
+    if (stored && stored.length > 0) {
+      const seen = new Set<string>();
+      const now = Date.now();
+      const updated = stored
+        .filter((usr) => {
+          const email = usr.email?.toLowerCase().trim();
+          if (!email || seen.has(email)) return false;
+          seen.add(email);
+          return true;
+        })
+        .map((usr) => {
+          if (usr.accountStatus === 'Pending' && usr.expiresAt) {
+            const exp = new Date(usr.expiresAt).getTime();
+            if (exp < now) {
+              return { ...usr, accountStatus: 'Expired' as const };
             }
-            return usr;
-          });
-        return updated;
+          }
+          return usr;
+        });
+
+      if (userEmail && !seen.has(userEmail) && u && u.email) {
+        const name = u.firstName && u.lastName
+          ? `${u.firstName} ${u.lastName}`
+          : (u.firstName || u.email.split('@')[0]);
+        const initials = (u.firstName && u.lastName)
+          ? (u.firstName[0] + u.lastName[0]).toUpperCase()
+          : u.email.substring(0, 2).toUpperCase();
+        const role = u.role === 'admin'
+          ? 'Super Administrator'
+          : u.role === 'security_officer'
+            ? 'Security Officer'
+            : 'Directory Member';
+
+        updated.unshift({
+          id: u.id || 'usr-root',
+          name,
+          email: u.email,
+          department: 'Security Ops',
+          role,
+          mfaStatus: u.user_metadata?.['has_totp'] ? 'Enrolled (TOTP)' : 'Email OTP Only',
+          accountStatus: 'Active',
+          lastLogin: 'Just now',
+          initials,
+        });
       }
+      return updated;
     }
     if (u && u.email) {
       const name = u.firstName && u.lastName
@@ -1994,6 +2016,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
         }
+        this.loadDirectoryUsers();
         }
       }
 
@@ -2149,11 +2172,27 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly isDirectoryLoading = signal<boolean>(false);
 
   /**
-   * SCRUM-156: Synchronize directory users and activation statuses with the backend.
+   * SCRUM-156 & SCRUM-177: Synchronize directory users and activation statuses with the backend.
    */
   loadDirectoryUsers(): void {
     if (!this.isBrowser) return;
-    const tenantId = this.activeOrganizationId();
+    let tenantId = this.activeOrganizationId();
+    if (!tenantId || tenantId === 'org_root' || tenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        tenantId = realOrg.id;
+        this.activeOrganizationId.set(realOrg.id);
+        this.saveStored('vanguard_active_org_id', realOrg.id);
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) {
+          tenantId = userTenant;
+          this.activeOrganizationId.set(userTenant);
+          this.saveStored('vanguard_active_org_id', userTenant);
+        }
+      }
+    }
     this.isDirectoryLoading.set(true);
     this.authService.getDirectoryUsers(tenantId).subscribe({
       next: (backendUsers) => {
@@ -2168,11 +2207,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             if (idx !== -1) {
               merged[idx] = {
                 ...merged[idx],
+                name: b.name || merged[idx].name,
                 accountStatus: b.accountStatus,
                 lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : merged[idx].lastLogin),
                 mfaStatus: b.mfaStatus || merged[idx].mfaStatus,
                 role: b.role || merged[idx].role,
                 department: b.department || merged[idx].department,
+                initials: b.initials || merged[idx].initials,
+                invitedAt: b.invitedAt || merged[idx].invitedAt,
+                expiresAt: b.expiresAt || merged[idx].expiresAt,
               };
             } else {
               merged.push({
@@ -2773,6 +2816,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.inviteError.set(null);
     this.showAdminNotice(`Provisioning employee and dispatching email to ${newUser.email}...`);
 
+    let targetTenantId = this.activeOrganizationId();
+    if (!targetTenantId || targetTenantId === 'org_root' || targetTenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        targetTenantId = realOrg.id;
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) targetTenantId = userTenant;
+      }
+    }
+
     this.authService
       .sendInviteEmail({
         email: newUser.email,
@@ -2781,7 +2836,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: newUser.department,
         temporaryPassword: newUser.temporaryPassword || this.invitePassword.trim(),
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
-        tenantId: this.activeOrganizationId(),
+        tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {
@@ -2817,6 +2872,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const user = this.inviteCreatedUser();
     if (!user) return;
     this.inviteEmailStatus.set('sending');
+    let targetTenantId = this.activeOrganizationId();
+    if (!targetTenantId || targetTenantId === 'org_root' || targetTenantId.startsWith('org_')) {
+      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
+      if (realOrg) {
+        targetTenantId = realOrg.id;
+      } else {
+        const u = this.user();
+        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+        if (userTenant) targetTenantId = userTenant;
+      }
+    }
+
     this.authService
       .sendInviteEmail({
         email: user.email,
@@ -2825,7 +2892,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         department: user.department,
         temporaryPassword: user.temporaryPassword || '',
         loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
-        tenantId: this.activeOrganizationId(),
+        tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {
@@ -6238,18 +6305,36 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
-  // SCRUM-50: TOTP 2FA Authenticator State & Actions (Zero Hardcoded Initial State)
+  // SCRUM-50 & SCRUM-178: TOTP 2FA Authenticator State & Actions
   // ==========================================
+  private getTotpStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim();
+    return email ? `vanguard_user_totp_accounts_${email}` : 'vanguard_user_totp_accounts';
+  }
+
   private initTotpAccounts(): TotpAccount[] {
-    return this.loadStored<TotpAccount[]>('vanguard_user_totp_accounts', []);
+    const userKey = this.getTotpStorageKey();
+    const stored = this.loadStored<TotpAccount[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
+    // Fallback to legacy global key if user key is empty
+    const legacy = this.loadStored<TotpAccount[]>('vanguard_user_totp_accounts', []);
+    return legacy || [];
+  }
+
+  private persistTotpAccounts(): void {
+    const accounts = this.totpAccounts();
+    const key = this.getTotpStorageKey();
+    this.saveStored(key, accounts);
+    this.saveStored('vanguard_user_totp_accounts', accounts);
   }
 
   readonly totpAccounts = signal<TotpAccount[]>(this.initTotpAccounts());
   readonly totpSecondsRemaining = signal<number>(30);
   readonly totpTick = signal<number>(0);
   private totpIntervalId: any = null;
+  private lastTotpStep = Math.floor(Date.now() / 1000 / 30);
 
-  // SCRUM-116: real RFC 6238 codes, computed asynchronously (HMAC-SHA1 is async
+  // SCRUM-116 & SCRUM-178: real RFC 6238 codes, computed asynchronously (HMAC-SHA1 is async
   // via Web Crypto) and cached per account id for synchronous template reads.
   readonly totpCodes = signal<Record<string, string>>({});
 
@@ -6294,14 +6379,17 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   private startTotpTimer(): void {
     if (!this.isBrowser) return;
     if (this.totpIntervalId) clearInterval(this.totpIntervalId);
-    // SCRUM-116: compute real codes once now, then refresh each new 30s window.
     void this.refreshTotpCodes();
 
     const updateTimer = () => {
-      const currentSeconds = Math.floor(Date.now() / 1000) % 30;
+      const nowSec = Math.floor(Date.now() / 1000);
+      const currentSeconds = nowSec % 30;
       const remaining = 30 - currentSeconds;
       this.totpSecondsRemaining.set(remaining);
-      if (remaining === 30 || remaining === 1) {
+
+      const currentStep = Math.floor(nowSec / 30);
+      if (currentStep !== this.lastTotpStep) {
+        this.lastTotpStep = currentStep;
         this.totpTick.update((t) => t + 1);
         void this.refreshTotpCodes();
       }
@@ -6309,6 +6397,28 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     updateTimer();
     this.totpIntervalId = setInterval(updateTimer, 1000);
+
+    // Refresh immediately when window or tab regains focus (prevents tab throttling stale codes)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => {
+        const nowStep = Math.floor(Date.now() / 1000 / 30);
+        if (nowStep !== this.lastTotpStep) {
+          this.lastTotpStep = nowStep;
+          this.totpTick.update((t) => t + 1);
+        }
+        void this.refreshTotpCodes();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          const nowStep = Math.floor(Date.now() / 1000 / 30);
+          if (nowStep !== this.lastTotpStep) {
+            this.lastTotpStep = nowStep;
+            this.totpTick.update((t) => t + 1);
+          }
+          void this.refreshTotpCodes();
+        }
+      });
+    }
   }
 
   addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
@@ -6320,7 +6430,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       id: 'totp-acc-' + Date.now()
     };
     this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     void this.refreshTotpCodes();
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
   }
@@ -6329,7 +6439,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.totpAccounts.update((accounts) =>
       accounts.map((acc) => (acc.id === id ? { ...acc, ...updates } : acc))
     );
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     void this.refreshTotpCodes();
     this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
   }
@@ -6337,7 +6447,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   deleteTotpAccount(id: string): void {
     const acc = this.totpAccounts().find((a) => a.id === id);
     this.totpAccounts.update((accounts) => accounts.filter((a) => a.id !== id));
-    this.saveStored('vanguard_user_totp_accounts', this.totpAccounts());
+    this.persistTotpAccounts();
     if (acc) {
       this.logAuditEvent(`Removed 2FA Authenticator token: ${acc.issuer}`, 'TOTP Authenticator', 'Revoke', 'success', 'Low');
     }

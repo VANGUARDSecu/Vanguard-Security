@@ -66,7 +66,7 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
   - Interactive SSO challenge banner and number-match button grid stack vertically on mobile screens without overflowing.
   - Modals adapt with `max-width: min(94vw, 500px)`, `max-height: 92vh`, and responsive internal padding.
 
-### Real-World 2FA Authenticator Vault, Universal App Parity, Drag-Drop/Paste QR Engine & Lockout Protection (SCRUM-178)
+### Real-World 2FA Authenticator Vault, Universal App Parity, Multi-Tier QR Scanner & Lockout Protection (SCRUM-178)
 - **Universal 3rd-Party Authenticator Compatibility**:
   - Full RFC 6238 / RFC 4226 TOTP engine for any external application (**GitHub, Google, Microsoft, AWS, Discord, Cloudflare, Binance, Bitwarden**, etc.).
   - Generates standard 6-digit or 8-digit rolling one-time passwords with real-time countdown progress bar.

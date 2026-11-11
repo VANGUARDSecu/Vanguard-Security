@@ -1016,6 +1016,17 @@ export class AuthService {
               }
             }
             keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // SCRUM-180: Notify Vanguard extension of session logout
+      if (typeof window !== 'undefined') {
+        try {
+          window.postMessage({
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_LOGOUT',
+          }, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-logout'));
+        } catch {}
+      }
           }
         } catch {}
       }
@@ -1055,6 +1066,22 @@ export class AuthService {
       }
       if (session.expires_at) {
         localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+      }
+
+      // SCRUM-180: Notify Vanguard extension content script of authenticated session
+      if (typeof window !== 'undefined') {
+        try {
+          const syncPayload = {
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_SYNC',
+            token: session.access_token,
+            user: normalizedUser,
+            email: normalizedUser.email,
+            timestamp: Date.now(),
+          };
+          window.postMessage(syncPayload, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-sync', { detail: syncPayload }));
+        } catch {}
       }
 
       if (session.access_token && session.refresh_token) {
@@ -1662,6 +1689,17 @@ export class AuthService {
         }
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // SCRUM-180: Notify Vanguard extension of session logout
+      if (typeof window !== 'undefined') {
+        try {
+          window.postMessage({
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_LOGOUT',
+          }, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-logout'));
+        } catch {}
+      }
       let ssoPending: string | null = null;
       if (preserveSso) {
         ssoPending = sessionStorage.getItem('vanguard_sso_pending');

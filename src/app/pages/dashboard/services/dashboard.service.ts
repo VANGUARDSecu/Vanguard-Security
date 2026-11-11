@@ -9,6 +9,7 @@ import { VaultCryptoService } from './vault-crypto.service';
 import { environment } from '../../../../environments/environment';
 import QRCode from 'qrcode';
 import { generateTotp } from '../../../shared/crypto/totp';
+import { isSelfApprovableDummyApp } from '../../../shared/dummy-app.util';
 import {
   ProtocolStatus,
   SaaSApp,
@@ -2374,6 +2375,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.isSubmittingSsoApproval.set(false);
         this.liveSsoChallenge.set(null);
         this.ssoApprovalSuccessNotice.set(`✓ Approved sign-in request for ${challenge?.appName || 'application'}!`);
+        this.loadAccessRequests(true);
+        this.loadCompanyApps();
         this.logAuditEvent(
           `Approved SSO Sign-in Request for ${challenge?.appName || 'application'} (Number match: ${selectedCode})`,
           'Zero-Trust SSO',
@@ -3583,18 +3586,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.accessRequestStatusFilter.set(filter);
   }
 
-  approveAccessRequest(requestId: string, adminNotes?: string): void {
-    const request = this.appAccessRequests().find((r) => r.id === requestId);
-    if (!request) return;
+  /** Whether the application or client ID identifies Acme Dummy Web (user self-approvable, SCRUM-167). */
+  isSelfApprovableDummyApp(nameOrClientId?: string | null): boolean {
+    return isSelfApprovableDummyApp(nameOrClientId);
+  }
 
-    const reviewer = this.displayName() || 'Vanguard Administrator';
+  /** Apply approved request state, auto-assign the app locally/in Supabase, and record audit trail. */
+  private applyAccessRequestApprovalLocally(
+    request: AppAccessRequest,
+    reviewer: string,
+    notes: string,
+    auditSource: string,
+  ): void {
     const reviewedAt = new Date().toISOString();
-    const notes = adminNotes || 'Approved by Administrator';
 
     // 1. Update request status to Approved
     this.appAccessRequests.update((list) =>
       list.map((r) =>
-        r.id === requestId
+        r.id === request.id
           ? {
               ...r,
               status: 'Approved' as const,
@@ -3610,15 +3619,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // Persist status update to Supabase (SCRUM-158)
     if (this.isBrowser) {
       this.supabaseService
-        .updateAccessRequestStatus(requestId, 'Approved', notes, reviewer)
+        .updateAccessRequestStatus(request.id, 'Approved', notes, reviewer)
         .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
-
-      // Also persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
-      this.http
-        .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
-        .subscribe({
-          error: (err) => console.warn('Backend approveAccessRequest notice:', err),
-        });
     }
 
     // 2. Automatically assign the SaaS application to the user's active launchpad
@@ -3662,13 +3664,55 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // 3. Log audit event in Tenant Audit Logs
     this.logAuditEvent(
       `Application access approved: ${request.appName} for ${request.userName} (${request.userEmail})`,
-      'Admin Console',
+      auditSource,
       'SAML 2.0 & OIDC',
       'success',
       'Medium'
     );
 
     this.showAdminNotice(`Application access approved: ${request.appName} for ${request.userName}.`);
+  }
+
+  approveAccessRequest(requestId: string, adminNotes?: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request) return;
+
+    const reviewer = this.displayName() || 'Vanguard Administrator';
+    const notes = adminNotes || 'Approved by Administrator';
+
+    this.applyAccessRequestApprovalLocally(request, reviewer, notes, 'Admin Console');
+
+    // Persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
+    if (this.isBrowser) {
+      this.http
+        .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
+        .subscribe({
+          error: (err) => console.warn('Backend approveAccessRequest notice:', err),
+        });
+    }
+  }
+
+  /** Allow an owning corporate member to self-approve their pending Dummy Web request (SCRUM-167). */
+  selfApproveAccessRequest(requestId: string, notes?: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request || request.status !== 'Pending Approval') return;
+    if (!this.isSelfApprovableDummyApp(request.appName)) {
+      this.showAdminNotice(
+        `${request.appName} requires Super Administrator approval and cannot be self-approved.`
+      );
+      return;
+    }
+
+    const reviewer = this.displayName() || this.authService.currentUser()?.email || 'User Account';
+    const resolvedNotes = notes || 'Self-approved by user account (SCRUM-167)';
+
+    this.applyAccessRequestApprovalLocally(request, reviewer, resolvedNotes, 'User Self-Approval');
+
+    if (this.isBrowser) {
+      this.authService.selfApproveAccessRequest(requestId, resolvedNotes).subscribe({
+        error: (err) => console.warn('Backend selfApproveAccessRequest notice:', err),
+      });
+    }
   }
 
   openRejectModal(request: AppAccessRequest): void {

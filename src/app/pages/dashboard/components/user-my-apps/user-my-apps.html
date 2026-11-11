@@ -438,6 +438,17 @@
                   <div class="request-denied-badge" *ngIf="req.status === 'Rejected'">
                     <span>🔒 Zero-Trust Guard: Assertion Blocked</span>
                   </div>
+                  <!-- User self-approval button for Dummy Web pending requests (SCRUM-167) -->
+                  <button
+                    type="button"
+                    class="btn-self-approve-action"
+                    *ngIf="canSelfApprove(req)"
+                    (click)="selfApproveAccessRequest(req, $event)"
+                    title="Approve Dummy Web access using your own Vanguard account"
+                    style="background: #10b981; color: #042f2e; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer;"
+                  >
+                    ✓ Approve with My Account
+                  </button>
                   <!-- Withdraw button for pending or rejected requests -->
                   <button
                     type="button"

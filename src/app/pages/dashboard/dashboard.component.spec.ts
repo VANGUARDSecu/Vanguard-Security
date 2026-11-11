@@ -1802,6 +1802,22 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       component.denyLiveSsoChallenge('push_123', true);
       expect(denySpy).toHaveBeenCalledWith('push_123', true);
     });
+
+    it('SCRUM-167: refreshes access requests when user approves a live SSO challenge', () => {
+      vi.spyOn(authService, 'respondPushMfa').mockReturnValue(
+        of({ success: true, message: 'Approved', action: 'approved' })
+      );
+      const reloadSpy = vi.spyOn(component.dashboardService, 'loadAccessRequests').mockResolvedValue();
+      component.dashboardService.liveSsoChallenge.set({
+        id: 'push_dummy_1',
+        clientId: 'vanguard-dummy-portal',
+        appName: 'Acme Dummy Portal (Angular SPA)',
+      });
+
+      component.approveLiveSsoChallenge('push_dummy_1', 42);
+
+      expect(reloadSpy).toHaveBeenCalledWith(true);
+    });
   });
 });
 

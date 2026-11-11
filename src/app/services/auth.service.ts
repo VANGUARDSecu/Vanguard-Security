@@ -1413,6 +1413,12 @@ export class AuthService {
     );
   }
 
+  /** Allow an owning corporate member to self-approve their pending Dummy Web access request (SCRUM-167). */
+  selfApproveAccessRequest(requestId: string, adminNotes?: string): Observable<any> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/apps/access-requests/${encodeURIComponent(requestId)}/self-approve`;
+    return this.http.post(url, { adminNotes });
+  }
+
   getConnectedApps(email?: string): Observable<{ success: boolean; connectedApps: UserConnectedApp[] }> {
     const baseUrl = this.API_URL.replace(/\/auth\/?$/, '');
     const url = email

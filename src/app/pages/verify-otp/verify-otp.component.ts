@@ -4,6 +4,7 @@ import { ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
+import { isSelfApprovableDummyApp } from '../../shared/dummy-app.util';
 
 export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval';
 
@@ -104,6 +105,66 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     // The name comes from the server, so this page and the mobile approval prompt show the same name.
     return this.serverClientName() || sso['client_id'] || 'Client Application';
   });
+  readonly isDummyWebClient = computed<boolean>(() => {
+    const sso = this.ssoParams();
+    return (
+      isSelfApprovableDummyApp(sso?.['client_id']) ||
+      isSelfApprovableDummyApp(this.serverClientName())
+    );
+  });
+
+  /** Initiate an SSO Push MFA challenge and handle Zero-Trust approval-required responses uniformly (SCRUM-167). */
+  private initiatePushChallenge(
+    ssoData: Record<string, string>,
+    email: string,
+    options: { fallbackToEmailOtp?: boolean; showLoading?: boolean; successNotice?: string } = {},
+  ): void {
+    if (options.showLoading) {
+      this.isLoading.set(true);
+    }
+    this.authService.initiatePushMfa({
+      client_id: ssoData['client_id'],
+      redirect_uri: ssoData['redirect_uri'],
+      email,
+      response_type: ssoData['response_type'] || 'code',
+      scope: ssoData['scope'] || 'openid profile email roles',
+      state: ssoData['state'] || '',
+      nonce: ssoData['nonce'] || '',
+      code_challenge: ssoData['code_challenge'] || '',
+      code_challenge_method: ssoData['code_challenge_method'] || 'S256',
+    }).subscribe({
+      next: (res) => {
+        if (options.showLoading) {
+          this.isLoading.set(false);
+        }
+        this.challengeId.set(res.challengeId);
+        this.serverClientName.set(res.clientName || null);
+        this.numberCode.set(String(res.numberMatching?.code || ''));
+        this.clientAppIcon.set(res.appIcon || '🛡️');
+        this.pushRetryCount.set(0);
+        this.pushRetriesRemaining.set(3);
+        this.startPushPolling(res.challengeId);
+        if (options.successNotice) {
+          this.showNotification('success', options.successNotice, 4000);
+        }
+      },
+      error: (err: Error) => {
+        if (options.showLoading) {
+          this.isLoading.set(false);
+        }
+        if (this.isApprovalRequiredError(err)) {
+          this.handleApprovalRequired(err);
+          return;
+        }
+        if (options.fallbackToEmailOtp) {
+          this.showNotification('error', err.message || 'Failed to initiate Push challenge. Falling back to Email OTP.');
+          this.switchToEmailOtp();
+        } else {
+          this.showNotification('error', err.message || 'Failed to initiate push challenge.');
+        }
+      },
+    });
+  }
   
   // Dynamic code length: SSO MFA and TOTP are strictly 6 digits; Email OTP for direct portal signup is 8 digits
   readonly codeLength = computed<number>(() => (this.isSsoVerification() || this.method() === 'totp' ? 6 : 8));
@@ -179,31 +240,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         // If SSO params are present but challengeId is missing, auto-initiate challenge
         if (!this.challengeId() && emailParam) {
           if (methodParam === 'push_approval') {
-            this.authService.initiatePushMfa({
-              client_id: params['client_id'],
-              redirect_uri: params['redirect_uri'],
-              email: emailParam,
-              response_type: params['response_type'] || 'code',
-              scope: params['scope'] || 'openid profile email roles',
-              state: params['state'] || '',
-              nonce: params['nonce'] || '',
-              code_challenge: params['code_challenge'] || '',
-              code_challenge_method: params['code_challenge_method'] || 'S256',
-            }).subscribe({
-              next: (res) => {
-                this.challengeId.set(res.challengeId);
-                this.serverClientName.set(res.clientName || null);
-                this.numberCode.set(String(res.numberMatching?.code || ''));
-                this.clientAppIcon.set(res.appIcon || '🛡️');
-                this.pushRetryCount.set(0);
-                this.pushRetriesRemaining.set(3);
-                this.startPushPolling(res.challengeId);
-              },
-              error: (err: Error) => {
-                this.showNotification('error', err.message || 'Failed to initiate Push challenge. Falling back to Email OTP.');
-                this.switchToEmailOtp();
-              },
-            });
+            this.initiatePushChallenge(ssoData, emailParam, { fallbackToEmailOtp: true });
           } else {
             this.authService.initiateSsoMfa({
               client_id: params['client_id'],
@@ -239,31 +276,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
               }
               if (!this.challengeId() && emailParam) {
                 if (methodParam === 'push_approval') {
-                  this.authService.initiatePushMfa({
-                    client_id: ssoData.client_id,
-                    redirect_uri: ssoData.redirect_uri,
-                    email: emailParam,
-                    response_type: ssoData.response_type || 'code',
-                    scope: ssoData.scope || 'openid profile email roles',
-                    state: ssoData.state || '',
-                    nonce: ssoData.nonce || '',
-                    code_challenge: ssoData.code_challenge || '',
-                    code_challenge_method: ssoData.code_challenge_method || 'S256',
-                  }).subscribe({
-                    next: (res) => {
-                      this.challengeId.set(res.challengeId);
-                      this.serverClientName.set(res.clientName || null);
-                      this.numberCode.set(String(res.numberMatching?.code || ''));
-                      this.clientAppIcon.set(res.appIcon || '🛡️');
-                      this.pushRetryCount.set(0);
-                      this.pushRetriesRemaining.set(3);
-                      this.startPushPolling(res.challengeId);
-                    },
-                    error: (err: Error) => {
-                      this.showNotification('error', err.message || 'Failed to initiate Push challenge. Falling back to Email OTP.');
-                      this.switchToEmailOtp();
-                    },
-                  });
+                  this.initiatePushChallenge(ssoData, emailParam, { fallbackToEmailOtp: true });
                 } else {
                   this.authService.initiateSsoMfa({
                     client_id: ssoData.client_id,
@@ -428,33 +441,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
     if (!sso || !email) return;
 
-    this.isLoading.set(true);
-    this.authService.initiatePushMfa({
-      client_id: sso['client_id'],
-      redirect_uri: sso['redirect_uri'],
-      email,
-      response_type: sso['response_type'] || 'code',
-      scope: sso['scope'] || 'openid profile email roles',
-      state: sso['state'] || '',
-      nonce: sso['nonce'] || '',
-      code_challenge: sso['code_challenge'] || '',
-      code_challenge_method: sso['code_challenge_method'] || 'S256',
-    }).subscribe({
-      next: (res) => {
-        this.isLoading.set(false);
-        this.challengeId.set(res.challengeId);
-        this.serverClientName.set(res.clientName || null);
-        this.numberCode.set(String(res.numberMatching?.code || ''));
-        this.clientAppIcon.set(res.appIcon || '🛡️');
-        this.pushRetryCount.set(0);
-        this.pushRetriesRemaining.set(3);
-        this.startPushPolling(res.challengeId);
-        this.showNotification('success', 'Switched to Mobile MFA / Dashboard Approval.', 4000);
-      },
-      error: (err: Error) => {
-        this.isLoading.set(false);
-        this.showNotification('error', err.message || 'Failed to initiate push challenge.');
-      },
+    this.initiatePushChallenge(sso, email, {
+      showLoading: true,
+      successNotice: 'Switched to Mobile MFA / Dashboard Approval.',
     });
   }
 

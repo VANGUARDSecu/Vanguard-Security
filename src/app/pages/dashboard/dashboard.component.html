@@ -24,7 +24,13 @@
               <span class="sso-pulse-icon">🔔</span>
               <div>
                 <h3 class="sso-prompt-title">SSO Sign-In Approval Request</h3>
-                <p class="sso-prompt-subtitle">An application is requesting access to your Vanguard account</p>
+                <p class="sso-prompt-subtitle">
+                  @if (dashboardService.isSelfApprovableDummyApp(challenge.clientId || challenge.appName)) {
+                    Self-approve this Acme Dummy Web sign-in request using your own Vanguard account
+                  } @else {
+                    An application is requesting access to your Vanguard account
+                  }
+                </p>
               </div>
             </div>
             @if (challenge.validitySeconds) {

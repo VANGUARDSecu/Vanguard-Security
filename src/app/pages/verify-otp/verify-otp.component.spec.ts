@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { VerifyOtpComponent } from './verify-otp.component';
 import { AuthService } from '../../services/auth.service';
 
@@ -252,6 +252,43 @@ describe('VerifyOtpComponent', () => {
       expect(component.method()).toBe('push_approval');
       expect(component.challengeId()).toBe('push_mfa_176');
       expect(component.numberCode()).toBe('77');
+    });
+
+    it('SCRUM-167: sets ssoApprovalRequired without falling back to Email OTP when initiatePushMfa returns approval-required error', () => {
+      vi.spyOn(authService, 'initiatePushMfa').mockReturnValue(
+        throwError(
+          () =>
+            new Error(
+              'Zero-Trust Access Governance: Administrative approval is required before corporate account "user@acme.corp" can access "Figma Enterprise".'
+            )
+        )
+      );
+
+      component.ssoParams.set({
+        client_id: 'figma-enterprise',
+        redirect_uri: 'https://figma.com/callback',
+      });
+      component.email.set('user@acme.corp');
+      component.method.set('push_approval');
+
+      component.switchToPushApproval();
+
+      expect(component.ssoApprovalRequired()).toBe(true);
+      expect(component.method()).toBe('push_approval');
+    });
+
+    it('SCRUM-167: displays user self-approval guidance for Acme Dummy Portal (vanguard-dummy-portal)', () => {
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+      });
+      component.serverClientName.set('Acme Dummy Portal (Angular SPA)');
+      component.ssoApprovalRequired.set(true);
+      fixture.detectChanges();
+
+      const el: HTMLElement = fixture.nativeElement;
+      expect(el.textContent).toContain('Approve with your Vanguard Account');
+      expect(el.textContent).toContain('Open Vanguard Dashboard');
     });
   });
 });

@@ -227,12 +227,17 @@ describe('AdminSettings Component (SCRUM-28 Multi-Tenant & Branding Studio)', ()
     });
 
     it('should trigger simulated DNS CNAME verification', async () => {
-      component.verifyDns();
-      expect(dashboardService.domainVerificationStatus()).toBe('checking');
+      vi.useFakeTimers();
+      try {
+        component.verifyDns();
+        expect(dashboardService.domainVerificationStatus()).toBe('checking');
 
-      await new Promise(resolve => setTimeout(resolve, 500));
-      expect(dashboardService.domainVerificationStatus()).toBe('verified');
-      expect(dashboardService.tenantBranding().ssoDomainVerified).toBe(true);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(dashboardService.domainVerificationStatus()).toBe('verified');
+        expect(dashboardService.tenantBranding().ssoDomainVerified).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

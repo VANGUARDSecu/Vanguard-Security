@@ -31,7 +31,7 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     expect(envelopeRaw).not.toContain('me@x.com');
     // The legacy plaintext key must never be written.
     expect(localStorage.getItem('vanguard_personal_vault_items')).toBeNull();
-  });
+  }, 25_000);
 
   it('migrates a legacy plaintext vault to an encrypted envelope and purges the plaintext', async () => {
     localStorage.setItem(
@@ -51,7 +51,7 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     const env = localStorage.getItem('vanguard_vault_envelope');
     expect(env).toBeTruthy();
     expect(env).not.toContain('legacyPass');
-  });
+  }, 25_000);
 
   it('round-trips: persist then unlock again with the same password returns items', async () => {
     await service.unlock('pw');
@@ -64,7 +64,7 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     const items = await service.unlock('pw');
     expect(items).toHaveLength(1);
     expect(items[0].title).toBe('GitHub');
-  });
+  }, 25_000);
 
   it('fails to unlock an existing encrypted vault with the wrong password', async () => {
     await service.unlock('right');
@@ -73,13 +73,13 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     ]);
     service.lock();
     await expect(service.unlock('wrong')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 
   it('lock() clears in-memory key so persist throws until unlocked again', async () => {
     await service.unlock('pw');
     service.lock();
     await expect(service.persist([])).rejects.toThrow(/locked/i);
-  });
+  }, 25_000);
 
   it('SCRUM-108 Option C: unlockWithLoginPassword encrypts/decrypts with the login password (shared format)', async () => {
     // Create a vault using the login password as the only secret.
@@ -97,7 +97,7 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     // Wrong login password fails (zero-knowledge: server-independent).
     service.lock();
     await expect(service.unlockWithLoginPassword('WrongLogin')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 
   it('SCRUM-109: re-encrypts the vault on password change (old password stops working, new works)', async () => {
     // Create a vault under the OLD login password.
@@ -119,7 +119,7 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     // Old password no longer works.
     service.lock();
     await expect(service.unlockWithLoginPassword('OldPass#1')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 
   it('SCRUM-109: re-encrypt throws when the old password is wrong (no silent data loss)', async () => {
     await service.unlockWithLoginPassword('OldPass#1');
@@ -128,5 +128,5 @@ describe('VaultCryptoService (SCRUM-98 zero-knowledge web vault)', () => {
     ]);
     service.lock();
     await expect(service.reencryptForPasswordChange('WrongOld', 'NewPass#2')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 });

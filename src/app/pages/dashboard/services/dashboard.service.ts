@@ -3717,6 +3717,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const request = this.appAccessRequests().find((r) => r.id === requestId);
     if (!request) return;
 
+    const prevRequests = [...this.appAccessRequests()];
+    const prevApps = [...this.apps()];
     const reviewer = this.displayName() || 'Vanguard Administrator';
     const notes = adminNotes || 'Approved by Administrator';
 
@@ -3727,7 +3729,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.http
         .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
         .subscribe({
-          error: (err) => console.warn('Backend approveAccessRequest notice:', err),
+          error: (err) => {
+            console.warn('Backend approveAccessRequest failed, rolling back optimistic update:', err);
+            this.appAccessRequests.set(prevRequests);
+            this.apps.set(prevApps);
+            this.saveStored('vanguard_access_requests', prevRequests);
+            this.saveStored('vanguard_user_apps', prevApps);
+            this.showAdminNotice('Failed to approve access request on the server.');
+          },
         });
     }
   }
@@ -3743,6 +3752,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       return;
     }
 
+    const prevRequests = [...this.appAccessRequests()];
+    const prevApps = [...this.apps()];
     const reviewer = this.displayName() || this.authService.currentUser()?.email || 'User Account';
     const resolvedNotes = notes || 'Self-approved by user account (SCRUM-167)';
 
@@ -3750,7 +3761,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
     if (this.isBrowser) {
       this.authService.selfApproveAccessRequest(requestId, resolvedNotes).subscribe({
-        error: (err) => console.warn('Backend selfApproveAccessRequest notice:', err),
+        error: (err) => {
+          console.warn('Backend selfApproveAccessRequest failed, rolling back optimistic update:', err);
+          this.appAccessRequests.set(prevRequests);
+          this.apps.set(prevApps);
+          this.saveStored('vanguard_access_requests', prevRequests);
+          this.saveStored('vanguard_user_apps', prevApps);
+          this.showAdminNotice('Failed to self-approve access request on the server.');
+        },
       });
     }
   }
@@ -5674,7 +5692,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
             password: resolvedCreds.password,
             timestamp: Date.now(),
           };
-          window.postMessage(payload, '*');
+          window.postMessage(payload, window.location.origin);
           window.dispatchEvent(new CustomEvent('vanguard-autofill-launch', { detail: payload }));
         } catch {
           // ignore postMessage errors in restricted contexts
@@ -6287,18 +6305,17 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const email = this.user()?.email || 'default';
     this.saveStored(`vanguard_sec_prefs_${email}`, updated);
 
-    // Sync to backend preferences endpoint if available
+    // Sync to backend preferences endpoint via Angular HttpClient so authTokenInterceptor attaches Bearer JWT.
     if (this.isBrowser && this.user()?.email) {
-      fetch(`${this.apiBase}/auth/security-preferences`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: this.user()?.email,
+      this.http
+        .post(`${this.apiBase}/auth/security-preferences`, {
           secondaryEmail: updated.secondaryEmail,
           alertThreshold: updated.alertThreshold,
           emailAlertsEnabled: updated.emailAlertsEnabled,
-        }),
-      }).catch(() => {});
+        })
+        .subscribe({
+          error: () => {},
+        });
     }
 
     this.showAdminNotice('Security notification preferences updated successfully.');
@@ -7353,7 +7370,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
         apps,
         timestamp: Date.now(),
       };
-      window.postMessage(payload, '*');
+      window.postMessage(payload, window.location.origin);
       window.dispatchEvent(new CustomEvent('vanguard-apps-sync', { detail: payload }));
     } catch {
       // ignore

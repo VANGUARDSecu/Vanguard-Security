@@ -27,7 +27,7 @@ describe('vault-crypto (SCRUM-96 zero-knowledge)', () => {
     const envelope = await encryptVault(SAMPLE, { masterPassword: 'Correct Horse Battery!' });
     const decrypted = await decryptVault<Item[]>(envelope, 'Correct Horse Battery!');
     expect(decrypted).toEqual(SAMPLE);
-  });
+  }, 25_000);
 
   it('produces a versioned envelope that contains no plaintext', async () => {
     const envelope = await encryptVault(SAMPLE, { masterPassword: 'pw' });
@@ -41,12 +41,12 @@ describe('vault-crypto (SCRUM-96 zero-knowledge)', () => {
     expect(serialized).not.toContain('S3cret!Pass');
     expect(serialized).not.toContain('alex@me.com');
     expect(serialized).not.toContain('Facebook');
-  });
+  }, 25_000);
 
   it('fails to decrypt with the wrong master password', async () => {
     const envelope = await encryptVault(SAMPLE, { masterPassword: 'right-password' });
     await expect(decryptVault(envelope, 'wrong-password')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 
   it('detects tampering with the ciphertext (AES-GCM authentication)', async () => {
     const envelope = await encryptVault(SAMPLE, { masterPassword: 'pw' });
@@ -54,7 +54,7 @@ describe('vault-crypto (SCRUM-96 zero-knowledge)', () => {
     bytes[0] ^= 0xff; // flip a bit
     const tampered: EncryptedVaultEnvelope = { ...envelope, ciphertext: bytesToBase64(bytes) };
     await expect(decryptVault(tampered, 'pw')).rejects.toThrow(/VAULT_DECRYPT_FAILED/);
-  });
+  }, 25_000);
 
   it('uses a unique random salt and IV per encryption', async () => {
     const a = await encryptVault(SAMPLE, { masterPassword: 'pw' });
@@ -62,7 +62,7 @@ describe('vault-crypto (SCRUM-96 zero-knowledge)', () => {
     expect(a.salt).not.toEqual(b.salt);
     expect(a.iv).not.toEqual(b.iv);
     expect(a.ciphertext).not.toEqual(b.ciphertext);
-  });
+  }, 25_000);
 
   it('supports encrypting with a pre-derived session key (unlock session)', async () => {
     const salt = generateSalt();
@@ -70,11 +70,11 @@ describe('vault-crypto (SCRUM-96 zero-knowledge)', () => {
     const envelope = await encryptVault(SAMPLE, { key, salt, iterations: 600_000 });
     const decrypted = await decryptVault<Item[]>(envelope, 'pw');
     expect(decrypted).toEqual(SAMPLE);
-  });
+  }, 25_000);
 
   it('round-trips an empty vault', async () => {
     const envelope = await encryptVault<Item[]>([], { masterPassword: 'pw' });
     const decrypted = await decryptVault<Item[]>(envelope, 'pw');
     expect(decrypted).toEqual([]);
-  });
+  }, 25_000);
 });

@@ -944,6 +944,20 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       httpMock.expectNone('http://localhost:3000/apps/access-requests/req-figma-1/self-approve');
       expect(dashboardService.appAccessRequests().find((r) => r.id === 'req-figma-1')?.status).toBe('Pending Approval');
     });
+
+    it('rolls back optimistic selfApproveAccessRequest when backend returns an error (SCRUM-169)', () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      const dummyReq = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1')!;
+      (component as any).selfApproveAccessRequest(dummyReq);
+
+      const postReq = httpMock.expectOne(
+        (r) => r.url === 'http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve'
+      );
+      postReq.flush({ message: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+
+      const reverted = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
+      expect(reverted?.status).toBe('Pending Approval');
+    });
   });
   });
 });

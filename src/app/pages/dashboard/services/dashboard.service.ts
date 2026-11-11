@@ -1260,15 +1260,45 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly requestAppSuccess = signal<boolean>(false);
 
   // SCRUM-52: Personal Application Bookmarks & Launcher (Zero Hardcoded Initial State)
+  getPersonalAppsStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim() || '';
+    return email ? `vanguard_personal_apps_${email}` : 'vanguard_personal_apps';
+  }
+
+  getUserAppsStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim() || '';
+    return email ? `vanguard_user_apps_${email}` : 'vanguard_user_apps';
+  }
+
   private initPersonalApps(): SaaSApp[] {
+    const userKey = this.getPersonalAppsStorageKey();
+    const stored = this.loadStored<SaaSApp[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
     return this.loadStored<SaaSApp[]>('vanguard_personal_apps', []);
+  }
+
+  private initUserApps(): SaaSApp[] {
+    const userKey = this.getUserAppsStorageKey();
+    const stored = this.loadStored<SaaSApp[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
+    return this.loadStored<SaaSApp[]>('vanguard_user_apps', []);
+  }
+
+  persistPersonalApps(apps?: SaaSApp[]): void {
+    const list = apps ?? this.personalApps();
+    this.saveStored(this.getPersonalAppsStorageKey(), list);
+    this.saveStored('vanguard_personal_apps', list);
+  }
+
+  persistUserApps(apps?: SaaSApp[]): void {
+    const list = apps ?? this.apps();
+    this.saveStored(this.getUserAppsStorageKey(), list);
+    this.saveStored('vanguard_user_apps', list);
   }
 
   readonly personalApps = signal<SaaSApp[]>(this.initPersonalApps());
 
-  readonly apps = signal<SaaSApp[]>(
-    this.loadStored<SaaSApp[]>('vanguard_user_apps', [])
-  );
+  readonly apps = signal<SaaSApp[]>(this.initUserApps());
 
   // SCRUM-171: Per-employee provisioned application accounts (Admin-created accounts isolated per employee)
   readonly employeeProvisionedApps = signal<SaaSApp[]>(
@@ -1446,7 +1476,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             }
           }
           this.apps.set(mapped);
-          this.saveStored('vanguard_user_apps', mapped);
+          this.persistUserApps(mapped);
         },
         error: () => {
           // On offline/network fallback, still ensure employee sees their isolated provisioned apps
@@ -2193,6 +2223,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     this.syncGroupInheritedApps();
     this.initSupabaseSync();
+    this.loadCompanyApps();
     this.startTotpTimer();
     this.fetchConnectedApps();
 
@@ -5695,10 +5726,10 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // 1. Remove from apps and personalApps signals
     this.apps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     this.personalApps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     // 2. Clean up from appAccessRequests for current user so activeAppsList computed signal does not keep displaying it
     const u = this.user();
@@ -7226,13 +7257,13 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       newApp,
       ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
     ]);
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) => [
       newApp,
       ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
     ]);
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     // Save credentials to personal vault
     this.addVaultItem({
@@ -7245,6 +7276,32 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     });
 
     this.broadcastAppsSync();
+
+    // SCRUM-182: Synchronize application with production backend so mobile device receives it
+    if (this.isBrowser && uid) {
+      this.http
+        .post(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}`,
+          {
+            appId: newApp.id,
+            name: newApp.name,
+            protocol: newApp.protocol,
+            launchUrl: newApp.launchUrl,
+            category: newApp.category,
+            icon: newApp.icon,
+            description: newApp.description,
+            assignedUsername: newApp.assignedUsername,
+            assignedPassword: newApp.assignedPassword,
+            targetUserEmail: newApp.targetUserEmail,
+          },
+        )
+        .subscribe({
+          next: () => {
+            this.loadCompanyApps();
+          },
+          error: () => {},
+        });
+    }
 
     this.logAuditEvent(`Added application: ${newApp.name}`, 'Applications', 'App Launcher', 'success', 'Low');
     this.showAdminNotice(`Added ${newApp.name} to applications.`);
@@ -7301,12 +7358,12 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.personalApps.update((list) =>
       list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
     );
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) =>
       list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
     );
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     const app = this.activeAppsList().find((a) => a.id === appId);
     if (app && (username || password)) {
@@ -7334,13 +7391,23 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.personalApps.update((list) =>
       list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
     );
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) =>
       list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
     );
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
     this.broadcastAppsSync();
+
+    // SCRUM-182: Synchronize application deletion with backend so mobile updates
+    const uid = this.user()?.id;
+    if (this.isBrowser && uid) {
+      this.http
+        .delete(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}&appId=${encodeURIComponent(id)}`,
+        )
+        .subscribe({ error: () => {} });
+    }
 
     if (app) {
       this.logAuditEvent(`Removed application: ${app.name}`, 'Applications', 'App Launcher', 'success', 'Low');

@@ -2199,11 +2199,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // SCRUM-180: Listen for Vanguard browser extension presence and sync applications
     if (this.isBrowser && typeof window !== 'undefined') {
       window.addEventListener('message', (event) => {
-        if (event.data?.source === 'VANGUARD_EXTENSION' && event.data?.type === 'VANGUARD_EXTENSION_READY') {
+        if (
+          event.data?.source === 'VANGUARD_EXTENSION' &&
+          (event.data?.type === 'VANGUARD_EXTENSION_READY' || event.data?.type === 'VANGUARD_GET_APPS')
+        ) {
           this.broadcastAppsSync();
         }
       });
-      setTimeout(() => this.broadcastAppsSync(), 500);
+      window.addEventListener('vanguard-extension-ready', () => this.broadcastAppsSync());
+
+      // Broadcast sync during initial bootstrap to accommodate async storage hydration
+      [200, 600, 1500, 3000].forEach((delay) => {
+        setTimeout(() => this.broadcastAppsSync(), delay);
+      });
     }
   }
 
@@ -7263,6 +7271,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
           category: a.category,
         };
       });
+
+      // Write directly to localStorage so the extension content script or popup
+      // can access the synchronized application catalog immediately even before messaging.
+      try {
+        localStorage.setItem('vanguard_synced_apps', JSON.stringify(apps));
+      } catch {
+        // ignore storage errors
+      }
+
       const payload = {
         source: 'VANGUARD_WEB_APP',
         type: 'VANGUARD_APPS_SYNC',

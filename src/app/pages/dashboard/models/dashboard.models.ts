@@ -134,6 +134,7 @@ export interface DirectoryUser {
   lastLogin: string;
   initials: string;
   temporaryPassword?: string;
+  setupUrl?: string;
   invitedAt?: string;
   expiresAt?: string;
   groups?: string[];

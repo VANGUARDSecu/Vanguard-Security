@@ -794,10 +794,11 @@ export class AuthService {
     department: string;
     temporaryPassword: string;
     loginUrl?: string;
+    setupBaseUrl?: string;
     tenantId?: string;
-  }): Observable<{ success: boolean; message: string; emailResult?: any }> {
+  }): Observable<{ success: boolean; message: string; setupUrl?: string; emailResult?: any }> {
     return this.http
-      .post<{ success: boolean; message: string; emailResult?: any }>(
+      .post<{ success: boolean; message: string; setupUrl?: string; emailResult?: any }>(
         `${this.API_URL}/send-invite-email`,
         payload
       )
@@ -814,6 +815,40 @@ export class AuthService {
             msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
           }
           return throwError(() => new Error(msg));
+        })
+      );
+  }
+
+  /** Validate a single-use employee onboarding token before showing the setup form (SCRUM-168). */
+  validateSetupToken(token: string): Observable<{
+    valid: boolean;
+    email: string;
+    name: string;
+    role: string;
+    department: string;
+    expiresAt?: string;
+  }> {
+    return this.http
+      .get<{ valid: boolean; email: string; name: string; role: string; department: string; expiresAt?: string }>(
+        `${this.API_URL}/setup-account/validate`,
+        { params: { token } }
+      )
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg = error.error?.message || 'This One-Time Setup link is invalid, expired, or has already been used.';
+          return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
+        })
+      );
+  }
+
+  /** Complete One-Time Setup onboarding and activate the employee account (SCRUM-168). */
+  completeSetupAccount(token: string, password: string): Observable<AuthResponse> {
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/setup-account/complete`, { token, password })
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg = error.error?.message || 'Failed to complete account setup. Please try again.';
+          return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
         })
       );
   }

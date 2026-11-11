@@ -433,7 +433,7 @@
       <ng-container *ngIf="!inviteSuccess()">
         <div class="modal-body">
           <p class="modal-desc">
-            Add an identity to <strong>{{ organizationName() }}</strong>. A corporate account with a temporary password will be provisioned.
+            Add an identity to <strong>{{ organizationName() }}</strong>. A single-use One-Time Setup link (with temporary password fallback) will be emailed to the user.
           </p>
 
           <div class="modal-row-grid">
@@ -655,10 +655,25 @@
           </div>
 
           <div class="credentials-card">
-            <div class="credentials-card-title">EMPLOYEE LOGIN CREDENTIALS</div>
-            
+            <div class="credentials-card-title">EMPLOYEE ONE-TIME SETUP &amp; BACKUP CREDENTIALS</div>
+
+            <div class="credential-row credential-password-row" *ngIf="inviteCreatedUser()?.setupUrl">
+              <div class="credential-pw-meta">
+                <span class="credential-label">One-Time Setup Link:</span>
+                <span class="credential-password-text font-mono">{{ inviteCreatedUser()?.setupUrl }}</span>
+              </div>
+              <button
+                type="button"
+                class="btn-copy-sm"
+                [class.btn-copied]="setupLinkCopied()"
+                (click)="copySetupLink()"
+              >
+                {{ setupLinkCopied() ? '✓ Copied!' : '📋 Copy Setup Link' }}
+              </button>
+            </div>
+
             <div class="credential-row">
-              <span class="credential-label">Portal Login URL:</span>
+              <span class="credential-label">Backup Portal Login URL:</span>
               <span class="credential-val font-mono">/login</span>
             </div>
 
@@ -674,7 +689,7 @@
 
             <div class="credential-row credential-password-row">
               <div class="credential-pw-meta">
-                <span class="credential-label">Temporary Password:</span>
+                <span class="credential-label">Backup Temp Password:</span>
                 <span class="credential-password-text font-mono">{{ inviteCreatedUser()?.temporaryPassword }}</span>
               </div>
               <button
@@ -720,7 +735,7 @@
               <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
             </svg>
             <span>
-              An official onboarding email with login URL and temporary credentials has been dispatched. The employee will be required to change this temporary password upon first sign-in.
+              An official onboarding email with a single-use One-Time Setup link (48h expiry) and backup temporary credentials has been dispatched. Using the setup link or backup temporary login will require setting a permanent password.
             </span>
           </div>
         </div>

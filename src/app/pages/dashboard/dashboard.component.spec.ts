@@ -1819,6 +1819,36 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       expect(reloadSpy).toHaveBeenCalledWith(true);
     });
   });
+
+  describe('SCRUM-168: One-Time Setup Onboarding Invite', () => {
+    it('sends setupBaseUrl in sendInviteEmail and stores returned One-Time Setup link on inviteCreatedUser', () => {
+      const sendSpy = vi.spyOn(authService, 'sendInviteEmail').mockReturnValue(
+        of({
+          success: true,
+          message: 'One-Time Setup invitation sent',
+          setupUrl: 'http://localhost:4200/setup-account?token=onetime_xyz_168',
+        } as any)
+      );
+
+      component.openInviteModal();
+      component.inviteFirstName = 'Elena';
+      component.inviteLastName = 'Rostova';
+      component.inviteEmail = 'elena.setup@vanguard.security';
+      component.inviteDepartment = 'Engineering';
+      component.inviteRole = 'Directory Member';
+      component.submitInviteUser();
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'elena.setup@vanguard.security',
+          setupBaseUrl: expect.stringContaining('/setup-account'),
+        })
+      );
+      expect(component.dashboardService.inviteCreatedUser()?.setupUrl).toBe(
+        'http://localhost:4200/setup-account?token=onetime_xyz_168'
+      );
+    });
+  });
 });
 
 

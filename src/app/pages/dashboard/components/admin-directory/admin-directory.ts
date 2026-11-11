@@ -55,6 +55,7 @@ export class AdminDirectory implements OnInit {
   readonly organizationName = this.dashboardService.organizationName;
   readonly inviteCreatedUser = this.dashboardService.inviteCreatedUser;
   readonly passwordCopied = this.dashboardService.passwordCopied;
+  readonly setupLinkCopied = this.dashboardService.setupLinkCopied;
   readonly inviteEmailStatus = this.dashboardService.inviteEmailStatus;
   readonly inviteEmailMessage = this.dashboardService.inviteEmailMessage;
 
@@ -206,6 +207,7 @@ export class AdminDirectory implements OnInit {
   submitInviteUser() { this.dashboardService.submitInviteUser(); }
   generateRandomPassword() { return this.dashboardService.generateRandomPassword(); }
   copyTemporaryPassword() { this.dashboardService.copyTemporaryPassword(); }
+  copySetupLink() { this.dashboardService.copySetupLink(); }
   retryInviteEmail() { this.dashboardService.retryInviteEmail(); }
   resendInvitation(user: DirectoryUser) { this.dashboardService.resendInvitation(user); }
   renewExistingPendingUser() { this.dashboardService.renewExistingPendingUser(); }

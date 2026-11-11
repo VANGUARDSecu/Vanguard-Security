@@ -87,6 +87,18 @@ export class ResetPasswordComponent {
   readonly notification = signal<{ type: 'success' | 'error'; message: string } | null>(null);
   private notificationTimer: any = null;
 
+  // One-Time Setup Onboarding Mode (SCRUM-168)
+  readonly setupToken = signal<string | null>(null);
+  readonly setupLoading = signal<boolean>(false);
+  readonly setupTokenError = signal<string | null>(null);
+  readonly setupInviteInfo = signal<{
+    email: string;
+    name: string;
+    role: string;
+    department: string;
+    expiresAt?: string;
+  } | null>(null);
+
   constructor() {
     this.resetForm.get('password')?.valueChanges.subscribe((val) => {
       this.passwordValue.set(val || '');
@@ -94,6 +106,24 @@ export class ResetPasswordComponent {
     this.resetForm.get('confirmPassword')?.valueChanges.subscribe((val) => {
       this.confirmPasswordValue.set(val || '');
     });
+
+    const token = this.route.snapshot?.queryParamMap?.get('token')?.trim() || null;
+    if (token) {
+      this.setupToken.set(token);
+      this.setupLoading.set(true);
+      this.authService.validateSetupToken(token).subscribe({
+        next: (info) => {
+          this.setupLoading.set(false);
+          this.setupInviteInfo.set(info);
+        },
+        error: (err: Error) => {
+          this.setupLoading.set(false);
+          this.setupTokenError.set(
+            err.message || 'This One-Time Setup link is invalid, expired, or has already been used.'
+          );
+        },
+      });
+    }
   }
 
   togglePassword(): void {
@@ -139,6 +169,46 @@ export class ResetPasswordComponent {
 
     this.isLoading.set(true);
     const newPassword = this.resetForm.value.password;
+    const token = this.setupToken();
+
+    if (token) {
+      this.authService.completeSetupAccount(token, newPassword).subscribe({
+        next: (response) => {
+          this.isLoading.set(false);
+          this.resetForm.reset();
+          this.submitted.set(false);
+          if (response.session?.access_token && response.user) {
+            this.authService.setSession(response.user, {
+              access_token: response.session.access_token,
+              refresh_token: response.session.refresh_token,
+              expires_at: response.session.expires_at,
+            });
+            this.showNotification(
+              'success',
+              response.message || 'Account setup complete! Redirecting to dashboard...',
+              3000
+            );
+            setTimeout(() => {
+              this.router.navigate(['/dashboard']);
+            }, 800);
+          } else {
+            this.showNotification(
+              'success',
+              response.message || 'Account setup complete! Redirecting to sign in...',
+              4000
+            );
+            setTimeout(() => {
+              this.router.navigate(['/login']);
+            }, 1500);
+          }
+        },
+        error: (err: Error) => {
+          this.isLoading.set(false);
+          this.showNotification('error', err.message || 'Failed to complete account setup. Please try again.');
+        },
+      });
+      return;
+    }
 
     this.authService.resetPassword(newPassword).subscribe({
       next: (response) => {

@@ -2223,6 +2223,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     this.syncGroupInheritedApps();
     this.initSupabaseSync();
+    this.loadCompanyApps();
     this.startTotpTimer();
     this.fetchConnectedApps();
 
@@ -7276,6 +7277,32 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     this.broadcastAppsSync();
 
+    // SCRUM-182: Synchronize application with production backend so mobile device receives it
+    if (this.isBrowser && uid) {
+      this.http
+        .post(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}`,
+          {
+            appId: newApp.id,
+            name: newApp.name,
+            protocol: newApp.protocol,
+            launchUrl: newApp.launchUrl,
+            category: newApp.category,
+            icon: newApp.icon,
+            description: newApp.description,
+            assignedUsername: newApp.assignedUsername,
+            assignedPassword: newApp.assignedPassword,
+            targetUserEmail: newApp.targetUserEmail,
+          },
+        )
+        .subscribe({
+          next: () => {
+            this.loadCompanyApps();
+          },
+          error: () => {},
+        });
+    }
+
     this.logAuditEvent(`Added application: ${newApp.name}`, 'Applications', 'App Launcher', 'success', 'Low');
     this.showAdminNotice(`Added ${newApp.name} to applications.`);
     return newApp;
@@ -7371,6 +7398,16 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     );
     this.persistUserApps();
     this.broadcastAppsSync();
+
+    // SCRUM-182: Synchronize application deletion with backend so mobile updates
+    const uid = this.user()?.id;
+    if (this.isBrowser && uid) {
+      this.http
+        .delete(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}&appId=${encodeURIComponent(id)}`,
+        )
+        .subscribe({ error: () => {} });
+    }
 
     if (app) {
       this.logAuditEvent(`Removed application: ${app.name}`, 'Applications', 'App Launcher', 'success', 'Low');

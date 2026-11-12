@@ -468,6 +468,22 @@ export class UserMyApps {
     this.dashboardService.withdrawAccessRequest(req.id);
   }
 
+  /** Whether the signed-in user may self-approve this pending request (Dummy Web only, SCRUM-167). */
+  canSelfApprove(req: AppAccessRequest): boolean {
+    return (
+      req.status === 'Pending Approval' &&
+      this.dashboardService.isSelfApprovableDummyApp(req.appName)
+    );
+  }
+
+  /** Self-approve a pending Dummy Web access request using the user's own account (SCRUM-167). */
+  selfApproveAccessRequest(req: AppAccessRequest, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    this.dashboardService.selfApproveAccessRequest(req.id);
+  }
+
   launchApprovedRequest(req: AppAccessRequest): void {
     const existing = this.apps().find((a) => a.name.toLowerCase() === req.appName.toLowerCase());
     if (existing) {

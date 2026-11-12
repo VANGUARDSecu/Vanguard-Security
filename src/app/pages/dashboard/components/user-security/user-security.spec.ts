@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { UserSecurity } from './user-security';
@@ -458,6 +458,30 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       component.pushMfaEnabled.set(true);
       component.togglePushMfa();
       expect(component.pushMfaUpdating()).toBe(false);
+    });
+  });
+
+  describe('SCRUM-169 Security Preferences & PostMessage Origin Hardening', () => {
+    it('syncs security preferences via Angular HttpClient instead of unauthenticated fetch', () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      dashboardService.updateSecurityAlertPreferences({
+        emailAlertsEnabled: false,
+        alertThreshold: 'new_device',
+      });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/auth/security-preferences'));
+      expect(req.request.method).toBe('POST');
+      req.flush({ success: true });
+    });
+
+    it('broadcastAppsSync uses window.location.origin instead of wildcard targetOrigin', () => {
+      const postMsgSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+      dashboardService.broadcastAppsSync();
+      expect(postMsgSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'VANGUARD_APPS_SYNC' }),
+        window.location.origin,
+      );
+      postMsgSpy.mockRestore();
     });
   });
 });

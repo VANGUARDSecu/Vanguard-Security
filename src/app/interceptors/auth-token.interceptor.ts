@@ -19,11 +19,13 @@ const NO_REFRESH_PATHS = [
   '/auth/verify-totp',
   '/auth/signup',
   '/auth/oauth-challenge',
+  '/auth/setup-account',
 ];
 
 /** Pre-auth public endpoints that should never carry ambient bearer tokens from previous sessions. */
 const NO_AUTH_PATHS = [
   '/auth/oauth-challenge',
+  '/auth/setup-account',
 ];
 
 /**

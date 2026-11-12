@@ -384,4 +384,61 @@ describe('AuthService', () => {
       expect(service.parseJwtPayload('invalid')).toEqual({});
     });
   });
+
+  describe('SCRUM-169 Security Hardening', () => {
+    it('does NOT call setSession when login returns requireMfa: true even with isSso: true', () => {
+      service.login({ email: 'sso@acme.com', password: 'Secret#1', isSso: true }).subscribe();
+      const req = httpMock.expectOne((r) => r.url.endsWith('/login'));
+      req.flush({
+        success: true,
+        requireMfa: true,
+        user: { id: 'usr-sso-1', email: 'sso@acme.com', role: 'user' },
+        session: { access_token: 'pre-mfa-tok', refresh_token: 'pre-mfa-ref', expires_at: 1800000000 },
+      });
+
+      expect(service.isAuthenticated()).toBe(false);
+      expect(localStorage.getItem('vanguard_token')).toBeNull();
+    });
+
+    it('resetPassword propagates HTTP error without falling back to localStorage vanguard_directory_users', () => {
+      localStorage.setItem(
+        'vanguard_directory_users',
+        JSON.stringify([{ email: 'emp@acme.com', temporaryPassword: 'Temp#1' }]),
+      );
+      service.pendingEmail.set('emp@acme.com');
+
+      let err: Error | null = null;
+      service.resetPassword('NewStrong#1').subscribe({
+        next: () => {},
+        error: (e) => { err = e; },
+      });
+
+      const req = httpMock.expectOne((r) => r.url.endsWith('/reset-password'));
+      req.flush({ message: 'Invalid token' }, { status: 401, statusText: 'Unauthorized' });
+
+      expect(err).toBeTruthy();
+      const stored = JSON.parse(localStorage.getItem('vanguard_directory_users') || '[]');
+      expect(stored[0].password).toBeUndefined();
+    });
+
+    it('getConnectedApps and disconnectConnectedApp surface server errors instead of fake fallbacks', () => {
+      let getErr: unknown = null;
+      service.getConnectedApps('emp@acme.com').subscribe({
+        next: () => {},
+        error: (e) => { getErr = e; },
+      });
+      const getReq = httpMock.expectOne((r) => r.url.includes('/oauth/connected-apps'));
+      getReq.flush({ message: 'Unauthorized' }, { status: 401, statusText: 'Unauthorized' });
+      expect(getErr).toBeTruthy();
+
+      let delErr: unknown = null;
+      service.disconnectConnectedApp('vanguard-dummy-portal', 'emp@acme.com').subscribe({
+        next: () => {},
+        error: (e) => { delErr = e; },
+      });
+      const delReq = httpMock.expectOne((r) => r.url.includes('/oauth/connected-apps/vanguard-dummy-portal'));
+      delReq.flush({ message: 'Unauthorized' }, { status: 401, statusText: 'Unauthorized' });
+      expect(delErr).toBeTruthy();
+    });
+  });
 });

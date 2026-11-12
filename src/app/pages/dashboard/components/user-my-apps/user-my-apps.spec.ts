@@ -865,5 +865,99 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(dashboardService.normalizeLoginUrl('https://www.roblox.com/games/123')).toBe('https://www.roblox.com/games/123');
     });
   });
+
+  // ==========================================================================
+  // SCRUM-167: User Self-Approval for Acme Dummy Web
+  // ==========================================================================
+  describe('SCRUM-167 Dummy Web User Account Self-Approval', () => {
+    beforeEach(() => {
+      authService.currentUser.set({
+        id: 'usr-member-167',
+        email: 'member@acme.corp',
+        firstName: 'Marissa',
+        lastName: 'Gulfan',
+        role: 'user',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+      dashboardService.switchWorkspace('org_root');
+      dashboardService.appAccessRequests.set([
+        {
+          id: 'req-dummy-web-1',
+          userId: 'usr-member-167',
+          userName: 'Marissa Gulfan',
+          userEmail: 'member@acme.corp',
+          department: 'Engineering',
+          role: 'Member',
+          appName: 'Acme Dummy Portal (Angular SPA)',
+          category: 'developer',
+          protocol: 'OpenID Connect 1.0 (PKCE)',
+          icon: '🌐',
+          launchUrl: 'http://localhost:4201',
+          justification: 'Dummy Web SSO access',
+          status: 'Pending Approval',
+          submittedAt: '2026-11-12T04:00:00Z',
+        },
+        {
+          id: 'req-figma-1',
+          userId: 'usr-member-167',
+          userName: 'Marissa Gulfan',
+          userEmail: 'member@acme.corp',
+          department: 'Engineering',
+          role: 'Member',
+          appName: 'Figma Enterprise',
+          category: 'collaboration',
+          protocol: 'SAML 2.0',
+          icon: '🎨',
+          launchUrl: 'https://www.figma.com/login',
+          justification: 'Design review',
+          status: 'Pending Approval',
+          submittedAt: '2026-11-12T04:01:00Z',
+        },
+      ]);
+      fixture.detectChanges();
+    });
+
+    it('renders Approve with My Account only for pending Dummy Web requests and self-approves via backend API', () => {
+      const el: HTMLElement = fixture.nativeElement;
+      const selfApproveBtns = el.querySelectorAll('.btn-self-approve-action');
+      expect(selfApproveBtns.length).toBe(1);
+      expect(selfApproveBtns[0].textContent).toContain('Approve with My Account');
+
+      const dummyReq = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1')!;
+      const httpMock = TestBed.inject(HttpTestingController);
+
+      (component as any).selfApproveAccessRequest(dummyReq);
+
+      const postReq = httpMock.expectOne(
+        (r) => r.url === 'http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve'
+      );
+      expect(postReq.request.method).toBe('POST');
+      postReq.flush({ id: 'req-dummy-web-1', status: 'Approved' });
+
+      const updated = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
+      expect(updated?.status).toBe('Approved');
+      expect(component.activeAppsList().some((a) => a.name === 'Acme Dummy Portal (Angular SPA)')).toBe(true);
+
+      // Corporate non-dummy app (Figma Enterprise) must NOT be self-approvable
+      (dashboardService as any).selfApproveAccessRequest('req-figma-1');
+      httpMock.expectNone('http://localhost:3000/apps/access-requests/req-figma-1/self-approve');
+      expect(dashboardService.appAccessRequests().find((r) => r.id === 'req-figma-1')?.status).toBe('Pending Approval');
+    });
+
+    it('rolls back optimistic selfApproveAccessRequest when backend returns an error (SCRUM-169)', () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      const dummyReq = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1')!;
+      (component as any).selfApproveAccessRequest(dummyReq);
+
+      const postReq = httpMock.expectOne(
+        (r) => r.url === 'http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve'
+      );
+      postReq.flush({ message: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+
+      const reverted = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
+      expect(reverted?.status).toBe('Pending Approval');
+    });
+  });
   });
 });

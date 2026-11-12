@@ -9,6 +9,7 @@ import { VaultCryptoService } from './vault-crypto.service';
 import { environment } from '../../../../environments/environment';
 import QRCode from 'qrcode';
 import { generateTotp } from '../../../shared/crypto/totp';
+import { isSelfApprovableDummyApp } from '../../../shared/dummy-app.util';
 import {
   ProtocolStatus,
   SaaSApp,
@@ -256,6 +257,7 @@ export class DashboardService {
   readonly inviteError = signal<string | null>(null);
   readonly inviteCreatedUser = signal<DirectoryUser | null>(null);
   readonly passwordCopied = signal<boolean>(false);
+  readonly setupLinkCopied = signal<boolean>(false);
   readonly inviteEmailStatus = signal<'idle' | 'sending' | 'sent' | 'failed'>('idle');
   readonly inviteEmailMessage = signal<string>('');
   readonly existingPendingUser = signal<DirectoryUser | null>(null);
@@ -2413,6 +2415,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.isSubmittingSsoApproval.set(false);
         this.liveSsoChallenge.set(null);
         this.ssoApprovalSuccessNotice.set(`✓ Approved sign-in request for ${challenge?.appName || 'application'}!`);
+        this.loadAccessRequests(true);
+        this.loadCompanyApps();
         this.logAuditEvent(
           `Approved SSO Sign-in Request for ${challenge?.appName || 'application'} (Number match: ${selectedCode})`,
           'Zero-Trust SSO',
@@ -2774,15 +2778,32 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return pwd;
   }
 
+  private copyWithFeedback(value: string | undefined, target: typeof this.passwordCopied): void {
+    if (value && typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(value).catch(() => {});
+    }
+    target.set(true);
+    setTimeout(() => {
+      target.set(false);
+    }, 2500);
+  }
+
+  private getInviteUrls(): { loginUrl: string; setupBaseUrl: string } {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4200';
+    return {
+      loginUrl: `${origin}/login`,
+      setupBaseUrl: `${origin}/setup-account`,
+    };
+  }
+
   copyTemporaryPassword(): void {
     const pwd = this.inviteCreatedUser()?.temporaryPassword || this.invitePassword;
-    if (pwd && typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(pwd).catch(() => {});
-    }
-    this.passwordCopied.set(true);
-    setTimeout(() => {
-      this.passwordCopied.set(false);
-    }, 2500);
+    this.copyWithFeedback(pwd, this.passwordCopied);
+  }
+
+  copySetupLink(): void {
+    const url = this.inviteCreatedUser()?.setupUrl;
+    this.copyWithFeedback(url, this.setupLinkCopied);
   }
 
   openInviteModal(): void {
@@ -2913,27 +2934,31 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         role: newUser.role,
         department: newUser.department,
         temporaryPassword: newUser.temporaryPassword || this.invitePassword.trim(),
-        loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        ...this.getInviteUrls(),
         tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {
+          const provisionedUser: DirectoryUser = {
+            ...newUser,
+            ...(res.setupUrl ? { setupUrl: res.setupUrl } : {}),
+          };
           // SCRUM-174: Update local directory store only upon verified backend success
-          this.directoryUsers.update((users) => [newUser, ...users]);
+          this.directoryUsers.update((users) => [provisionedUser, ...users]);
           this.saveStored('vanguard_directory_users', this.directoryUsers());
           this.logAuditEvent(
-            `Invited employee ${newUser.email} (${newUser.department} - ${newUser.role}) (Valid for 48h)`,
+            `Invited employee ${provisionedUser.email} (${provisionedUser.department} - ${provisionedUser.role}) (Valid for 48h)`,
             'Directory Vault',
             'Invitation Service',
             'success',
             'Low'
           );
 
-          this.inviteCreatedUser.set(newUser);
+          this.inviteCreatedUser.set(provisionedUser);
           this.inviteSuccess.set(true);
           this.inviteEmailStatus.set('sent');
-          this.inviteEmailMessage.set(res.message || `Credentials sent to ${newUser.email}`);
-          this.showAdminNotice(`Credentials & invitation successfully emailed to ${newUser.email}`);
+          this.inviteEmailMessage.set(res.message || `One-Time Setup & credentials sent to ${provisionedUser.email}`);
+          this.showAdminNotice(`One-Time Setup & credentials emailed to ${provisionedUser.email}`);
         },
         error: (err) => {
           this.inviteEmailStatus.set('failed');
@@ -2969,14 +2994,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         role: user.role,
         department: user.department,
         temporaryPassword: user.temporaryPassword || '',
-        loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        ...this.getInviteUrls(),
         tenantId: targetTenantId,
       })
       .subscribe({
         next: (res) => {
+          if (res.setupUrl) {
+            this.syncUserSetupUrl(user.email, res.setupUrl);
+          }
           this.inviteEmailStatus.set('sent');
-          this.inviteEmailMessage.set(res.message || `Credentials sent to ${user.email}`);
-          this.showAdminNotice(`Credentials successfully emailed to ${user.email}`);
+          this.inviteEmailMessage.set(res.message || `One-Time Setup & credentials sent to ${user.email}`);
+          this.showAdminNotice(`One-Time Setup & credentials emailed to ${user.email}`);
         },
         error: (err) => {
           this.inviteEmailStatus.set('failed');
@@ -2992,6 +3020,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (!user) return;
     this.resendInvitation(user);
     this.closeInviteModal();
+  }
+
+  private syncUserSetupUrl(email: string, setupUrl: string): void {
+    const cleanEmail = email.trim().toLowerCase();
+    this.directoryUsers.update((users) =>
+      users.map((u) => (u.email.toLowerCase().trim() === cleanEmail ? { ...u, setupUrl } : u)),
+    );
+    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    const created = this.inviteCreatedUser();
+    if (created && created.email.toLowerCase().trim() === cleanEmail) {
+      this.inviteCreatedUser.set({ ...created, setupUrl });
+    }
   }
 
   resendInvitation(user: DirectoryUser): void {
@@ -3038,12 +3078,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         role: updatedUser.role,
         department: updatedUser.department,
         temporaryPassword: newTempPw,
-        loginUrl: typeof window !== 'undefined' ? `${window.location.origin}/login` : 'http://localhost:4200/login',
+        ...this.getInviteUrls(),
         tenantId: this.activeOrganizationId(),
       })
       .subscribe({
         next: (res) => {
-          this.showAdminNotice(`Invitation successfully re-sent to ${cleanEmail} (Valid for 48h)`);
+          if (res.setupUrl) {
+            this.syncUserSetupUrl(cleanEmail, res.setupUrl);
+          }
+          this.showAdminNotice(`Invitation successfully re-sent with One-Time Setup to ${cleanEmail} (Valid for 48h)`);
         },
         error: (err) => {
           const msg = err.message || 'Email delivery failed.';
@@ -3622,18 +3665,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.accessRequestStatusFilter.set(filter);
   }
 
-  approveAccessRequest(requestId: string, adminNotes?: string): void {
-    const request = this.appAccessRequests().find((r) => r.id === requestId);
-    if (!request) return;
+  /** Whether the application or client ID identifies Acme Dummy Web (user self-approvable, SCRUM-167). */
+  isSelfApprovableDummyApp(nameOrClientId?: string | null): boolean {
+    return isSelfApprovableDummyApp(nameOrClientId);
+  }
 
-    const reviewer = this.displayName() || 'Vanguard Administrator';
+  /** Apply approved request state, auto-assign the app locally/in Supabase, and record audit trail. */
+  private applyAccessRequestApprovalLocally(
+    request: AppAccessRequest,
+    reviewer: string,
+    notes: string,
+    auditSource: string,
+  ): void {
     const reviewedAt = new Date().toISOString();
-    const notes = adminNotes || 'Approved by Administrator';
 
     // 1. Update request status to Approved
     this.appAccessRequests.update((list) =>
       list.map((r) =>
-        r.id === requestId
+        r.id === request.id
           ? {
               ...r,
               status: 'Approved' as const,
@@ -3649,15 +3698,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // Persist status update to Supabase (SCRUM-158)
     if (this.isBrowser) {
       this.supabaseService
-        .updateAccessRequestStatus(requestId, 'Approved', notes, reviewer)
+        .updateAccessRequestStatus(request.id, 'Approved', notes, reviewer)
         .catch((err) => console.warn('Supabase updateAccessRequestStatus notice:', err));
-
-      // Also persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
-      this.http
-        .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
-        .subscribe({
-          error: (err) => console.warn('Backend approveAccessRequest notice:', err),
-        });
     }
 
     // 2. Automatically assign the SaaS application to the user's active launchpad
@@ -3701,13 +3743,73 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // 3. Log audit event in Tenant Audit Logs
     this.logAuditEvent(
       `Application access approved: ${request.appName} for ${request.userName} (${request.userEmail})`,
-      'Admin Console',
+      auditSource,
       'SAML 2.0 & OIDC',
       'success',
       'Medium'
     );
 
     this.showAdminNotice(`Application access approved: ${request.appName} for ${request.userName}.`);
+  }
+
+  approveAccessRequest(requestId: string, adminNotes?: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request) return;
+
+    const prevRequests = [...this.appAccessRequests()];
+    const prevApps = [...this.apps()];
+    const reviewer = this.displayName() || 'Vanguard Administrator';
+    const notes = adminNotes || 'Approved by Administrator';
+
+    this.applyAccessRequestApprovalLocally(request, reviewer, notes, 'Admin Console');
+
+    // Persist to backend-vanguard REST API (SCRUM-158 / SCRUM-167)
+    if (this.isBrowser) {
+      this.http
+        .post(`${this.apiBase}/apps/access-requests/${requestId}/approve`, { adminNotes: notes })
+        .subscribe({
+          error: (err) => {
+            console.warn('Backend approveAccessRequest failed, rolling back optimistic update:', err);
+            this.appAccessRequests.set(prevRequests);
+            this.apps.set(prevApps);
+            this.saveStored('vanguard_access_requests', prevRequests);
+            this.saveStored('vanguard_user_apps', prevApps);
+            this.showAdminNotice('Failed to approve access request on the server.');
+          },
+        });
+    }
+  }
+
+  /** Allow an owning corporate member to self-approve their pending Dummy Web request (SCRUM-167). */
+  selfApproveAccessRequest(requestId: string, notes?: string): void {
+    const request = this.appAccessRequests().find((r) => r.id === requestId);
+    if (!request || request.status !== 'Pending Approval') return;
+    if (!this.isSelfApprovableDummyApp(request.appName)) {
+      this.showAdminNotice(
+        `${request.appName} requires Super Administrator approval and cannot be self-approved.`
+      );
+      return;
+    }
+
+    const prevRequests = [...this.appAccessRequests()];
+    const prevApps = [...this.apps()];
+    const reviewer = this.displayName() || this.authService.currentUser()?.email || 'User Account';
+    const resolvedNotes = notes || 'Self-approved by user account (SCRUM-167)';
+
+    this.applyAccessRequestApprovalLocally(request, reviewer, resolvedNotes, 'User Self-Approval');
+
+    if (this.isBrowser) {
+      this.authService.selfApproveAccessRequest(requestId, resolvedNotes).subscribe({
+        error: (err) => {
+          console.warn('Backend selfApproveAccessRequest failed, rolling back optimistic update:', err);
+          this.appAccessRequests.set(prevRequests);
+          this.apps.set(prevApps);
+          this.saveStored('vanguard_access_requests', prevRequests);
+          this.saveStored('vanguard_user_apps', prevApps);
+          this.showAdminNotice('Failed to self-approve access request on the server.');
+        },
+      });
+    }
   }
 
   openRejectModal(request: AppAccessRequest): void {
@@ -5629,7 +5731,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
             password: resolvedCreds.password,
             timestamp: Date.now(),
           };
-          window.postMessage(payload, '*');
+          window.postMessage(payload, window.location.origin);
           window.dispatchEvent(new CustomEvent('vanguard-autofill-launch', { detail: payload }));
         } catch {
           // ignore postMessage errors in restricted contexts
@@ -6242,18 +6344,17 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const email = this.user()?.email || 'default';
     this.saveStored(`vanguard_sec_prefs_${email}`, updated);
 
-    // Sync to backend preferences endpoint if available
+    // Sync to backend preferences endpoint via Angular HttpClient so authTokenInterceptor attaches Bearer JWT.
     if (this.isBrowser && this.user()?.email) {
-      fetch(`${this.apiBase}/auth/security-preferences`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: this.user()?.email,
+      this.http
+        .post(`${this.apiBase}/auth/security-preferences`, {
           secondaryEmail: updated.secondaryEmail,
           alertThreshold: updated.alertThreshold,
           emailAlertsEnabled: updated.emailAlertsEnabled,
-        }),
-      }).catch(() => {});
+        })
+        .subscribe({
+          error: () => {},
+        });
     }
 
     this.showAdminNotice('Security notification preferences updated successfully.');
@@ -7343,7 +7444,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
         apps,
         timestamp: Date.now(),
       };
-      window.postMessage(payload, '*');
+      window.postMessage(payload, window.location.origin);
       window.dispatchEvent(new CustomEvent('vanguard-apps-sync', { detail: payload }));
     } catch {
       // ignore

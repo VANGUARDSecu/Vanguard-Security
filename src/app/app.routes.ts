@@ -16,6 +16,7 @@ export const routes: Routes = [
   { path: 'verify-otp', component: VerifyOtpComponent, title: 'Vanguard - 2-Step Verification' },
   { path: 'forgot-password', component: ForgotPasswordComponent, title: 'Vanguard - Forgot Password' },
   { path: 'reset-password', component: ResetPasswordComponent, title: 'Vanguard - Reset Password' },
+  { path: 'setup-account', component: ResetPasswordComponent, title: 'Vanguard - One-Time Account Setup' },
   { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard], title: 'Vanguard - Security Dashboard' },
   { path: '**', redirectTo: '' },
 ];

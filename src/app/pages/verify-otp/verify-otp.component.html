@@ -122,10 +122,17 @@
             <span class="governance-icon">🛡️</span>
           </div>
 
-          <h3 class="sso-approval-title">Administrative Approval Required</h3>
+          <h3 class="sso-approval-title">
+            {{ isDummyWebClient() ? 'Approve with your Vanguard Account' : 'Administrative Approval Required' }}
+          </h3>
           
           <p class="sso-approval-text">
-            {{ ssoApprovalMessage() || 'Your corporate organization requires administrative approval before this application can access your account.' }}
+            {{
+              ssoApprovalMessage() ||
+                (isDummyWebClient()
+                  ? 'Self-approve this Acme Dummy Portal sign-in with your own Vanguard corporate account on your Dashboard.'
+                  : 'Your corporate organization requires administrative approval before this application can access your account.')
+            }}
           </p>
 
           <div class="sso-approval-status-card">
@@ -139,7 +146,13 @@
             </div>
             <div class="status-desc" style="display: flex; align-items: center; gap: 8px;">
               <span class="pulse-dot-amber"></span>
-              <span>An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.</span>
+              <span>
+                {{
+                  isDummyWebClient()
+                    ? 'Open your Vanguard Dashboard to self-approve with your own account (My Apps -> Approve with My Account, or respond to the SSO Push prompt). Once approved, this screen will automatically proceed.'
+                    : 'An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.'
+                }}
+              </span>
             </div>
           </div>
 
@@ -151,15 +164,30 @@
               (click)="checkApprovalAndProceed(false)"
               [disabled]="isCheckingApproval()"
             >
-              {{ isCheckingApproval() ? 'Checking Admin Approval...' : '↻ Check Admin Approval & Continue SSO' }}
+              @if (isDummyWebClient()) {
+                {{ isCheckingApproval() ? 'Checking Account Approval...' : '↻ Check Account Approval & Continue SSO' }}
+              } @else {
+                {{ isCheckingApproval() ? 'Checking Admin Approval...' : '↻ Check Admin Approval & Continue SSO' }}
+              }
             </button>
             <div style="display: flex; gap: 10px; justify-content: center; width: 100%;">
               <button type="button" class="sso-return-btn" style="flex: 1;" (click)="onCancelSso()">
                 Return to {{ clientDisplayName() }}
               </button>
-              <a routerLink="/dashboard" class="sso-dashboard-link" style="flex: 1; text-align: center;">
-                Go to Vanguard Dashboard
-              </a>
+              @if (isDummyWebClient()) {
+                <button
+                  type="button"
+                  class="sso-dashboard-link"
+                  style="flex: 1; text-align: center; cursor: pointer;"
+                  (click)="openDashboardForApproval()"
+                >
+                  Open Vanguard Dashboard
+                </button>
+              } @else {
+                <a routerLink="/dashboard" class="sso-dashboard-link" style="flex: 1; text-align: center;">
+                  Go to Vanguard Dashboard
+                </a>
+              }
             </div>
           </div>
         </div>

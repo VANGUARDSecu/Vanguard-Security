@@ -644,7 +644,7 @@ export class AuthService {
           this.pendingEmail.set(credentials.email);
           this.pendingMode.set('signin');
 
-          if ((!response.requireMfa || credentials.isSso) && response.user && response.session) {
+          if (!response.requireMfa && response.user && response.session) {
             this.setSession(response.user, response.session);
           }
         }
@@ -794,10 +794,11 @@ export class AuthService {
     department: string;
     temporaryPassword: string;
     loginUrl?: string;
+    setupBaseUrl?: string;
     tenantId?: string;
-  }): Observable<{ success: boolean; message: string; emailResult?: any }> {
+  }): Observable<{ success: boolean; message: string; setupUrl?: string; emailResult?: any }> {
     return this.http
-      .post<{ success: boolean; message: string; emailResult?: any }>(
+      .post<{ success: boolean; message: string; setupUrl?: string; emailResult?: any }>(
         `${this.API_URL}/send-invite-email`,
         payload
       )
@@ -814,6 +815,40 @@ export class AuthService {
             msg = 'Unable to connect to backend authentication service (http://localhost:3000). Please ensure the backend server is running.';
           }
           return throwError(() => new Error(msg));
+        })
+      );
+  }
+
+  /** Validate a single-use employee onboarding token before showing the setup form (SCRUM-168). */
+  validateSetupToken(token: string): Observable<{
+    valid: boolean;
+    email: string;
+    name: string;
+    role: string;
+    department: string;
+    expiresAt?: string;
+  }> {
+    return this.http
+      .get<{ valid: boolean; email: string; name: string; role: string; department: string; expiresAt?: string }>(
+        `${this.API_URL}/setup-account/validate`,
+        { params: { token } }
+      )
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg = error.error?.message || 'This One-Time Setup link is invalid, expired, or has already been used.';
+          return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
+        })
+      );
+  }
+
+  /** Complete One-Time Setup onboarding and activate the employee account (SCRUM-168). */
+  completeSetupAccount(token: string, password: string): Observable<AuthResponse> {
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/setup-account/complete`, { token, password })
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg = error.error?.message || 'Failed to complete account setup. Please try again.';
+          return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
         })
       );
   }
@@ -1125,31 +1160,6 @@ export class AuthService {
   resetPassword(password: string, accessToken?: string): Observable<{ success: boolean; message: string }> {
     const token = accessToken || this.token() || '';
     const currentEmail = this.currentUser()?.email || this.pendingEmail() || this.loadStoredUser()?.email;
-    const isLocalDirectorySession = token.startsWith('vanguard_') || (token && token.split('.').length !== 3);
-
-    // Sync to localStorage directory cache if present
-    if (this.isBrowser && (isLocalDirectorySession || currentEmail)) {
-      try {
-        const stored = localStorage.getItem('vanguard_directory_users');
-        if (stored) {
-          const users: any[] = JSON.parse(stored);
-          const idx = currentEmail
-            ? users.findIndex((u) => u.email?.toLowerCase().trim() === currentEmail.toLowerCase().trim())
-            : users.findIndex((u) => !!u.temporaryPassword);
-
-          if (idx !== -1) {
-            users[idx].password = password.trim();
-            users[idx].accountStatus = 'Active';
-            users[idx].lastLogin = 'Just now';
-            delete users[idx].temporaryPassword;
-            delete users[idx].isTemporaryPassword;
-            localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
-          }
-        }
-      } catch (e) {
-        console.error('Error updating directory user password in localStorage', e);
-      }
-    }
 
     const headers: Record<string, string> = {};
     if (token) {
@@ -1173,32 +1183,6 @@ export class AuthService {
           this.token.set(null);
         }),
         catchError((error: HttpErrorResponse) => {
-          // Fallback if local directory user had an issue with backend JWT verification
-          if (this.isBrowser && currentEmail) {
-            try {
-              const stored = localStorage.getItem('vanguard_directory_users');
-              if (stored) {
-                const users: any[] = JSON.parse(stored);
-                const idx = users.findIndex((u) => u.email?.toLowerCase().trim() === currentEmail.toLowerCase().trim());
-                if (idx !== -1) {
-                  users[idx].password = password.trim();
-                  delete users[idx].temporaryPassword;
-                  localStorage.setItem('vanguard_directory_users', JSON.stringify(users));
-                  this.isPasswordResetRequired.set(false);
-                  localStorage.removeItem('vanguard_reset_required');
-                  localStorage.removeItem('vanguard_user');
-                  localStorage.removeItem('vanguard_token');
-                  this.currentUser.set(null);
-                  this.token.set(null);
-                  return of({
-                    success: true,
-                    message: 'Password updated successfully! Please sign in with your new password.',
-                  });
-                }
-              }
-            } catch {}
-          }
-
           let errorMessage = 'Failed to reset password. Please try again.';
           if (error.error && error.error.message) {
             errorMessage = Array.isArray(error.error.message)
@@ -1440,32 +1424,18 @@ export class AuthService {
     );
   }
 
+  /** Allow an owning corporate member to self-approve their pending Dummy Web access request (SCRUM-167). */
+  selfApproveAccessRequest(requestId: string, adminNotes?: string): Observable<any> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/apps/access-requests/${encodeURIComponent(requestId)}/self-approve`;
+    return this.http.post(url, { adminNotes });
+  }
+
   getConnectedApps(email?: string): Observable<{ success: boolean; connectedApps: UserConnectedApp[] }> {
     const baseUrl = this.API_URL.replace(/\/auth\/?$/, '');
     const url = email
       ? `${baseUrl}/oauth/connected-apps?email=${encodeURIComponent(email)}`
       : `${baseUrl}/oauth/connected-apps`;
-    return this.http.get<{ success: boolean; connectedApps: UserConnectedApp[] }>(url).pipe(
-      catchError(() => of({
-        success: true,
-        connectedApps: [
-          {
-            id: 'conn-dummy-portal',
-            clientId: 'vanguard-dummy-portal',
-            clientName: 'Acme Dummy Web',
-            protocol: 'OpenID Connect 1.0 (PKCE)',
-            scopes: ['openid', 'profile', 'email', 'roles', 'offline_access'],
-            redirectUri: 'http://localhost:4201/auth/callback',
-            originUrl: 'http://localhost:4201',
-            status: 'Connected' as const,
-            connectedAt: new Date().toISOString(),
-            lastActiveAt: new Date().toISOString(),
-            icon: '🌐',
-            description: 'Acme Dummy Web portal integrated via Vanguard Single Sign-On and OAuth 2.0 PKCE authentication.',
-          }
-        ]
-      }))
-    );
+    return this.http.get<{ success: boolean; connectedApps: UserConnectedApp[] }>(url);
   }
 
   disconnectConnectedApp(clientId: string, email?: string): Observable<{ success: boolean; disconnected: boolean }> {
@@ -1473,9 +1443,7 @@ export class AuthService {
     const url = email
       ? `${baseUrl}/oauth/connected-apps/${encodeURIComponent(clientId)}?email=${encodeURIComponent(email)}`
       : `${baseUrl}/oauth/connected-apps/${encodeURIComponent(clientId)}`;
-    return this.http.delete<{ success: boolean; disconnected: boolean }>(url).pipe(
-      catchError(() => of({ success: true, disconnected: true }))
-    );
+    return this.http.delete<{ success: boolean; disconnected: boolean }>(url);
   }
 
 

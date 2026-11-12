@@ -53,7 +53,10 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
   - **🔗 Copy URI**: One-click copy chip for the standard RFC 6238 `otpauth://totp/...` setup URI for desktop and browser authenticators (1Password, Bitwarden, etc.).
   - 6-digit code verification input supports `Enter` key submission, auto-focus, and numeric formatting.
 
-### Real Web Application Launch & Autofill, Direct Application Provisioning & Zero-URL Security (SCRUM-180)
+### Real Web Application Launch & Autofill, Direct Application Provisioning & Real-Time Extension Synchronization (SCRUM-180)
+- **Real-Time Extension Application Synchronization**:
+  - Automatically caches the user's active application catalog (`activeAppsList`) to `localStorage['vanguard_synced_apps']` and broadcasts `VANGUARD_APPS_SYNC` events across window messaging and DOM event buses.
+  - Automatically responds to extension presence announcements (`VANGUARD_EXTENSION_READY`) and polls during Angular SPA hydration (200ms, 600ms, 1500ms, 3000ms), ensuring newly registered applications in "My Applications" are synchronized to the Vanguard Autofill web extension immediately upon login.
 - **Zero URL Credential Exposure Security Architecture**:
   - **Eliminated Plaintext Credentials in URLs**: Completely removed transmission of plaintext usernames or passwords via URL query strings or hash fragments (`#vg_autofill`, `vg_u`, `vg_p`). The browser is strictly launched to a clean, canonical destination URL (e.g. `https://www.roblox.com/login`), eliminating password exposure in the address bar, browser history, shoulder surfing, screen shares, and third-party tracking scripts.
   - **Popup-Safe Direct Launch**: Launches target applications synchronously upon user click to preserve transient user gestures, completely preventing modern browser pop-up blockers (Chrome, Edge, Firefox) from suppressing the launched application tab.
@@ -578,3 +581,19 @@ frontend-vanguard/
 ## License
 
 This project is part of the **Vanguard Security Platform**. All rights reserved.
+
+---
+
+## Multi-Tenant Isolation, Real-Time Directory & Live Mobile Pairing (SCRUM-183)
+
+1. **Tenant-Scoped Directory, Access Requests & Provisioned Apps**:
+   - Browser storage caches (`directoryUsers`, `appAccessRequests`, `employeeProvisionedApps`, `userDevices`) are partitioned by authenticated user/tenant scope and cleared cleanly on account switches.
+   - Company Super Administrators see only directory accounts and access requests belonging to their own company tenant or created by them.
+   - Apps assigned via **Directory → Provision App** synchronize canonically with the target user's membership and appear immediately in **My Applications**.
+2. **Live Directory Status Updates**:
+   - The **Directory** view subscribes to backend Server-Sent Events (`/auth/directory-users/stream`) and Supabase Realtime (`tenant_memberships`) so invited users flip from `Pending` to `Active` without manual browser refreshes.
+3. **Real Mobile & Devices Pairing & Push Testing**:
+   - **My Devices & Mobile Authenticator** generates live backend pairing keys (`POST /oauth/devices/pairing/create`) and polls pairing completion (`GET /oauth/devices/pairing/status`).
+   - **Send Test Push** dispatches a real backend number-matching challenge (`POST /oauth/mfa/push/test`) to **Vanguard Mobile Authenticator** only when a mobile device is genuinely paired.
+4. **Company Super Admin SSO Prohibition**:
+   - Company Super Administrators are blocked at login, OTP verification, and SSO approval flows from signing into OAuth/OIDC client apps via SSO.

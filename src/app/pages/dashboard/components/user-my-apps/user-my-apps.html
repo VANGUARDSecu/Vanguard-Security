@@ -302,7 +302,7 @@
               </div>
 
               <button type="button" class="btn-launch-app" (click)="initiateSecureAppLaunch(app)">
-                <span>{{ isAppLoggedIn(app.id) ? 'Open Application (Logged In)' : 'Launch & Auto-fill' }}</span>
+                <span>{{ isAppLoggedIn(app.id) ? 'Open Application (Logged In)' : 'Launch' }}</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="launch-icon">
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                   <polyline points="15 3 21 3 21 9"></polyline>
@@ -426,7 +426,7 @@
                     *ngIf="req.status === 'Approved'"
                     (click)="launchApprovedRequest(req)"
                   >
-                    <span>Launch & Auto-fill</span>
+                    <span>Launch</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="launch-icon">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                       <polyline points="15 3 21 3 21 9"></polyline>
@@ -836,15 +836,30 @@
     <div class="modal-card">
       <div class="modal-header">
         <div>
-          <h3 class="modal-title">🔒 Security Verification Before Launch</h3>
+          <h3 class="modal-title">🚀 Launch {{ targetApp.name }}</h3>
           <p class="modal-desc" style="margin: 4px 0 0 0; font-size: 12px;">
-            Verify your identity to unlock and auto-fill credentials into <strong>{{ targetApp.name }}</strong>
+            Review sign-in instructions and verify identity to launch <strong>{{ targetApp.name }}</strong>
           </p>
         </div>
         <button type="button" class="modal-close-btn" (click)="closeLaunchVerifyModal()">✕</button>
       </div>
 
       <div class="modal-body">
+        <!-- Step-by-Step Instructions on What to Do -->
+        <div
+          class="launch-instructions-banner"
+          style="padding: 12px 14px; border-radius: 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); margin-bottom: 14px;"
+        >
+          <div style="font-weight: 600; color: #93c5fd; font-size: 13px; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+            <span>ℹ️</span> <span>How to Sign In After Launching</span>
+          </div>
+          <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
+            <li>Click <strong>Launch {{ targetApp.name }}</strong> below to open the application in a new browser tab.</li>
+            <li>In the opened tab, click the <strong>Vanguard Autofill</strong> extension icon (🛡️) in your browser toolbar.</li>
+            <li>Click <strong>"Fill into current tab"</strong> to automatically populate your username and password, or use <strong>Copy</strong>.</li>
+          </ol>
+        </div>
+
         <!-- Application Summary Pill -->
         <div
           style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); margin-bottom: 14px;"
@@ -978,7 +993,7 @@
       <div class="modal-footer">
         <button type="button" class="btn-ghost" (click)="closeLaunchVerifyModal()">Cancel</button>
         <button type="button" class="btn-primary-action" (click)="confirmSecureAppLaunch()">
-          ✓ Verify &amp; Launch {{ targetApp.name }}
+          🚀 Launch {{ targetApp.name }}
         </button>
       </div>
     </div>

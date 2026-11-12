@@ -350,10 +350,20 @@ export class LoginComponent implements OnInit, OnDestroy {
     const sso = this.ssoParams();
     if (!sso) return;
 
+    const currentUser = user || this.authService.currentUser();
+    if (this.authService.isCompanySuperAdmin(currentUser)) {
+      this.isLoading.set(false);
+      this.showNotification(
+        'error',
+        'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).',
+        8000,
+      );
+      return;
+    }
+
     this.isLoading.set(true);
     this.showNotification('success', 'Credentials verified! Initiating SSO Multi-Factor Authentication challenge...', 3000);
 
-    const currentUser = user || this.authService.currentUser();
     const email = currentUser?.email || this.loginForm.get('email')?.value?.trim();
     const fullName = this.resolveUserFullName(currentUser, email);
     const role = currentUser?.role || 'user';
@@ -395,6 +405,11 @@ export class LoginComponent implements OnInit, OnDestroy {
               this.router.navigate(['/verify-otp'], { queryParams });
             },
             error: (pushErr: any) => {
+              if (String(pushErr?.message || '').includes('prohibited from performing Single Sign-On')) {
+                this.isLoading.set(false);
+                this.showNotification('error', pushErr.message, 8000);
+                return;
+              }
               if (this.isApprovalRequiredError(pushErr)) {
                 this.handleApprovalRequired(pushErr);
                 return;
@@ -469,12 +484,22 @@ export class LoginComponent implements OnInit, OnDestroy {
     const sso = this.ssoParams();
     if (!sso) return;
 
+    const currentUser = user || this.authService.currentUser();
+    if (this.authService.isCompanySuperAdmin(currentUser)) {
+      this.isLoading.set(false);
+      this.showNotification(
+        'error',
+        'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).',
+        8000,
+      );
+      return;
+    }
+
     if (!silent) {
       this.isLoading.set(true);
       this.showNotification('success', 'Authorizing SSO access to application...', 4000);
     }
 
-    const currentUser = user || this.authService.currentUser();
     const email = currentUser?.email || this.loginForm.get('email')?.value?.trim();
     const fullName = this.resolveUserFullName(currentUser, email);
     const role = currentUser?.role || 'user';

@@ -101,6 +101,11 @@ export class UserMyApps {
   gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
   gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
 
+  constructor() {
+    // SCRUM-180: Ensure My Applications catalog is broadcast and synchronized to the browser extension on page load
+    this.dashboardService.broadcastAppsSync();
+  }
+
   // Request Application Form Signals
   readonly reqDeliveryMode = signal<'sso' | 'extension'>('extension');
   readonly reqAppName = signal<string>('');

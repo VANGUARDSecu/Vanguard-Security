@@ -1051,6 +1051,17 @@ export class AuthService {
               }
             }
             keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // SCRUM-180: Notify Vanguard extension of session logout
+      if (typeof window !== 'undefined') {
+        try {
+          window.postMessage({
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_LOGOUT',
+          }, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-logout'));
+        } catch {}
+      }
           }
         } catch {}
       }
@@ -1090,6 +1101,22 @@ export class AuthService {
       }
       if (session.expires_at) {
         localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+      }
+
+      // SCRUM-180: Notify Vanguard extension content script of authenticated session
+      if (typeof window !== 'undefined') {
+        try {
+          const syncPayload = {
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_SYNC',
+            token: session.access_token,
+            user: normalizedUser,
+            email: normalizedUser.email,
+            timestamp: Date.now(),
+          };
+          window.postMessage(syncPayload, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-sync', { detail: syncPayload }));
+        } catch {}
       }
 
       if (session.access_token && session.refresh_token) {
@@ -1266,7 +1293,30 @@ export class AuthService {
     );
   }
 
+  isCompanySuperAdmin(user?: UserProfile | null): boolean {
+    const target = user ?? this.currentUser();
+    if (!target) return false;
+    const meta = (target.user_metadata as Record<string, any>) || {};
+    const accountType = target.accountType || meta['account_type'];
+    if (accountType === 'individual') return false;
+    const role = String(target.role || meta['role'] || '').toLowerCase().trim();
+    return role === 'admin' || role === 'super_admin' || role === 'super administrator';
+  }
+
+  private assertNotCompanySuperAdminForSso(): Error | null {
+    if (this.isCompanySuperAdmin()) {
+      return new Error(
+        'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).'
+      );
+    }
+    return null;
+  }
+
   approveSsoAuthorization(payload: ApproveSsoPayload): Observable<ApproveSsoResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/approve`;
     return this.http.post<ApproveSsoResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {
@@ -1282,6 +1332,10 @@ export class AuthService {
   }
 
   initiateSsoMfa(payload: InitiateSsoMfaPayload): Observable<InitiateSsoMfaResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/challenge`;
     return this.http.post<InitiateSsoMfaResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {
@@ -1327,6 +1381,10 @@ export class AuthService {
   }
 
   initiatePushMfa(payload: InitiatePushMfaPayload): Observable<InitiatePushMfaResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/initiate`;
     return this.http.post<InitiatePushMfaResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {
@@ -1630,6 +1688,17 @@ export class AuthService {
         }
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // SCRUM-180: Notify Vanguard extension of session logout
+      if (typeof window !== 'undefined') {
+        try {
+          window.postMessage({
+            source: 'VANGUARD_WEB_APP',
+            type: 'VANGUARD_SESSION_LOGOUT',
+          }, '*');
+          window.dispatchEvent(new CustomEvent('vanguard-session-logout'));
+        } catch {}
+      }
       let ssoPending: string | null = null;
       if (preserveSso) {
         ssoPending = sessionStorage.getItem('vanguard_sso_pending');

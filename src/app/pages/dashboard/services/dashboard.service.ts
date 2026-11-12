@@ -2,7 +2,7 @@ import { Injectable, inject, signal, computed, PLATFORM_ID } from '@angular/core
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Observable, tap, catchError, throwError, of } from 'rxjs';
+import { Observable, tap, catchError, throwError, of, firstValueFrom } from 'rxjs';
 import { AuthService } from '../../../services/auth.service';
 import { SupabaseService } from '../../../services/supabase.service';
 import { VaultCryptoService } from './vault-crypto.service';
@@ -146,11 +146,56 @@ export class DashboardService {
   readonly directoryStatusFilter = signal<string>('all');
   readonly directorySearch = signal<string>('');
 
+  private resolveRealTenantId(): string | undefined {
+    const active = typeof this.activeOrganizationId === 'function' ? this.activeOrganizationId() : undefined;
+    if (active && active !== 'org_root' && !active.startsWith('org_')) {
+      return active;
+    }
+    const orgs = typeof this.organizations === 'function' ? this.organizations() : [];
+    const realOrg = orgs.find((o) => o?.id && !o.id.startsWith('org_') && o.id !== 'org_root');
+    if (realOrg?.id) {
+      return realOrg.id;
+    }
+    const u = this.authService.currentUser();
+    const userTenant = (u?.user_metadata as any)?.['tenant_id'] || (u as any)?.tenantId;
+    if (userTenant && typeof userTenant === 'string' && !userTenant.startsWith('org_') && userTenant !== 'org_root') {
+      return userTenant;
+    }
+    return undefined;
+  }
+
+  private getUserScopeKey(): string {
+    const u = this.authService.currentUser();
+    const tenantId = (u?.user_metadata as any)?.['tenant_id'] || (u as any)?.tenantId;
+    if (tenantId && typeof tenantId === 'string' && !tenantId.startsWith('org_') && tenantId !== 'org_root') {
+      return tenantId;
+    }
+    const email = u?.email?.toLowerCase().trim();
+    return email || 'anon';
+  }
+
+  getDirectoryUsersStorageKey(): string {
+    return `vanguard_directory_users_${this.getUserScopeKey()}`;
+  }
+
+  getAccessRequestsStorageKey(): string {
+    return `vanguard_access_requests_${this.getUserScopeKey()}`;
+  }
+
+  getUserDevicesStorageKey(): string {
+    const email = this.authService.currentUser()?.email?.toLowerCase().trim();
+    return email ? `vanguard_user_devices_${email}` : 'vanguard_user_devices';
+  }
+
+  getProvisionedAppsStorageKey(): string {
+    return `vanguard_employee_provisioned_apps_${this.getUserScopeKey()}`;
+  }
+
   private initDirectoryUsers(): DirectoryUser[] {
     const u = this.authService.currentUser();
     const userEmail = u?.email?.toLowerCase().trim();
 
-    const stored = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
+    const stored = this.loadStored<DirectoryUser[]>(this.getDirectoryUsersStorageKey(), []);
     if (stored && stored.length > 0) {
       const seen = new Set<string>();
       const now = Date.now();
@@ -708,17 +753,19 @@ export class DashboardService {
   // SCRUM-42: Application Access Requests & Admin Approval Queue State
   // ==========================================
   private initAppAccessRequests(): AppAccessRequest[] {
-    const stored = this.loadStored<AppAccessRequest[]>('vanguard_access_requests', []);
+    const stored = this.loadStored<AppAccessRequest[]>(this.getAccessRequestsStorageKey(), []);
     if (stored && stored.length > 0) {
+      const activeTenant = this.resolveRealTenantId();
       const genuine = stored.filter(
         (r) =>
           !['req-101', 'req-102', 'req-103'].includes(r.id) &&
           r.userEmail !== 'elena.rostova@vanguard.security' &&
           r.userEmail !== 'marcus.vance@vanguard.security' &&
-          r.userEmail !== 'sarah.jenkins@vanguard.security'
+          r.userEmail !== 'sarah.jenkins@vanguard.security' &&
+          (!activeTenant || !r.tenantId || r.tenantId === activeTenant)
       );
       if (genuine.length !== stored.length) {
-        this.saveStored('vanguard_access_requests', genuine);
+        this.saveStored(this.getAccessRequestsStorageKey(), genuine);
       }
       return genuine;
     }
@@ -1192,7 +1239,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   readonly userDevices = signal<EnrolledDevice[]>(
-    this.loadStored<EnrolledDevice[]>('vanguard_user_devices', [])
+    this.loadStored<EnrolledDevice[]>(this.getUserDevicesStorageKey(), [])
   );
   readonly fleetDevices = signal<EnrolledDevice[]>(
     this.loadStored<EnrolledDevice[]>('vanguard_fleet_devices', [])
@@ -1209,19 +1256,29 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     })
   );
 
-  // Pairing Modal State
+  // Real Mobile Pairing Modal State (SCRUM-183)
   readonly showPairDeviceModal = signal<boolean>(false);
-  readonly newPairingToken = signal<string>('vg_mob_pair_8f92e4a19c');
-  readonly newPairingKey = signal<string>('VG-8942-0193');
+  readonly newPairingToken = signal<string>('');
+  readonly newPairingKey = signal<string>('');
+  readonly newPairingQrData = signal<string>('');
   readonly pairDeviceSuccess = signal<boolean>(false);
+  readonly pairingStatusMessage = signal<string>('');
+  readonly isPairingModalLoading = signal<boolean>(false);
 
-  // Push Simulator Modal State
-  readonly showPushSimulatorModal = signal<boolean>(false);
-  readonly simulatedPushStep = signal<'notification' | 'challenge' | 'biometric' | 'approved' | 'denied'>('notification');
-  readonly simulatedChallengeNumber = signal<number>(48);
-  readonly simulatedCandidateNumbers = signal<number[]>([23, 48, 79]);
-  readonly simulatedSelectedNumber = signal<number | null>(null);
-  readonly simulatedBiometricScanning = signal<boolean>(false);
+  // Real Out-of-Band Device Push Verification State (SCRUM-183)
+  readonly activeDevicePushTest = signal<{
+    challengeId: string;
+    code: number;
+    deviceName: string;
+    status: 'pending' | 'approved' | 'denied' | 'fraud_reported' | 'expired' | 'error';
+    message: string;
+  } | null>(null);
+  readonly isSendingPushTest = signal<boolean>(false);
+
+  private pairingPollTimer: any = null;
+  private pushTestPollTimer: any = null;
+  private directoryRealtimeChannel: any = null;
+  private directorySseSource: EventSource | null = null;
 
   // Remote Wipe Modal State
   readonly showWipeDeviceModal = signal<boolean>(false);
@@ -1262,19 +1319,49 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly requestAppSuccess = signal<boolean>(false);
 
   // SCRUM-52: Personal Application Bookmarks & Launcher (Zero Hardcoded Initial State)
+  getPersonalAppsStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim() || '';
+    return email ? `vanguard_personal_apps_${email}` : 'vanguard_personal_apps';
+  }
+
+  getUserAppsStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim() || '';
+    return email ? `vanguard_user_apps_${email}` : 'vanguard_user_apps';
+  }
+
   private initPersonalApps(): SaaSApp[] {
+    const userKey = this.getPersonalAppsStorageKey();
+    const stored = this.loadStored<SaaSApp[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
     return this.loadStored<SaaSApp[]>('vanguard_personal_apps', []);
+  }
+
+  private initUserApps(): SaaSApp[] {
+    const userKey = this.getUserAppsStorageKey();
+    const stored = this.loadStored<SaaSApp[]>(userKey, []);
+    if (stored && stored.length > 0) return stored;
+    return this.loadStored<SaaSApp[]>('vanguard_user_apps', []);
+  }
+
+  persistPersonalApps(apps?: SaaSApp[]): void {
+    const list = apps ?? this.personalApps();
+    this.saveStored(this.getPersonalAppsStorageKey(), list);
+    this.saveStored('vanguard_personal_apps', list);
+  }
+
+  persistUserApps(apps?: SaaSApp[]): void {
+    const list = apps ?? this.apps();
+    this.saveStored(this.getUserAppsStorageKey(), list);
+    this.saveStored('vanguard_user_apps', list);
   }
 
   readonly personalApps = signal<SaaSApp[]>(this.initPersonalApps());
 
-  readonly apps = signal<SaaSApp[]>(
-    this.loadStored<SaaSApp[]>('vanguard_user_apps', [])
-  );
+  readonly apps = signal<SaaSApp[]>(this.initUserApps());
 
-  // SCRUM-171: Per-employee provisioned application accounts (Admin-created accounts isolated per employee)
+  // SCRUM-171 & SCRUM-183: Per-employee provisioned application accounts (scoped by tenant)
   readonly employeeProvisionedApps = signal<SaaSApp[]>(
-    this.loadStored<SaaSApp[]>('vanguard_employee_provisioned_apps', [])
+    this.loadStored<SaaSApp[]>(this.getProvisionedAppsStorageKey(), [])
   );
 
   getAppsProvisionedForEmployee(userId?: string, userEmail?: string): SaaSApp[] {
@@ -1332,12 +1419,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     const updated = [...existing, provisionedApp];
     this.employeeProvisionedApps.set(updated);
-    this.saveStored('vanguard_employee_provisioned_apps', updated);
+    this.saveStored(this.getProvisionedAppsStorageKey(), updated);
 
-    // Sync to backend (best-effort)
+    // Sync to backend (authoritative persistence for target employee)
     if (this.isBrowser) {
       this.http
-        .post(
+        .post<any>(
           `${this.apiBase}/apps?targetUserId=${encodeURIComponent(payload.targetUserId)}`,
           {
             appId,
@@ -1352,7 +1439,22 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             targetUserEmail: provisionedApp.targetUserEmail,
           },
         )
-        .subscribe({ error: () => {} });
+        .subscribe({
+          next: (savedRow) => {
+            if (savedRow?.user_id && savedRow.user_id !== provisionedApp.targetUserId) {
+              this.employeeProvisionedApps.update((apps) =>
+                apps.map((a) =>
+                  a.id === provisionedApp.id ? { ...a, targetUserId: savedRow.user_id } : a,
+                ),
+              );
+              this.saveStored(this.getProvisionedAppsStorageKey(), this.employeeProvisionedApps());
+            }
+          },
+          error: (err) => {
+            const msg = err?.error?.message || err?.message || 'Backend sync failed.';
+            this.showAdminNotice(`Warning: ${provisionedApp.name} provisioning failed on server (${msg}).`);
+          },
+        });
     }
 
     this.logAuditEvent(
@@ -1384,7 +1486,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         ),
     );
     this.employeeProvisionedApps.set(updated);
-    this.saveStored('vanguard_employee_provisioned_apps', updated);
+    this.saveStored(this.getProvisionedAppsStorageKey(), updated);
 
     if (this.isBrowser && targetUserId) {
       this.http
@@ -1448,7 +1550,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             }
           }
           this.apps.set(mapped);
-          this.saveStored('vanguard_user_apps', mapped);
+          this.persistUserApps(mapped);
         },
         error: () => {
           // On offline/network fallback, still ensure employee sees their isolated provisioned apps
@@ -2169,13 +2271,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.fleetDevices.set(mappedDevices);
         this.saveStored('vanguard_fleet_devices', mappedDevices);
         const currentUserEmail = this.user()?.email || '';
-        this.userDevices.set(mappedDevices.filter((d) => d.ownerEmail === currentUserEmail));
-        this.saveStored('vanguard_user_devices', this.userDevices());
+        const scopedDevs = mappedDevices.filter((d) => d.ownerEmail === currentUserEmail);
+        if (scopedDevs.length > 0) {
+          this.userDevices.set(scopedDevs);
+          this.saveStored(this.getUserDevicesStorageKey(), scopedDevs);
+        }
       }
 
-      // 6. Synchronize Application Access Requests from Supabase (SCRUM-158)
+      // 6. Synchronize Application Access Requests (SCRUM-158/183)
       await this.loadAccessRequests();
       this.setupAccessRequestsRealtime();
+      await this.loadUserDevices();
     } catch (err) {
       console.warn('Supabase: Background synchronization failed, defaulting to local cache:', err);
     }
@@ -2195,17 +2301,26 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     this.syncGroupInheritedApps();
     this.initSupabaseSync();
+    this.loadCompanyApps();
     this.startTotpTimer();
     this.fetchConnectedApps();
 
     // SCRUM-180: Listen for Vanguard browser extension presence and sync applications
     if (this.isBrowser && typeof window !== 'undefined') {
       window.addEventListener('message', (event) => {
-        if (event.data?.source === 'VANGUARD_EXTENSION' && event.data?.type === 'VANGUARD_EXTENSION_READY') {
+        if (
+          event.data?.source === 'VANGUARD_EXTENSION' &&
+          (event.data?.type === 'VANGUARD_EXTENSION_READY' || event.data?.type === 'VANGUARD_GET_APPS')
+        ) {
           this.broadcastAppsSync();
         }
       });
-      setTimeout(() => this.broadcastAppsSync(), 500);
+      window.addEventListener('vanguard-extension-ready', () => this.broadcastAppsSync());
+
+      // Broadcast sync during initial bootstrap to accommodate async storage hydration
+      [200, 600, 1500, 3000].forEach((delay) => {
+        setTimeout(() => this.broadcastAppsSync(), delay);
+      });
     }
   }
 
@@ -2216,66 +2331,31 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
    */
   loadDirectoryUsers(): void {
     if (!this.isBrowser) return;
-    let tenantId = this.activeOrganizationId();
-    if (!tenantId || tenantId === 'org_root' || tenantId.startsWith('org_')) {
-      const realOrg = this.organizations().find((o) => !o.id.startsWith('org_') && o.id !== 'org_root');
-      if (realOrg) {
-        tenantId = realOrg.id;
-        this.activeOrganizationId.set(realOrg.id);
-        this.saveStored('vanguard_active_org_id', realOrg.id);
-      } else {
-        const u = this.user();
-        const userTenant = u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
-        if (userTenant) {
-          tenantId = userTenant;
-          this.activeOrganizationId.set(userTenant);
-          this.saveStored('vanguard_active_org_id', userTenant);
-        }
-      }
+    let tenantId = this.resolveRealTenantId();
+    if (tenantId) {
+      this.activeOrganizationId.set(tenantId);
+      this.saveStored('vanguard_active_org_id', tenantId);
     }
     this.isDirectoryLoading.set(true);
     this.authService.getDirectoryUsers(tenantId).subscribe({
       next: (backendUsers) => {
         this.isDirectoryLoading.set(false);
-        if (!backendUsers || backendUsers.length === 0) return;
-        this.directoryUsers.update((current) => {
-          const merged = [...current];
-          for (const b of backendUsers) {
-            const idx = merged.findIndex(
-              (u) => u.email?.toLowerCase().trim() === b.email?.toLowerCase().trim()
-            );
-            if (idx !== -1) {
-              merged[idx] = {
-                ...merged[idx],
-                name: b.name || merged[idx].name,
-                accountStatus: b.accountStatus,
-                lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : merged[idx].lastLogin),
-                mfaStatus: b.mfaStatus || merged[idx].mfaStatus,
-                role: b.role || merged[idx].role,
-                department: b.department || merged[idx].department,
-                initials: b.initials || merged[idx].initials,
-                invitedAt: b.invitedAt || merged[idx].invitedAt,
-                expiresAt: b.expiresAt || merged[idx].expiresAt,
-              };
-            } else {
-              merged.push({
-                id: b.id,
-                name: b.name,
-                email: b.email,
-                department: b.department,
-                role: b.role,
-                mfaStatus: b.mfaStatus,
-                accountStatus: b.accountStatus,
-                lastLogin: b.lastLogin,
-                initials: b.initials,
-                invitedAt: b.invitedAt,
-                expiresAt: b.expiresAt,
-              });
-            }
-          }
-          return merged;
-        });
-        this.saveStored('vanguard_directory_users', this.directoryUsers());
+        const mapped: DirectoryUser[] = (backendUsers || []).map((b) => ({
+          id: b.id,
+          name: b.name,
+          email: b.email,
+          department: b.department,
+          role: b.role,
+          mfaStatus: b.mfaStatus,
+          accountStatus: b.accountStatus,
+          lastLogin: b.lastLogin || (b.accountStatus === 'Active' ? 'Active' : 'Never (Invite sent)'),
+          initials: b.initials,
+          invitedAt: b.invitedAt,
+          expiresAt: b.expiresAt,
+        }));
+        // Replace with authoritative tenant-scoped server list so users from other companies never persist.
+        this.directoryUsers.set(mapped);
+        this.saveStored(this.getDirectoryUsersStorageKey(), mapped);
       },
       error: () => {
         this.isDirectoryLoading.set(false);
@@ -2283,9 +2363,119 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     });
   }
 
+  setupDirectoryUsersRealtime(): void {
+    if (!this.isBrowser) return;
+    const g = globalThis as any;
+    if (g && g.process && (g.process.env?.['NODE_ENV'] === 'test' || g.process.env?.['VITEST'])) {
+      return;
+    }
+
+    // 1. Backend SSE stream for immediate account status activation (Pending -> Active)
+    if (!this.directorySseSource && typeof EventSource !== 'undefined') {
+      const token =
+        this.authService.token?.() ||
+        (typeof localStorage !== 'undefined' ? localStorage.getItem('vanguard_token') : null);
+      if (token) {
+        try {
+          const url = `${this.apiBase}/auth/directory-users/stream?token=${encodeURIComponent(token)}`;
+          const source = new EventSource(url);
+          source.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data || '{}');
+              if (data?.type === 'connected') return;
+              const eventEmail = data?.email?.toLowerCase().trim();
+              if (eventEmail && data?.status) {
+                this.directoryUsers.update((users) =>
+                  users.map((u) =>
+                    u.email?.toLowerCase().trim() === eventEmail
+                      ? {
+                          ...u,
+                          accountStatus: data.status,
+                          lastLogin: data.lastLogin || (data.status === 'Active' ? 'Active' : u.lastLogin),
+                        }
+                      : u,
+                  ),
+                );
+                this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
+              }
+            } catch {
+              // Ignore heartbeat/malformed frames
+            }
+          };
+          source.onerror = () => {
+            // Keep silent; EventSource auto-reconnects when server is online
+          };
+          this.directorySseSource = source;
+        } catch {
+          // Non-fatal if EventSource unavailable
+        }
+      }
+    }
+
+    // 2. Supabase Realtime postgres_changes on tenant_memberships
+    if (!this.directoryRealtimeChannel) {
+      try {
+        const tenantId = this.resolveRealTenantId();
+        const channels = (this.supabaseService.client as any).getChannels?.() || [];
+        const existing = channels.find((c: any) => c.topic === 'realtime:directory_memberships');
+        if (existing) {
+          this.supabaseService.client.removeChannel(existing);
+        }
+        this.directoryRealtimeChannel = this.supabaseService.client
+          .channel('realtime:directory_memberships')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'tenant_memberships' },
+            (payload: any) => {
+              const row = payload?.new || payload?.old;
+              if (tenantId && row?.tenant_id && row.tenant_id !== tenantId) {
+                return;
+              }
+              if (payload?.new?.user_id && payload?.new?.status) {
+                this.directoryUsers.update((users) =>
+                  users.map((u) =>
+                    u.id === payload.new.user_id
+                      ? {
+                          ...u,
+                          accountStatus: payload.new.status,
+                          lastLogin: payload.new.status === 'Active' ? 'Active' : u.lastLogin,
+                        }
+                      : u,
+                  ),
+                );
+                this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
+              }
+              this.loadDirectoryUsers();
+            },
+          )
+          .subscribe();
+      } catch {
+        // Non-fatal in local/dev
+      }
+    }
+  }
+
+  cleanupDirectoryUsersRealtime(): void {
+    if (this.directorySseSource) {
+      try {
+        this.directorySseSource.close();
+      } catch {}
+      this.directorySseSource = null;
+    }
+    if (this.directoryRealtimeChannel) {
+      try {
+        this.supabaseService.client.removeChannel(this.directoryRealtimeChannel);
+      } catch {}
+      this.directoryRealtimeChannel = null;
+    }
+  }
+
   initDashboardForCurrentUser(): void {
     const currentUser = this.authService.currentUser();
     if (!currentUser) return;
+
+    this.cleanupDirectoryUsersRealtime();
+    this.cleanupAccessRequestsRealtime();
 
     if (this.isIndividual()) {
       this.activeWorkspaceId.set('personal');
@@ -2305,21 +2495,21 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.activeTab.set('my-apps');
     }
 
+    // Reload tenant-scoped and user-scoped stores for the new principal
+    this.directoryUsers.set(this.initDirectoryUsers());
+    this.appAccessRequests.set(this.initAppAccessRequests());
+    this.employeeProvisionedApps.set(this.loadStored<SaaSApp[]>(this.getProvisionedAppsStorageKey(), []));
+    this.userDevices.set(this.loadStored<EnrolledDevice[]>(this.getUserDevicesStorageKey(), []));
+
     this.initSupabaseSync();
     this.loadDirectoryUsers();
+    this.setupDirectoryUsersRealtime();
+    this.loadCompanyApps();
+    this.loadUserDevices();
+    this.loadAccessRequests();
+    this.setupAccessRequestsRealtime();
     this.fetchConnectedApps();
     this.startLiveSsoChallengePolling();
-
-    const storedUsers = this.loadStored<DirectoryUser[]>('vanguard_directory_users', []);
-    const u = this.user();
-    const userEmail = u?.email?.toLowerCase().trim();
-    if (storedUsers && storedUsers.length > 0 && userEmail && storedUsers.some((usr) => usr.email?.toLowerCase().trim() === userEmail)) {
-      this.directoryUsers.set(storedUsers);
-    } else {
-      const freshUsers = this.initDirectoryUsers();
-      this.directoryUsers.set(freshUsers);
-      this.saveStored('vanguard_directory_users', freshUsers);
-    }
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
     if (storedGroups && storedGroups.length > 0) {
@@ -2445,35 +2635,50 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // ==========================================
   async loadAccessRequests(force = false): Promise<void> {
     if (!this.isBrowser) return;
-    const activeTenant = this.activeOrganizationId();
-    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+    const tenantId = this.resolveRealTenantId();
     this.isAccessRequestsLoading.set(true);
 
     try {
-      const data = await this.supabaseService.getAccessRequests(tenantId);
+      let data: any[] = [];
+      try {
+        const backendRows = await firstValueFrom(
+          this.http.get<any[]>(`${this.apiBase}/apps/access-requests`),
+        );
+        if (Array.isArray(backendRows)) {
+          data = backendRows;
+        }
+      } catch {
+        // Fallback to direct tenant-filtered Supabase query ONLY when tenantId is resolved
+        if (tenantId) {
+          data = await this.supabaseService.getAccessRequests(tenantId);
+        }
+      }
+
       if (data && data.length > 0) {
-        const mapped: AppAccessRequest[] = data.map((r: any) => ({
-          id: r.id,
-          tenantId: r.tenant_id,
-          userId: r.user_id,
-          userName: r.user_name,
-          userEmail: r.user_email,
-          department: r.department || 'General',
-          role: r.role || 'Directory Member',
-          appName: r.app_name,
-          protocol: r.protocol || 'SAML 2.0',
-          category: r.category || 'cloud',
-          icon: r.icon || '🚀',
-          launchUrl: r.launch_url || 'https://vanguard.security',
-          justification: r.justification || '',
-          status: r.status || 'Pending Approval',
-          submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
-          reviewedAt: r.reviewed_at,
-          reviewedBy: r.reviewed_by,
-          adminNotes: r.admin_notes,
-        }));
+        const mapped: AppAccessRequest[] = data
+          .filter((r: any) => !tenantId || !r.tenant_id || r.tenant_id === tenantId)
+          .map((r: any) => ({
+            id: r.id,
+            tenantId: r.tenant_id,
+            userId: r.user_id,
+            userName: r.user_name,
+            userEmail: r.user_email,
+            department: r.department || 'General',
+            role: r.role || 'Directory Member',
+            appName: r.app_name,
+            protocol: r.protocol || 'SAML 2.0',
+            category: r.category || 'cloud',
+            icon: r.icon || '🚀',
+            launchUrl: r.launch_url || 'https://vanguard.security',
+            justification: r.justification || '',
+            status: r.status || 'Pending Approval',
+            submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
+            reviewedAt: r.reviewed_at,
+            reviewedBy: r.reviewed_by,
+            adminNotes: r.admin_notes,
+          }));
         this.appAccessRequests.set(mapped);
-        this.saveStored('vanguard_access_requests', mapped);
+        this.saveStored(this.getAccessRequestsStorageKey(), mapped);
 
         // SCRUM-159: Sync approved requests into assigned apps list
         const u = this.user();
@@ -2502,13 +2707,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               status: 'Approved',
             }));
             this.apps.update((prev) => [...additions, ...prev]);
-            this.saveStored('vanguard_user_apps', this.apps());
+            this.persistUserApps();
           }
         }
-      } else if (tenantId) {
-        // Obey zero-mock data policy: if 0 requests exist in database for this tenant, empty list
+      } else {
         this.appAccessRequests.set([]);
-        this.saveStored('vanguard_access_requests', []);
+        this.saveStored(this.getAccessRequestsStorageKey(), []);
       }
     } catch (err) {
       console.warn('loadAccessRequests notice:', err);
@@ -2562,12 +2766,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   handleAccessRequestRealtimeChange(payload: any): void {
     if (!payload || !payload.eventType) return;
-    const activeTenant = this.activeOrganizationId();
-    const tenantId = activeTenant && !activeTenant.startsWith('org_') ? activeTenant : undefined;
+    const tenantId = this.resolveRealTenantId();
+    // SCRUM-183: Strict multi-tenant isolation — ignore any realtime payload when caller tenant is unknown or mismatched.
+    if (!tenantId) return;
 
     if (payload.eventType === 'INSERT') {
       const r = payload.new;
-      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+      if (!r?.tenant_id || r.tenant_id !== tenantId) {
         return;
       }
       const mapped: AppAccessRequest = {
@@ -2597,11 +2802,11 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         }
         return [mapped, ...prev];
       });
-      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+      this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
       this.showAdminNotice(`New application access request from ${mapped.userName} for ${mapped.appName}.`);
     } else if (payload.eventType === 'UPDATE') {
       const r = payload.new;
-      if (tenantId && r.tenant_id && r.tenant_id !== tenantId) {
+      if (!r?.tenant_id || r.tenant_id !== tenantId) {
         return;
       }
       this.appAccessRequests.update((prev) =>
@@ -2617,7 +2822,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             : item
         )
       );
-      this.saveStored('vanguard_access_requests', this.appAccessRequests());
+      this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
       // SCRUM-159: If approved, ensure app is added to assigned apps and refresh company apps
       if (r.status === 'Approved') {
@@ -2652,7 +2857,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const oldId = payload.old?.id;
       if (oldId) {
         this.appAccessRequests.update((prev) => prev.filter((item) => item.id !== oldId));
-        this.saveStored('vanguard_access_requests', this.appAccessRequests());
+        this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
       }
     }
   }
@@ -2668,10 +2873,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     if (tab === 'directory') {
       this.loadDirectoryUsers();
+      this.setupDirectoryUsersRealtime();
     }
     if (tab === 'access-requests') {
       this.loadAccessRequests();
       this.setupAccessRequestsRealtime();
+    }
+    if (tab === 'my-apps') {
+      this.loadCompanyApps();
+    }
+    if (tab === 'user-devices') {
+      this.loadUserDevices();
     }
     this.activeTab.set(tab);
   }
@@ -2695,7 +2907,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.directoryUsers.update((users) =>
       users.map((u) => (u.id === user.id ? { ...u, accountStatus: 'Suspended' } : u))
     );
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Suspend account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Medium');
     this.showAdminNotice(`Account for ${user.name} has been suspended.`);
   }
@@ -2704,7 +2916,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.directoryUsers.update((users) =>
       users.map((u) => (u.id === user.id ? { ...u, accountStatus: 'Active' } : u))
     );
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Reactivate account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Low');
     this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
   }
@@ -2713,7 +2925,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.directoryUsers.update((users) =>
       users.map((u) => (u.id === user.id ? { ...u, role: newRole } : u))
     );
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Role modified for ${user.name} to ${newRole}`, 'Directory RBAC', 'Privilege Escalation Guard', 'success', 'Medium');
     this.showAdminNotice(`Role for ${user.name} updated to ${newRole}.`);
   }
@@ -2906,7 +3118,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           };
           // SCRUM-174: Update local directory store only upon verified backend success
           this.directoryUsers.update((users) => [provisionedUser, ...users]);
-          this.saveStored('vanguard_directory_users', this.directoryUsers());
+          this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
           this.logAuditEvent(
             `Invited employee ${provisionedUser.email} (${provisionedUser.department} - ${provisionedUser.role}) (Valid for 48h)`,
             'Directory Vault',
@@ -3021,7 +3233,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.directoryUsers.update((users) =>
       users.map((u) => (u.email.toLowerCase().trim() === cleanEmail ? updatedUser : u)),
     );
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(
       `Resent invitation to ${cleanEmail} with renewed 48h expiration`,
       'Directory Vault',
@@ -3329,7 +3541,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         return { ...u, groups: userGroupNames };
       })
     );
-    this.saveStored('vanguard_directory_users', this.directoryUsers());
+    this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
   }
 
   syncGroupInheritedApps(): void {
@@ -3654,7 +3866,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           : r
       )
     );
-    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
     // Persist status update to Supabase (SCRUM-158)
     if (this.isBrowser) {
@@ -3807,7 +4019,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           : r
       )
     );
-    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
     // Persist status update to Supabase (SCRUM-158)
     if (this.isBrowser) {
@@ -5185,98 +5397,247 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   }
 
   // ==========================================
-  // PHASE 6: Mobile & Biometrics Actions
+  // PHASE 6: Mobile & Biometrics Actions (SCRUM-183)
   // ==========================================
+  private stopPairingPoll(): void {
+    if (this.pairingPollTimer) {
+      clearInterval(this.pairingPollTimer);
+      this.pairingPollTimer = null;
+    }
+  }
+
+  private stopPushTestPoll(): void {
+    if (this.pushTestPollTimer) {
+      clearInterval(this.pushTestPollTimer);
+      this.pushTestPollTimer = null;
+    }
+  }
+
+  async loadUserDevices(): Promise<void> {
+    if (!this.isBrowser) return;
+    const email = (this.user()?.email || this.authService.currentUser()?.email || '').trim().toLowerCase();
+    if (!email && !this.authService.token()) return;
+
+    const query = email ? `?email=${encodeURIComponent(email)}` : '';
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{ success?: boolean; devices?: any[] }>(`${this.apiBase}/oauth/devices${query}`)
+      );
+      if (Array.isArray(res?.devices)) {
+        const mapped: EnrolledDevice[] = res.devices.map((d) => ({
+          id: d.id,
+          name: d.name || 'Vanguard Mobile Device',
+          model: d.model || 'Mobile Authenticator',
+          type: d.type || 'Mobile iOS',
+          osVersion: d.osVersion || d.os_version || 'Mobile OS',
+          ownerName: this.displayName(),
+          ownerEmail: d.ownerEmail || d.email || email,
+          department: (this.user()?.user_metadata as any)?.['department'] || 'General',
+          biometricType: d.biometricType || d.biometric_type || 'Face ID / Biometrics',
+          diskEncrypted: d.diskEncrypted ?? d.disk_encrypted ?? true,
+          jailbroken: d.jailbroken ?? false,
+          edrActive: d.edrActive ?? d.edr_active ?? true,
+          complianceStatus: d.complianceStatus || d.compliance_status || 'Compliant',
+          enrolledAt: d.enrolledAt || d.enrolled_at || 'Paired',
+          lastSync: d.lastSync || d.last_sync || 'Just now',
+          ssoRevokedAt: d.ssoRevokedAt || d.sso_revoked_at || undefined,
+          isCompromised: d.isCompromised ?? d.is_compromised ?? false,
+        }));
+        this.userDevices.set(mapped);
+        this.saveStored(this.getUserDevicesStorageKey(), mapped);
+      }
+    } catch (err) {
+      console.warn('Could not load paired mobile devices from backend:', err);
+    }
+  }
+
   openPairDeviceModal(): void {
-    const token = 'vg_mob_pair_' + Math.random().toString(36).substring(2, 12);
-    const key = `VG-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`;
-    this.newPairingToken.set(token);
-    this.newPairingKey.set(key);
+    this.stopPairingPoll();
+    this.newPairingKey.set('');
+    this.newPairingToken.set('');
+    this.newPairingQrData.set('');
     this.pairDeviceSuccess.set(false);
+    this.isPairingModalLoading.set(true);
+    this.pairingStatusMessage.set('Generating secure one-time pairing key...');
     this.showPairDeviceModal.set(true);
+
+    const email = (this.user()?.email || this.authService.currentUser()?.email || '').trim().toLowerCase();
+    this.http
+      .post<{
+        success: boolean;
+        pairingKey: string;
+        pairingToken: string;
+        qrPayload: string;
+        expiresInSeconds: number;
+      }>(`${this.apiBase}/oauth/devices/pairing/create`, { email })
+      .subscribe({
+        next: (res) => {
+          this.isPairingModalLoading.set(false);
+          this.newPairingKey.set(res.pairingKey);
+          this.newPairingToken.set(res.pairingToken);
+          this.newPairingQrData.set(res.qrPayload);
+          this.pairingStatusMessage.set(
+            'Enter this key in Vanguard Mobile Authenticator to bind your phone to this account.'
+          );
+          this.startPairingPoll(res.pairingKey);
+        },
+        error: (err) => {
+          this.isPairingModalLoading.set(false);
+          this.pairingStatusMessage.set(err?.error?.message || 'Unable to generate pairing key. Please retry.');
+        },
+      });
+  }
+
+  private startPairingPoll(pairingKey: string): void {
+    this.stopPairingPoll();
+    if (!this.isBrowser || !pairingKey) return;
+    this.pairingPollTimer = setInterval(() => {
+      this.checkPairingStatus(pairingKey, false);
+    }, 2500);
+  }
+
+  private checkPairingStatus(pairingKey: string, notifyIfPending: boolean): void {
+    this.http
+      .get<{ success: boolean; status: string; device?: any }>(
+        `${this.apiBase}/oauth/devices/pairing/status?pairingKey=${encodeURIComponent(pairingKey)}`
+      )
+      .subscribe({
+        next: (res) => {
+          if (res?.status === 'paired') {
+            this.stopPairingPoll();
+            this.pairDeviceSuccess.set(true);
+            this.pairingStatusMessage.set('Phone connected and cryptographically bound to your account.');
+            void this.loadUserDevices();
+            this.logAuditEvent(
+              'Paired mobile companion device with backend key attestation',
+              'Mobile MDM Hub',
+              'FIDO2 / Biometrics',
+              'success',
+              'Low'
+            );
+            setTimeout(() => {
+              this.showPairDeviceModal.set(false);
+              this.pairDeviceSuccess.set(false);
+              this.showAdminNotice(
+                `Mobile device${res.device?.name ? ` (${res.device.name})` : ''} connected to your account.`
+              );
+            }, 900);
+          } else if (res?.status === 'expired' || res?.status === 'not_found') {
+            this.stopPairingPoll();
+            this.pairingStatusMessage.set('Pairing key expired. Close and reopen to generate a new pairing key.');
+          } else if (notifyIfPending) {
+            this.pairingStatusMessage.set(
+              'Still waiting for Vanguard Mobile Authenticator to submit this key...'
+            );
+          }
+        },
+        error: () => {
+          if (notifyIfPending) {
+            this.pairingStatusMessage.set('Unable to check pairing status. Please try again.');
+          }
+        },
+      });
   }
 
   closePairDeviceModal(): void {
+    this.stopPairingPoll();
     this.showPairDeviceModal.set(false);
   }
 
   confirmPairDevice(): void {
-    this.pairDeviceSuccess.set(true);
-    const newDev: EnrolledDevice = {
-      id: 'dev-' + Date.now(),
-      name: `${this.displayName()}'s Mobile Authenticator`,
-      model: 'Personal Authenticator Device',
-      type: 'Mobile iOS',
-      osVersion: 'iOS 18.x',
-      ownerName: this.displayName(),
-      ownerEmail: this.user()?.email || 'user@vanguard.security',
-      department: 'Engineering',
-      biometricType: 'Face ID',
-      diskEncrypted: true,
-      jailbroken: false,
-      edrActive: true,
-      complianceStatus: 'Compliant',
-      enrolledAt: 'Just now',
-      lastSync: 'Just now',
-    };
-
-    this.userDevices.update((devs) => [newDev, ...devs]);
-    this.fleetDevices.update((devs) => [newDev, ...devs]);
-    this.saveStored('vanguard_user_devices', this.userDevices());
-    this.saveStored('vanguard_fleet_devices', this.fleetDevices());
-    this.logAuditEvent(`Paired mobile companion device with biometric attestation`, 'Mobile MDM Hub', 'FIDO2 / Biometrics', 'success', 'Low');
-
-    setTimeout(() => {
-      this.showPairDeviceModal.set(false);
-      this.pairDeviceSuccess.set(false);
-      this.showAdminNotice(`Mobile device successfully paired with biometric Face ID attestation.`);
-    }, 1200);
-  }
-
-  startPushSimulation(): void {
-    const targetNum = Math.floor(10 + Math.random() * 89);
-    const opt1 = Math.floor(10 + Math.random() * 89);
-    const opt2 = Math.floor(10 + Math.random() * 89);
-    const shuffled = [targetNum, opt1 === targetNum ? opt1 + 3 : opt1, opt2 === targetNum ? opt2 + 7 : opt2].sort(
-      () => Math.random() - 0.5
-    );
-
-    this.simulatedChallengeNumber.set(targetNum);
-    this.simulatedCandidateNumbers.set(shuffled);
-    this.simulatedSelectedNumber.set(null);
-    this.simulatedPushStep.set('notification');
-    this.simulatedBiometricScanning.set(false);
-    this.showPushSimulatorModal.set(true);
-  }
-
-  closePushSimulator(): void {
-    this.showPushSimulatorModal.set(false);
-  }
-
-  openNotificationChallenge(): void {
-    this.simulatedPushStep.set('challenge');
-  }
-
-  selectSimulatedNumberMatch(num: number): void {
-    this.simulatedSelectedNumber.set(num);
-    if (num === this.simulatedChallengeNumber()) {
-      this.simulatedPushStep.set('biometric');
-      this.simulatedBiometricScanning.set(true);
-      setTimeout(() => {
-        this.simulatedBiometricScanning.set(false);
-        this.simulatedPushStep.set('approved');
-      }, 1000);
-    } else {
-      this.simulatedPushStep.set('denied');
+    const key = this.newPairingKey().trim();
+    if (!key) {
+      this.pairingStatusMessage.set('No active pairing key found. Reopen modal to generate a new key.');
+      return;
     }
+    this.checkPairingStatus(key, true);
   }
 
-  denySimulatedPush(): void {
-    this.simulatedPushStep.set('denied');
+  sendRealTestPush(device?: EnrolledDevice): void {
+    const paired = this.userDevices();
+    if (paired.length === 0) {
+      this.showAdminNotice('Connect a real mobile device first before sending a push verification test.');
+      return;
+    }
+
+    const targetDevice = device || paired[0];
+    const email = (this.user()?.email || this.authService.currentUser()?.email || '').trim().toLowerCase();
+    this.isSendingPushTest.set(true);
+    this.stopPushTestPoll();
+
+    this.http
+      .post<{
+        success: boolean;
+        challengeId: string;
+        numberMatching?: { enabled: boolean; code: number };
+        message?: string;
+      }>(`${this.apiBase}/oauth/mfa/push/test`, {
+        email,
+        deviceId: targetDevice.id,
+        deviceName: targetDevice.name,
+      })
+      .subscribe({
+        next: (res) => {
+          this.isSendingPushTest.set(false);
+          const code = res?.numberMatching?.code ?? 0;
+          this.activeDevicePushTest.set({
+            challengeId: res.challengeId,
+            code,
+            deviceName: targetDevice.name,
+            status: 'pending',
+            message: res.message || `Push verification sent to ${targetDevice.name}.`,
+          });
+          this.startPushTestPoll(res.challengeId, targetDevice.name, code);
+        },
+        error: (err) => {
+          this.isSendingPushTest.set(false);
+          const msg = err?.error?.message || 'Unable to send push verification to device.';
+          this.activeDevicePushTest.set(null);
+          this.showAdminNotice(msg);
+        },
+      });
   }
 
-  retryPushSimulation(): void {
-    this.startPushSimulation();
+  private startPushTestPoll(challengeId: string, deviceName: string, code: number): void {
+    this.stopPushTestPoll();
+    if (!this.isBrowser || !challengeId) return;
+    this.pushTestPollTimer = setInterval(() => {
+      this.http
+        .get<{ status?: string }>(
+          `${this.apiBase}/oauth/mfa/push/status?challengeId=${encodeURIComponent(challengeId)}`
+        )
+        .subscribe({
+          next: (res) => {
+            const st = res?.status;
+            if (!st || st === 'pending') return;
+            this.stopPushTestPoll();
+            const normalized =
+              st === 'approved' || st === 'denied' || st === 'fraud_reported' || st === 'expired'
+                ? st
+                : 'expired';
+            const message =
+              normalized === 'approved'
+                ? `Push verification approved on ${deviceName}.`
+                : normalized === 'denied' || normalized === 'fraud_reported'
+                  ? `Push verification denied on ${deviceName}.`
+                  : 'Push verification challenge expired.';
+            this.activeDevicePushTest.set({
+              challengeId,
+              code,
+              deviceName,
+              status: normalized,
+              message,
+            });
+            this.showAdminNotice(message);
+          },
+          error: () => {},
+        });
+    }, 2000);
+  }
+
+  cancelDevicePushTest(): void {
+    this.stopPushTestPoll();
+    this.activeDevicePushTest.set(null);
   }
 
   openWipeDeviceModal(device: EnrolledDevice): void {
@@ -5295,19 +5656,25 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     if (!dev) return;
 
     this.wipeDeviceSuccess.set(true);
+    const email = (this.user()?.email || this.authService.currentUser()?.email || '').trim().toLowerCase();
+    const query = email ? `?email=${encodeURIComponent(email)}` : '';
+    this.http
+      .delete(`${this.apiBase}/oauth/devices/${encodeURIComponent(dev.id)}${query}`)
+      .subscribe({ error: () => {} });
+
     setTimeout(() => {
       this.userDevices.update((devs) => devs.filter((d) => d.id !== dev.id));
       this.fleetDevices.update((devs) =>
         devs.map((d) => (d.id === dev.id ? { ...d, complianceStatus: 'Revoked' } : d))
       );
-      this.saveStored('vanguard_user_devices', this.userDevices());
+      this.saveStored(this.getUserDevicesStorageKey(), this.userDevices());
       this.saveStored('vanguard_fleet_devices', this.fleetDevices());
       this.logAuditEvent(`Remote wipe executed on device ${dev.name}`, 'Mobile MDM Hub', 'Zero-Trust Revocation', 'blocked', 'High');
       this.showWipeDeviceModal.set(false);
       this.wipeDeviceSuccess.set(false);
       this.selectedDeviceForWipe.set(null);
-      this.showAdminNotice(`Device ${dev.name} revoked and corporate keys wiped.`);
-    }, 1200);
+      this.showAdminNotice(`Device ${dev.name} revoked and unlinked.`);
+    }, 600);
   }
 
   toggleFleetDeviceCompliance(device: EnrolledDevice): void {
@@ -5320,7 +5687,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       devs.map((d) => (d.id === device.id ? { ...d, complianceStatus: newStatus } : d))
     );
     this.saveStored('vanguard_fleet_devices', this.fleetDevices());
-    this.saveStored('vanguard_user_devices', this.userDevices());
+    this.saveStored(this.getUserDevicesStorageKey(), this.userDevices());
     this.showAdminNotice(`Compliance status for ${device.name} updated to ${newStatus}.`);
   }
 
@@ -5365,7 +5732,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
         devs.map((d) => (d.id === dev.id ? { ...d, ssoRevokedAt: updatedTime, lastSync: 'Just now' } : d))
       );
       this.saveStored('vanguard_fleet_devices', this.fleetDevices());
-      this.saveStored('vanguard_user_devices', this.userDevices());
+      this.saveStored(this.getUserDevicesStorageKey(), this.userDevices());
       this.logAuditEvent(
         `Revoked active SSO sessions and tokens for device ${dev.name} (${dev.model}) owned by ${dev.ownerName}`,
         'Endpoint Trust Manager',
@@ -5423,7 +5790,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
         )
       );
       this.saveStored('vanguard_fleet_devices', this.fleetDevices());
-      this.saveStored('vanguard_user_devices', this.userDevices());
+      this.saveStored(this.getUserDevicesStorageKey(), this.userDevices());
       this.logAuditEvent(
         `Flagged device ${dev.name} (${dev.model}) as COMPROMISED / LOST; all network & SSO access quarantined`,
         'Endpoint Trust Manager',
@@ -5466,7 +5833,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       this.fleetDevices.update((devs) => devs.filter((d) => d.id !== dev.id));
       this.userDevices.update((devs) => devs.filter((d) => d.id !== dev.id));
       this.saveStored('vanguard_fleet_devices', this.fleetDevices());
-      this.saveStored('vanguard_user_devices', this.userDevices());
+      this.saveStored(this.getUserDevicesStorageKey(), this.userDevices());
       this.logAuditEvent(
         `Removed device ${dev.name} (${dev.model}) from corporate directory`,
         'Endpoint Trust Manager',
@@ -5789,10 +6156,10 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // 1. Remove from apps and personalApps signals
     this.apps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     this.personalApps.update((prev) => prev.filter((a) => a.id !== appId && (targetName ? a.name.toLowerCase().trim() !== targetName : true)));
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     // 2. Clean up from appAccessRequests for current user so activeAppsList computed signal does not keep displaying it
     const u = this.user();
@@ -5810,7 +6177,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
         return !isUserMatch;
       })
     );
-    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
     // 3. Persist unassign to Supabase if applicable
     const activeTenant = this.activeOrganizationId();
@@ -5842,7 +6209,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // 1. Remove from local signal
     this.appAccessRequests.update((prev) => prev.filter((r) => r.id !== requestId));
-    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
     // 2. Persist to Supabase if applicable
     if (this.isBrowser) {
@@ -5941,7 +6308,7 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     // Add to access requests queue with Pending Approval status - DO NOT auto-provision into apps
     this.appAccessRequests.update((prev) => [newRequest, ...prev]);
-    this.saveStored('vanguard_access_requests', this.appAccessRequests());
+    this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
     // Persist to live Supabase database (SCRUM-158)
     if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
@@ -7319,13 +7686,13 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       newApp,
       ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
     ]);
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) => [
       newApp,
       ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
     ]);
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     // Save credentials to personal vault
     this.addVaultItem({
@@ -7338,6 +7705,32 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     });
 
     this.broadcastAppsSync();
+
+    // SCRUM-182: Synchronize application with production backend so mobile device receives it
+    if (this.isBrowser && uid) {
+      this.http
+        .post(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}`,
+          {
+            appId: newApp.id,
+            name: newApp.name,
+            protocol: newApp.protocol,
+            launchUrl: newApp.launchUrl,
+            category: newApp.category,
+            icon: newApp.icon,
+            description: newApp.description,
+            assignedUsername: newApp.assignedUsername,
+            assignedPassword: newApp.assignedPassword,
+            targetUserEmail: newApp.targetUserEmail,
+          },
+        )
+        .subscribe({
+          next: () => {
+            this.loadCompanyApps();
+          },
+          error: () => {},
+        });
+    }
 
     this.logAuditEvent(`Added application: ${newApp.name}`, 'Applications', 'App Launcher', 'success', 'Low');
     this.showAdminNotice(`Added ${newApp.name} to applications.`);
@@ -7364,6 +7757,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
           category: a.category,
         };
       });
+
+      // Write directly to localStorage so the extension content script or popup
+      // can access the synchronized application catalog immediately even before messaging.
+      try {
+        localStorage.setItem('vanguard_synced_apps', JSON.stringify(apps));
+      } catch {
+        // ignore storage errors
+      }
+
       const payload = {
         source: 'VANGUARD_WEB_APP',
         type: 'VANGUARD_APPS_SYNC',
@@ -7385,12 +7787,12 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.personalApps.update((list) =>
       list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
     );
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) =>
       list.map((a) => (a.id === appId ? { ...a, assignedUsername: username || a.assignedUsername, assignedPassword: password || a.assignedPassword } : a))
     );
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
 
     const app = this.activeAppsList().find((a) => a.id === appId);
     if (app && (username || password)) {
@@ -7418,13 +7820,23 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.personalApps.update((list) =>
       list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
     );
-    this.saveStored('vanguard_personal_apps', this.personalApps());
+    this.persistPersonalApps();
 
     this.apps.update((list) =>
       list.filter((a) => a.id !== id && (targetName ? a.name.toLowerCase().trim() !== targetName : true))
     );
-    this.saveStored('vanguard_user_apps', this.apps());
+    this.persistUserApps();
     this.broadcastAppsSync();
+
+    // SCRUM-182: Synchronize application deletion with backend so mobile updates
+    const uid = this.user()?.id;
+    if (this.isBrowser && uid) {
+      this.http
+        .delete(
+          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}&appId=${encodeURIComponent(id)}`,
+        )
+        .subscribe({ error: () => {} });
+    }
 
     if (app) {
       this.logAuditEvent(`Removed application: ${app.name}`, 'Applications', 'App Launcher', 'success', 'Low');

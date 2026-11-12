@@ -354,13 +354,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly showPairDeviceModal = this.dashboardService.showPairDeviceModal;
   readonly newPairingToken = this.dashboardService.newPairingToken;
   readonly newPairingKey = this.dashboardService.newPairingKey;
+  readonly newPairingQrData = this.dashboardService.newPairingQrData;
   readonly pairDeviceSuccess = this.dashboardService.pairDeviceSuccess;
-  readonly showPushSimulatorModal = this.dashboardService.showPushSimulatorModal;
-  readonly simulatedPushStep = this.dashboardService.simulatedPushStep;
-  readonly simulatedChallengeNumber = this.dashboardService.simulatedChallengeNumber;
-  readonly simulatedCandidateNumbers = this.dashboardService.simulatedCandidateNumbers;
-  readonly simulatedSelectedNumber = this.dashboardService.simulatedSelectedNumber;
-  readonly simulatedBiometricScanning = this.dashboardService.simulatedBiometricScanning;
+  readonly pairingStatusMessage = this.dashboardService.pairingStatusMessage;
+  readonly isPairingModalLoading = this.dashboardService.isPairingModalLoading;
+  readonly activeDevicePushTest = this.dashboardService.activeDevicePushTest;
+  readonly isSendingPushTest = this.dashboardService.isSendingPushTest;
   readonly showWipeDeviceModal = this.dashboardService.showWipeDeviceModal;
   readonly selectedDeviceForWipe = this.dashboardService.selectedDeviceForWipe;
   readonly wipeDeviceSuccess = this.dashboardService.wipeDeviceSuccess;
@@ -530,12 +529,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   openPairDeviceModal() { return this.dashboardService.openPairDeviceModal(); }
   closePairDeviceModal() { return this.dashboardService.closePairDeviceModal(); }
   confirmPairDevice() { return this.dashboardService.confirmPairDevice(); }
-  startPushSimulation() { return this.dashboardService.startPushSimulation(); }
-  closePushSimulator() { return this.dashboardService.closePushSimulator(); }
-  openNotificationChallenge() { return this.dashboardService.openNotificationChallenge(); }
-  selectSimulatedNumberMatch(selectedNumber: number) { return this.dashboardService.selectSimulatedNumberMatch(selectedNumber); }
-  denySimulatedPush() { return this.dashboardService.denySimulatedPush(); }
-  retryPushSimulation() { return this.dashboardService.retryPushSimulation(); }
+  sendRealTestPush(device?: EnrolledDevice) { return this.dashboardService.sendRealTestPush(device); }
+  cancelDevicePushTest() { return this.dashboardService.cancelDevicePushTest(); }
   openWipeDeviceModal(device: EnrolledDevice) { return this.dashboardService.openWipeDeviceModal(device); }
   closeWipeDeviceModal() { return this.dashboardService.closeWipeDeviceModal(); }
   executeWipeDevice() { return this.dashboardService.executeWipeDevice(); }

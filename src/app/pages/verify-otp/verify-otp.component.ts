@@ -176,6 +176,15 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           sessionStorage.setItem('vanguard_sso_pending', JSON.stringify(ssoData));
         }
 
+        if (this.authService.isCompanySuperAdmin()) {
+          this.showNotification(
+            'error',
+            'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).',
+            8000,
+          );
+          return;
+        }
+
         // If SSO params are present but challengeId is missing, auto-initiate challenge
         if (!this.challengeId() && emailParam) {
           if (methodParam === 'push_approval') {
@@ -234,6 +243,14 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
             const ssoData = JSON.parse(pending);
             if (ssoData?.client_id && ssoData?.redirect_uri) {
               this.ssoParams.set(ssoData);
+              if (this.authService.isCompanySuperAdmin()) {
+                this.showNotification(
+                  'error',
+                  'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).',
+                  8000,
+                );
+                return;
+              }
               if (ssoData.client_name || ssoData.clientName) {
                 this.serverClientName.set(ssoData.client_name || ssoData.clientName);
               }
@@ -883,10 +900,19 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   private handleVerificationSuccess(user?: UserProfile): void {
     const sso = this.ssoParams();
     if (sso && sso['client_id'] && sso['redirect_uri']) {
+      const currentUser = user || this.authService.currentUser();
+      if (this.authService.isCompanySuperAdmin(currentUser)) {
+        this.isLoading.set(false);
+        this.showNotification(
+          'error',
+          'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).',
+          8000,
+        );
+        return;
+      }
       this.isLoading.set(true);
       this.showNotification('success', 'Identity and 2FA verified! Authorizing access to client application...', 4000);
 
-      const currentUser = user || this.authService.currentUser();
       const email = currentUser?.email || this.email();
       const fullName = this.resolveUserFullName(currentUser, email);
       const role = currentUser?.role || 'user';

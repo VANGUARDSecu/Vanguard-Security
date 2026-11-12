@@ -1309,7 +1309,30 @@ export class AuthService {
     );
   }
 
+  isCompanySuperAdmin(user?: UserProfile | null): boolean {
+    const target = user ?? this.currentUser();
+    if (!target) return false;
+    const meta = (target.user_metadata as Record<string, any>) || {};
+    const accountType = target.accountType || meta['account_type'];
+    if (accountType === 'individual') return false;
+    const role = String(target.role || meta['role'] || '').toLowerCase().trim();
+    return role === 'admin' || role === 'super_admin' || role === 'super administrator';
+  }
+
+  private assertNotCompanySuperAdminForSso(): Error | null {
+    if (this.isCompanySuperAdmin()) {
+      return new Error(
+        'Zero-Trust Security Policy: Super Administrator accounts from company organizations are strictly prohibited from performing Single Sign-On (SSO).'
+      );
+    }
+    return null;
+  }
+
   approveSsoAuthorization(payload: ApproveSsoPayload): Observable<ApproveSsoResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/approve`;
     return this.http.post<ApproveSsoResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {
@@ -1325,6 +1348,10 @@ export class AuthService {
   }
 
   initiateSsoMfa(payload: InitiateSsoMfaPayload): Observable<InitiateSsoMfaResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/challenge`;
     return this.http.post<InitiateSsoMfaResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {
@@ -1370,6 +1397,10 @@ export class AuthService {
   }
 
   initiatePushMfa(payload: InitiatePushMfaPayload): Observable<InitiatePushMfaResponse> {
+    const blocked = this.assertNotCompanySuperAdminForSso();
+    if (blocked) {
+      return throwError(() => blocked);
+    }
     const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/push/initiate`;
     return this.http.post<InitiatePushMfaResponse>(url, payload).pipe(
       catchError((error: HttpErrorResponse) => {

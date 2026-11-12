@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { Component } from '@angular/core';
 import { of, throwError } from 'rxjs';
@@ -1132,58 +1132,102 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   // ==========================================
-  // PHASE 6: Mobile Companion App & Biometrics Tests
+  // PHASE 6: Mobile Companion App & Biometrics Tests (SCRUM-183)
   // ==========================================
-  it('should initialize with personal and fleet devices and mobile security policies', () => {
+  it('should initialize with empty personal/fleet devices and real mobile security policies', () => {
     expect(component.userDevices().length).toBe(0);
     expect(component.fleetDevices().length).toBe(0);
     expect(component.mobilePolicy().enforceNumberMatching).toBe(true);
-
-    component.confirmPairDevice();
-    expect(component.userDevices().length).toBe(1);
-    expect(component.fleetDevices().length).toBe(1);
-    expect(component.userDevices()[0].biometricType).toBe('Face ID');
   });
 
-  it('should manage device pairing modal state', () => {
+  it('should create backend pairing session when opening pair device modal', () => {
+    const httpMock = TestBed.inject(HttpTestingController);
     expect(component.showPairDeviceModal()).toBe(false);
     component.openPairDeviceModal();
     expect(component.showPairDeviceModal()).toBe(true);
-    expect(component.newPairingToken()).toBeDefined();
-    expect(component.newPairingKey()).toBeDefined();
+
+    const req = httpMock.expectOne((r) => r.url.endsWith('/oauth/devices/pairing/create'));
+    expect(req.request.method).toBe('POST');
+    req.flush({
+      success: true,
+      pairingKey: 'VG-1234-5678',
+      pairingToken: 'vg_mob_pair_real123',
+      qrPayload: 'vanguard://pair?key=VG-1234-5678',
+      expiresInSeconds: 600,
+    });
+
+    expect(component.newPairingToken()).toBe('vg_mob_pair_real123');
+    expect(component.newPairingKey()).toBe('VG-1234-5678');
 
     component.closePairDeviceModal();
     expect(component.showPairDeviceModal()).toBe(false);
   });
 
-  it('should manage push notification challenge simulation', () => {
-    expect(component.showPushSimulatorModal()).toBe(false);
-    component.startPushSimulation();
-    expect(component.showPushSimulatorModal()).toBe(true);
-    expect(component.simulatedPushStep()).toBe('notification');
+  it('should refuse test push when no mobile device is paired and send real backend test push once paired', () => {
+    const httpMock = TestBed.inject(HttpTestingController);
 
-    component.openNotificationChallenge();
-    expect(component.simulatedPushStep()).toBe('challenge');
+    component.sendRealTestPush();
+    expect(component.activeDevicePushTest()).toBeNull();
+    httpMock.expectNone((r) => r.url.endsWith('/oauth/mfa/push/test'));
 
-    const wrongNum = 999999;
-    component.selectSimulatedNumberMatch(wrongNum);
-    expect(component.simulatedPushStep()).toBe('denied');
+    const pairedDev = {
+      id: 'dev-real-1',
+      name: 'Pixel 9 Pro',
+      model: 'Pixel 9 Pro',
+      type: 'Mobile Android' as const,
+      osVersion: 'Android 15',
+      ownerName: 'Alex User',
+      ownerEmail: 'alex@company.com',
+      department: 'Engineering',
+      biometricType: 'Fingerprint' as const,
+      diskEncrypted: true,
+      jailbroken: false,
+      edrActive: true,
+      complianceStatus: 'Compliant' as const,
+      enrolledAt: 'Just now',
+      lastSync: 'Just now',
+    };
+    component.dashboardService.userDevices.set([pairedDev]);
 
-    component.retryPushSimulation();
-    const correctNum = component.simulatedChallengeNumber();
-    component.openNotificationChallenge();
-    component.selectSimulatedNumberMatch(correctNum);
-    expect(component.simulatedPushStep()).toBe('biometric');
+    component.sendRealTestPush(pairedDev);
+    const req = httpMock.expectOne((r) => r.url.endsWith('/oauth/mfa/push/test'));
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body.deviceId).toBe('dev-real-1');
+    req.flush({
+      success: true,
+      challengeId: 'push_test_1',
+      numberMatching: { enabled: true, code: 47 },
+      message: 'Push verification sent to Pixel 9 Pro.',
+    });
 
-    component.denySimulatedPush();
-    expect(component.simulatedPushStep()).toBe('denied');
+    expect(component.activeDevicePushTest()?.challengeId).toBe('push_test_1');
+    expect(component.activeDevicePushTest()?.code).toBe(47);
+    expect(component.activeDevicePushTest()?.status).toBe('pending');
 
-    component.closePushSimulator();
-    expect(component.showPushSimulatorModal()).toBe(false);
+    component.cancelDevicePushTest();
+    expect(component.activeDevicePushTest()).toBeNull();
   });
 
   it('should manage remote device wipe workflow', () => {
-    component.confirmPairDevice();
+    component.dashboardService.fleetDevices.set([
+      {
+        id: 'dev-wipe-1',
+        name: 'Workstation',
+        model: 'MacBook Pro',
+        type: 'macOS Workstation',
+        osVersion: 'macOS 15',
+        ownerName: 'User',
+        ownerEmail: 'user@company.com',
+        department: 'Engineering',
+        biometricType: 'Touch ID',
+        diskEncrypted: true,
+        jailbroken: false,
+        edrActive: true,
+        complianceStatus: 'Compliant',
+        enrolledAt: 'Today',
+        lastSync: 'Just now',
+      },
+    ]);
     const dev = component.fleetDevices()[0];
     expect(dev).toBeDefined();
 
@@ -1196,7 +1240,25 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   it('should toggle fleet device compliance status and update mobile policy', () => {
-    component.confirmPairDevice();
+    component.dashboardService.fleetDevices.set([
+      {
+        id: 'dev-comp-1',
+        name: 'Workstation',
+        model: 'MacBook Pro',
+        type: 'macOS Workstation',
+        osVersion: 'macOS 15',
+        ownerName: 'User',
+        ownerEmail: 'user@company.com',
+        department: 'Engineering',
+        biometricType: 'Touch ID',
+        diskEncrypted: true,
+        jailbroken: false,
+        edrActive: true,
+        complianceStatus: 'Compliant',
+        enrolledAt: 'Today',
+        lastSync: 'Just now',
+      },
+    ]);
     const dev = component.fleetDevices()[0];
     const initialStatus = dev.complianceStatus;
     component.toggleFleetDeviceCompliance(dev);
@@ -1801,6 +1863,105 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
       component.denyLiveSsoChallenge('push_123', true);
       expect(denySpy).toHaveBeenCalledWith('push_123', true);
+    });
+  });
+
+  describe('SCRUM-183: Multi-Tenant Isolation, Provisioned Apps & Company Super Admin SSO Block', () => {
+    it('should identify company Super Admin and block SSO approval, OTP MFA, and Push MFA calls', () => {
+      authService.currentUser.set({
+        id: 'admin-company-1',
+        email: 'ceo@acme.com',
+        accountType: 'company',
+        role: 'admin',
+        user_metadata: { account_type: 'company', role: 'admin', tenant_id: 'tenant-acme' },
+      });
+
+      expect(authService.isCompanySuperAdmin()).toBe(true);
+
+      let approveErr: any = null;
+      authService
+        .approveSsoAuthorization({
+          client_id: 'app-1',
+          redirect_uri: 'http://localhost:4000/cb',
+          email: 'ceo@acme.com',
+        })
+        .subscribe({ error: (e) => (approveErr = e) });
+      expect(approveErr?.message).toContain('prohibited from performing Single Sign-On');
+
+      let otpErr: any = null;
+      authService
+        .initiateSsoMfa({
+          email: 'ceo@acme.com',
+          client_id: 'app-1',
+          redirect_uri: 'http://localhost:4000/cb',
+        })
+        .subscribe({ error: (e) => (otpErr = e) });
+      expect(otpErr?.message).toContain('prohibited from performing Single Sign-On');
+
+      let pushErr: any = null;
+      authService
+        .initiatePushMfa({
+          email: 'ceo@acme.com',
+          client_id: 'app-1',
+          redirect_uri: 'http://localhost:4000/cb',
+        })
+        .subscribe({ error: (e) => (pushErr = e) });
+      expect(pushErr?.message).toContain('prohibited from performing Single Sign-On');
+    });
+
+    it('should allow non-admin company employee SSO check (not blocked as company Super Admin)', () => {
+      const emp = {
+        id: 'emp-1',
+        email: 'dev@acme.com',
+        accountType: 'company' as const,
+        role: 'user' as const,
+        user_metadata: { account_type: 'company', role: 'user', tenant_id: 'tenant-acme' },
+      };
+      expect(authService.isCompanySuperAdmin(emp)).toBe(false);
+    });
+
+    it('should scope directory users storage per user and reject cross-tenant access request realtime events', () => {
+      authService.currentUser.set({
+        id: 'admin-acme',
+        email: 'admin@acme.com',
+        accountType: 'company',
+        role: 'admin',
+        user_metadata: { account_type: 'company', role: 'admin', tenant_id: 'tenant-acme' },
+      });
+      component.dashboardService.activeOrganizationId.set('tenant-acme');
+      component.dashboardService.appAccessRequests.set([]);
+
+      // Simulate Supabase Realtime event from a DIFFERENT tenant
+      (component.dashboardService as any).handleAccessRequestRealtimeChange({
+        eventType: 'INSERT',
+        new: {
+          id: 'req-other-tenant',
+          tenant_id: 'tenant-rival',
+          user_id: 'usr-rival',
+          user_name: 'Rival User',
+          user_email: 'rival@rival.com',
+          app_name: 'Rival Secret App',
+          status: 'Pending Approval',
+          submitted_at: new Date().toISOString(),
+        },
+      });
+      expect(component.appAccessRequests().some((r) => r.id === 'req-other-tenant')).toBe(false);
+
+      // Simulate Supabase Realtime event from the SAME tenant
+      (component.dashboardService as any).handleAccessRequestRealtimeChange({
+        eventType: 'INSERT',
+        new: {
+          id: 'req-acme-1',
+          tenant_id: 'tenant-acme',
+          user_id: 'usr-acme',
+          user_name: 'Acme Dev',
+          user_email: 'dev@acme.com',
+          app_name: 'Jira Cloud',
+          status: 'Pending Approval',
+          submitted_at: new Date().toISOString(),
+        },
+      });
+      expect(component.appAccessRequests().some((r) => r.id === 'req-acme-1')).toBe(true);
     });
   });
 });

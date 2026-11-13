@@ -3118,7 +3118,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           };
           // SCRUM-174: Update local directory store only upon verified backend success
           this.directoryUsers.update((users) => [provisionedUser, ...users]);
-          this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
+          this.saveStored('vanguard_directory_users', this.directoryUsers());
           this.logAuditEvent(
             `Invited employee ${provisionedUser.email} (${provisionedUser.department} - ${provisionedUser.role}) (Valid for 48h)`,
             'Directory Vault',

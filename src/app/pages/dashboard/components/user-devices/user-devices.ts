@@ -1,23 +1,8 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
-import {
-  ProtocolStatus,
-  SaaSApp,
-  SignInEvent,
-  SSHKey,
-  DirectoryUser,
-  TenantAuditEvent,
-  SamlConnector,
-  OidcClient,
-  IdpCertMetadata,
-  LdapHost,
-  RadiusAccessPoint,
-  VlanMapping,
-  EnrolledDevice,
-  MobilePolicyConfig,
-} from '../../models/dashboard.models';
+import { EnrolledDevice } from '../../models/dashboard.models';
 
 @Component({
   selector: 'app-user-devices',
@@ -26,7 +11,7 @@ import {
   templateUrl: './user-devices.html',
   styleUrl: './user-devices.css'
 })
-export class UserDevices {
+export class UserDevices implements OnInit {
   readonly dashboardService = inject(DashboardService);
 
   readonly activeTab = this.dashboardService.activeTab;
@@ -35,20 +20,23 @@ export class UserDevices {
   readonly showPairDeviceModal = this.dashboardService.showPairDeviceModal;
   readonly newPairingToken = this.dashboardService.newPairingToken;
   readonly newPairingKey = this.dashboardService.newPairingKey;
+  readonly newPairingQrData = this.dashboardService.newPairingQrData;
   readonly pairDeviceSuccess = this.dashboardService.pairDeviceSuccess;
-  readonly showPushSimulatorModal = this.dashboardService.showPushSimulatorModal;
-  readonly simulatedPushStep = this.dashboardService.simulatedPushStep;
-  readonly simulatedChallengeNumber = this.dashboardService.simulatedChallengeNumber;
-  readonly simulatedCandidateNumbers = this.dashboardService.simulatedCandidateNumbers;
-  readonly simulatedSelectedNumber = this.dashboardService.simulatedSelectedNumber;
-  readonly simulatedBiometricScanning = this.dashboardService.simulatedBiometricScanning;
+  readonly pairingStatusMessage = this.dashboardService.pairingStatusMessage;
+  readonly isPairingModalLoading = this.dashboardService.isPairingModalLoading;
+  readonly activeDevicePushTest = this.dashboardService.activeDevicePushTest;
+  readonly isSendingPushTest = this.dashboardService.isSendingPushTest;
 
-  startPushSimulation() { this.dashboardService.startPushSimulation(); }
-  closePushSimulator() { this.dashboardService.closePushSimulator(); }
-  openNotificationChallenge() { this.dashboardService.openNotificationChallenge(); }
-  selectSimulatedNumberMatch(num: number) { this.dashboardService.selectSimulatedNumberMatch(num); }
-  denySimulatedPush() { this.dashboardService.denySimulatedPush(); }
-  retryPushSimulation() { this.dashboardService.retryPushSimulation(); }
+  ngOnInit(): void {
+    void this.dashboardService.loadUserDevices();
+  }
+
+  encodeUri(val: string): string {
+    return encodeURIComponent(val || '');
+  }
+
+  sendRealTestPush(device?: EnrolledDevice) { this.dashboardService.sendRealTestPush(device); }
+  cancelDevicePushTest() { this.dashboardService.cancelDevicePushTest(); }
   openPairDeviceModal() { this.dashboardService.openPairDeviceModal(); }
   closePairDeviceModal() { this.dashboardService.closePairDeviceModal(); }
   confirmPairDevice() { this.dashboardService.confirmPairDevice(); }

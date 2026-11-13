@@ -581,3 +581,19 @@ frontend-vanguard/
 ## License
 
 This project is part of the **Vanguard Security Platform**. All rights reserved.
+
+---
+
+## Multi-Tenant Isolation, Real-Time Directory & Live Mobile Pairing (SCRUM-183)
+
+1. **Tenant-Scoped Directory, Access Requests & Provisioned Apps**:
+   - Browser storage caches (`directoryUsers`, `appAccessRequests`, `employeeProvisionedApps`, `userDevices`) are partitioned by authenticated user/tenant scope and cleared cleanly on account switches.
+   - Company Super Administrators see only directory accounts and access requests belonging to their own company tenant or created by them.
+   - Apps assigned via **Directory → Provision App** synchronize canonically with the target user's membership and appear immediately in **My Applications**.
+2. **Live Directory Status Updates**:
+   - The **Directory** view subscribes to backend Server-Sent Events (`/auth/directory-users/stream`) and Supabase Realtime (`tenant_memberships`) so invited users flip from `Pending` to `Active` without manual browser refreshes.
+3. **Real Mobile & Devices Pairing & Push Testing**:
+   - **My Devices & Mobile Authenticator** generates live backend pairing keys (`POST /oauth/devices/pairing/create`) and polls pairing completion (`GET /oauth/devices/pairing/status`).
+   - **Send Test Push** dispatches a real backend number-matching challenge (`POST /oauth/mfa/push/test`) to **Vanguard Mobile Authenticator** only when a mobile device is genuinely paired.
+4. **Company Super Admin SSO Prohibition**:
+   - Company Super Administrators are blocked at login, OTP verification, and SSO approval flows from signing into OAuth/OIDC client apps via SSO.

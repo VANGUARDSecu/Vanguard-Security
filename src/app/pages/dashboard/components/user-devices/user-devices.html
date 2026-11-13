@@ -5,16 +5,49 @@
               <p class="section-subtitle">Manage personal smartphones, biometric sensors, and authorized workstations.</p>
             </div>
             <div class="header-actions-group">
-              <button type="button" class="btn-ghost" (click)="startPushSimulation()">
+              <button
+                type="button"
+                class="btn-ghost"
+                [disabled]="userDevices().length === 0 || isSendingPushTest()"
+                [title]="userDevices().length === 0 ? 'Pair a mobile device first to send a real push challenge' : 'Send a real push verification to your paired mobile app'"
+                (click)="sendRealTestPush()"
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
                   <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                   <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                 </svg>
-                <span>Test Push Notification</span>
+                <span>{{ isSendingPushTest() ? 'Sending Push...' : 'Send Test Push' }}</span>
               </button>
               <button type="button" class="btn-primary-action" (click)="openPairDeviceModal()">
                 <span class="btn-plus">+</span>
                 <span>Pair Mobile Authenticator</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Real Out-of-Band Push Verification Status Banner (SCRUM-183) -->
+          <div class="session-card mb-4" *ngIf="activeDevicePushTest() as pushTest">
+            <div class="session-device-row">
+              <div class="device-icon-box">🔔</div>
+              <div class="session-info">
+                <div class="session-headline">
+                  <span class="device-name">Real Push Challenge → {{ pushTest.deviceName }}</span>
+                  <span
+                    class="status-badge"
+                    [class.status-success]="pushTest.status === 'approved'"
+                    [class.status-warning]="pushTest.status === 'pending'"
+                    [class.status-danger]="pushTest.status === 'denied' || pushTest.status === 'fraud_reported' || pushTest.status === 'expired'"
+                  >
+                    {{ pushTest.status | uppercase }}
+                  </span>
+                </div>
+                <p class="session-sub">{{ pushTest.message }}</p>
+                <p class="session-verified" *ngIf="pushTest.status === 'pending' && pushTest.code">
+                  Number Matching Code on your Mobile Authenticator: <strong>{{ pushTest.code }}</strong>
+                </p>
+              </div>
+              <button type="button" class="btn-ghost btn-sm ml-auto" (click)="cancelDevicePushTest()">
+                Dismiss
               </button>
             </div>
           </div>
@@ -57,8 +90,8 @@
               </div>
 
               <div class="device-card-footer">
-                <button type="button" class="btn-ghost btn-sm" (click)="startPushSimulation()">
-                  <span>🔔 Test Push</span>
+                <button type="button" class="btn-ghost btn-sm" [disabled]="isSendingPushTest()" (click)="sendRealTestPush(dev)">
+                  <span>🔔 Send Test Push</span>
                 </button>
                 <button type="button" class="btn-ghost btn-sm text-red" (click)="openWipeDeviceModal(dev)">
                   <span>Unlink</span>
@@ -115,24 +148,31 @@
 
       <div class="modal-body text-center">
         <p class="modal-desc">
-          Scan this QR code with the <strong>Vanguard Authenticator</strong> app on iOS or Android to enroll your phone for push biometric approvals.
+          Scan this QR code or enter the registration key in <strong>Vanguard Mobile Authenticator</strong> to cryptographically bind your phone to this account.
         </p>
 
         <!-- Dynamic QR Code Card -->
-        <div class="qr-pairing-box">
+        <div class="qr-pairing-box" *ngIf="newPairingQrData() || newPairingKey(); else pairingLoadingTpl">
           <img
-            [src]="'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + newPairingToken()"
+            [src]="'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeUri(newPairingQrData() || newPairingKey())"
             alt="Mobile Enrollment QR Code"
             class="pairing-qr-img"
           />
           <div class="qr-pulse-ring"></div>
         </div>
+        <ng-template #pairingLoadingTpl>
+          <p class="text-sm text-muted">Generating secure pairing key...</p>
+        </ng-template>
 
-        <div class="pairing-code-wrap">
+        <div class="pairing-code-wrap" *ngIf="newPairingKey()">
           <span class="pairing-label">Manual Registration Key</span>
           <code class="pairing-key">{{ newPairingKey() }}</code>
           <span class="text-sm text-muted">Expires in 10 minutes</span>
         </div>
+
+        <p class="text-sm text-muted" *ngIf="pairingStatusMessage() && !pairDeviceSuccess()">
+          {{ pairingStatusMessage() }}
+        </p>
 
         <div class="store-badge-row">
           <span class="store-pill">🍎 Apple App Store (iOS 17+)</span>
@@ -140,152 +180,16 @@
         </div>
 
         <div class="form-success-text" *ngIf="pairDeviceSuccess()">
-          ✓ Device paired successfully! Hardware Face ID biometric bound.
+          ✓ Device connected and verified!
         </div>
       </div>
 
       <div class="modal-footer">
         <button type="button" class="btn-ghost" (click)="closePairDeviceModal()">Cancel</button>
-        <button type="button" class="btn-primary-action" (click)="confirmPairDevice()">Confirm Device Pairing</button>
+        <button type="button" class="btn-primary-action" [disabled]="isPairingModalLoading() || !newPairingKey()" (click)="confirmPairDevice()">
+          Check Pairing Status
+        </button>
       </div>
-    </div>
-  </div>
-
-  <!-- ========================================================================
-       MODAL: SMARTPHONE PUSH & BIOMETRIC CHALLENGE SIMULATOR
-       ======================================================================== -->
-
-  <div class="modal-backdrop" *ngIf="showPushSimulatorModal()">
-    <div class="phone-modal-wrapper">
-      <div class="phone-mockup-frame">
-        <!-- Phone Speaker Notch / Dynamic Island -->
-        <div class="phone-notch">
-          <div class="notch-camera"></div>
-          <div class="notch-speaker"></div>
-        </div>
-
-        <!-- Phone Top Status Bar -->
-        <div class="phone-status-bar">
-          <span class="status-time">9:41</span>
-          <div class="status-icons">
-            <span>5G</span>
-            <span>📶</span>
-            <span>🔋 100%</span>
-          </div>
-        </div>
-
-        <!-- Phone Screen Content -->
-        <div class="phone-screen">
-          <!-- STEP 1: Incoming Push Notification Banner -->
-          <div class="push-flow-step" *ngIf="simulatedPushStep() === 'notification'">
-            <div class="push-notification-banner" (click)="openNotificationChallenge()">
-              <div class="push-banner-top">
-                <span class="push-app-badge">🛡️ VANGUARD AUTH</span>
-                <span class="push-time-now">now</span>
-              </div>
-              <h5 class="push-banner-title">Sign-In Verification Request</h5>
-              <p class="push-banner-msg">Sign-in attempt detected from Chrome on Windows 11 (127.0.0.1, Manila).</p>
-              <span class="push-tap-hint">Tap to verify your identity →</span>
-            </div>
-
-            <div class="phone-lockscreen-clock">
-              <div class="lock-clock">09:41</div>
-              <div class="lock-date">Wednesday, September 5</div>
-            </div>
-
-            <div class="phone-actions-hint">
-              <span>Touch banner to review sign-in challenge</span>
-            </div>
-          </div>
-
-          <!-- STEP 2: Number Matching Challenge -->
-          <div class="push-flow-step step-challenge" *ngIf="simulatedPushStep() === 'challenge'">
-            <div class="security-shield-icon">🔐</div>
-            <h4 class="phone-title">Approve Sign-In?</h4>
-            <p class="phone-desc">
-              A computer is requesting access to your Vanguard account.
-            </p>
-
-            <div class="challenge-box-phone">
-              <span class="challenge-instruction">Enter the number shown on your computer screen:</span>
-              <div class="computer-screen-peek">
-                <span class="peek-label">Computer Screen:</span>
-                <span class="peek-number">{{ simulatedChallengeNumber() }}</span>
-              </div>
-
-              <div class="number-match-grid">
-                <button
-                  type="button"
-                  class="number-choice-btn"
-                  *ngFor="let num of simulatedCandidateNumbers()"
-                  (click)="selectSimulatedNumberMatch(num)"
-                >
-                  {{ num }}
-                </button>
-              </div>
-            </div>
-
-            <button type="button" class="btn-deny-phone" (click)="denySimulatedPush()">
-              ✕ No, It's Not Me (Deny)
-            </button>
-          </div>
-
-          <!-- STEP 3: Biometric Scanning (Face ID / Touch ID) -->
-          <div class="push-flow-step step-biometric" *ngIf="simulatedPushStep() === 'biometric'">
-            <div class="biometric-scan-container">
-              <div class="face-id-graphic">
-                <div class="face-corner tl"></div>
-                <div class="face-corner tr"></div>
-                <div class="face-corner bl"></div>
-                <div class="face-corner br"></div>
-                <div class="face-smile">👁️ 👁️</div>
-              </div>
-              <div class="biometric-pulse-circle"></div>
-            </div>
-            <h4 class="phone-title mt-4">Verifying Face ID...</h4>
-            <p class="phone-desc text-cyan">Hardware Secure Enclave validating biometric attestation.</p>
-          </div>
-
-          <!-- STEP 4: Approved State -->
-          <div class="push-flow-step step-approved" *ngIf="simulatedPushStep() === 'approved'">
-            <div class="success-check-circle">✓</div>
-            <h4 class="phone-title text-green">Sign-In Approved!</h4>
-            <p class="phone-desc">
-              Identity verified with Face ID & Number Matching. Computer session granted access.
-            </p>
-            <div class="approval-meta-card">
-              <div><strong>Device:</strong> iPhone 15 Pro</div>
-              <div><strong>Biometric:</strong> Secure Enclave Pass</div>
-              <div><strong>Time:</strong> Just now</div>
-            </div>
-            <button type="button" class="btn-phone-close" (click)="closePushSimulator()">
-              Done
-            </button>
-          </div>
-
-          <!-- STEP 5: Denied State -->
-          <div class="push-flow-step step-denied" *ngIf="simulatedPushStep() === 'denied'">
-            <div class="danger-cross-circle">✕</div>
-            <h4 class="phone-title text-danger">Sign-In Blocked!</h4>
-            <p class="phone-desc text-danger">
-              Number mismatch or verification denied. Zero-Trust lockout triggered and audit alert dispatched.
-            </p>
-            <button type="button" class="btn-phone-retry" (click)="retryPushSimulation()">
-              Retry Challenge
-            </button>
-            <button type="button" class="btn-phone-close mt-2" (click)="closePushSimulator()">
-              Close
-            </button>
-          </div>
-        </div>
-
-        <!-- Phone Home Indicator Bar -->
-        <div class="phone-home-indicator"></div>
-      </div>
-
-      <button type="button" class="close-simulator-pill" (click)="closePushSimulator()">
-        ✕ Close Phone Simulator
-      </button>
     </div>
   </div>
 

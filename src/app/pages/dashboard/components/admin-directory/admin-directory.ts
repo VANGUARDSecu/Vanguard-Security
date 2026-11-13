@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, HostListener, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, HostListener, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -27,13 +27,18 @@ import {
   templateUrl: './admin-directory.html',
   styleUrl: './admin-directory.css'
 })
-export class AdminDirectory implements OnInit {
+export class AdminDirectory implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
 
   readonly isDirectoryLoading = this.dashboardService.isDirectoryLoading;
 
   ngOnInit(): void {
     this.dashboardService.loadDirectoryUsers();
+    this.dashboardService.setupDirectoryUsersRealtime();
+  }
+
+  ngOnDestroy(): void {
+    this.dashboardService.cleanupDirectoryUsersRealtime();
   }
 
   refreshDirectoryUsers(): void {

@@ -298,8 +298,13 @@ export class AuthService {
 
   private isOAuthChallenging = false;
 
+  // SCRUM-184: Reactive Google/OAuth callback processing state for login indicator
+  readonly isOAuthProcessing = signal<boolean>(false);
+  readonly oAuthProcessingMessage = signal<string>('Processing Google sign-in...');
+  readonly oAuthErrorMessage = signal<string | null>(null);
+
   get isChallengingOAuth(): boolean {
-    return this.isOAuthChallenging;
+    return this.isOAuthChallenging || this.isOAuthProcessing();
   }
 
   /**
@@ -375,12 +380,16 @@ export class AuthService {
             return;
           }
 
-          // SCRUM-163: Zero-Trust OAuth 2-Step Verification Challenge
+          // SCRUM-163 & SCRUM-184: Zero-Trust OAuth 2-Step Verification Challenge with immediate processing state
           this.isOAuthChallenging = true;
+          this.isOAuthProcessing.set(true);
+          this.oAuthErrorMessage.set(null);
+          this.oAuthProcessingMessage.set('Verifying Google account session...');
           window.history.replaceState(null, '', window.location.pathname);
 
           const initiateChallenge = (resolvedEmail: string) => {
             const finalEmail = resolvedEmail || email || 'verified_user@vanguard.security';
+            this.oAuthProcessingMessage.set('Preparing 2-Step Verification challenge...');
             this.challengeOAuthOtp({
               email: finalEmail,
               provider: 'google',
@@ -392,6 +401,7 @@ export class AuthService {
             }).subscribe({
               next: (res) => {
                 this.isOAuthChallenging = false;
+                this.isOAuthProcessing.set(false);
                 const targetEmail = res.email || finalEmail;
                 this.pendingEmail.set(targetEmail);
                 this.pendingMode.set('signin');
@@ -417,9 +427,11 @@ export class AuthService {
               },
               error: (err) => {
                 this.isOAuthChallenging = false;
+                this.isOAuthProcessing.set(false);
                 console.warn('OAuth challenge initiation failed:', err);
                 const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
                 const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
+                this.oAuthErrorMessage.set(errorMsg);
                 let pendingSso: Record<string, string> | null = null;
                 try {
                   const raw = sessionStorage.getItem('vanguard_sso_pending');
@@ -452,11 +464,22 @@ export class AuthService {
       const type = queryParams.get('type');
 
       if (code) {
+        if (type !== 'recovery') {
+          this.isOAuthChallenging = true;
+          this.isOAuthProcessing.set(true);
+          this.oAuthErrorMessage.set(null);
+          this.oAuthProcessingMessage.set('Verifying Google account session...');
+        }
         this.supabaseService.client.auth
           .exchangeCodeForSession(code)
           .then(({ data, error }) => {
-            if (error) {
-              console.warn('Supabase exchangeCodeForSession notice:', error.message);
+            if (error || !data?.session) {
+              this.isOAuthChallenging = false;
+              this.isOAuthProcessing.set(false);
+              const errMsg = error?.message || 'Unable to complete Google sign-in. Please try again.';
+              this.oAuthErrorMessage.set(errMsg);
+              console.warn('Supabase exchangeCodeForSession notice:', errMsg);
+              window.history.replaceState(null, '', window.location.pathname);
               return;
             }
             if (data?.session) {
@@ -465,6 +488,8 @@ export class AuthService {
               const email = user.email || 'verified_user@vanguard.security';
 
               if (type === 'recovery') {
+                this.isOAuthChallenging = false;
+                this.isOAuthProcessing.set(false);
                 const userProfile: UserProfile = {
                   id: user.id,
                   email,
@@ -493,8 +518,10 @@ export class AuthService {
                 return;
               }
 
-              // SCRUM-163: Zero-Trust OAuth 2-Step Verification Challenge
+              // SCRUM-163 & SCRUM-184: Zero-Trust OAuth 2-Step Verification Challenge
               this.isOAuthChallenging = true;
+              this.isOAuthProcessing.set(true);
+              this.oAuthProcessingMessage.set('Preparing 2-Step Verification challenge...');
               window.history.replaceState(null, '', window.location.pathname);
               this.challengeOAuthOtp({
                 email,
@@ -508,6 +535,7 @@ export class AuthService {
               }).subscribe({
                 next: (res) => {
                   this.isOAuthChallenging = false;
+                  this.isOAuthProcessing.set(false);
                   const targetEmail = res.email || email;
                   this.pendingEmail.set(targetEmail);
                   this.pendingMode.set('signin');
@@ -533,9 +561,11 @@ export class AuthService {
                 },
                 error: (err) => {
                   this.isOAuthChallenging = false;
+                  this.isOAuthProcessing.set(false);
                   console.warn('OAuth challenge initiation failed:', err);
                   const rawErr = err?.error?.message || err?.message || 'Failed to initiate 2-Step Verification.';
                   const errorMsg = Array.isArray(rawErr) ? rawErr.join(', ') : rawErr;
+                  this.oAuthErrorMessage.set(errorMsg);
                   let pendingSso: Record<string, string> | null = null;
                   try {
                     const raw = sessionStorage.getItem('vanguard_sso_pending');
@@ -549,6 +579,9 @@ export class AuthService {
             }
           })
           .catch((e) => {
+            this.isOAuthChallenging = false;
+            this.isOAuthProcessing.set(false);
+            this.oAuthErrorMessage.set(e?.message || 'Unable to process Google authentication callback.');
             console.warn('Supabase exchangeCodeForSession exception:', e);
           });
         return;

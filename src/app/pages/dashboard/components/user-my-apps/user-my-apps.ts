@@ -60,6 +60,12 @@ export class UserMyApps {
   readonly pendingRequestsCount = computed(() =>
     this.myAccessRequests().filter((r) => r.status === 'Pending Approval').length
   );
+  readonly myExtensionAccessRequests = computed(() =>
+    this.myAccessRequests().filter((r) => !this.dashboardService.isSsoApplication(r))
+  );
+  readonly pendingExtensionRequestsCount = computed(() =>
+    this.myExtensionAccessRequests().filter((r) => r.status === 'Pending Approval').length
+  );
 
   // SCRUM-57: Connected Applications & Active SSO Integrations
   readonly connectedApps = this.dashboardService.connectedApps;
@@ -468,15 +474,12 @@ export class UserMyApps {
     this.dashboardService.withdrawAccessRequest(req.id);
   }
 
-  /** Whether the signed-in user may self-approve this pending request (Dummy Web only, SCRUM-167). */
-  canSelfApprove(req: AppAccessRequest): boolean {
-    return (
-      req.status === 'Pending Approval' &&
-      this.dashboardService.isSelfApprovableDummyApp(req.appName)
-    );
+  /** Self-approval is disabled for tenant applications (SCRUM-184); requires Admin approval. */
+  canSelfApprove(_req: AppAccessRequest): boolean {
+    return false;
   }
 
-  /** Self-approve a pending Dummy Web access request using the user's own account (SCRUM-167). */
+  /** Self-approval is disabled; delegates to service governance notice. */
   selfApproveAccessRequest(req: AppAccessRequest, event?: Event): void {
     if (event) {
       event.stopPropagation();

@@ -109,6 +109,10 @@ describe('VerifyOtpComponent', () => {
         code: '654321',
         method: 'email_otp',
       });
+      expect(component.ssoConsentPending()).toBe(true);
+      expect(window.location.href).toBe('');
+
+      component.confirmSsoLoginApproval();
       expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_code_sso_test');
 
       (window as any).location = originalLocation;
@@ -277,7 +281,7 @@ describe('VerifyOtpComponent', () => {
       expect(component.method()).toBe('push_approval');
     });
 
-    it('SCRUM-167: displays user self-approval guidance for Acme Dummy Portal (vanguard-dummy-portal)', () => {
+    it('SCRUM-184: displays Administrative Approval Required even for Acme Dummy Portal (no self-approval bypass)', () => {
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -287,8 +291,62 @@ describe('VerifyOtpComponent', () => {
       fixture.detectChanges();
 
       const el: HTMLElement = fixture.nativeElement;
-      expect(el.textContent).toContain('Approve with your Vanguard Account');
-      expect(el.textContent).toContain('Open Vanguard Dashboard');
+      expect(el.textContent).toContain('Administrative Approval Required');
+      expect(el.textContent).not.toContain('Approve with your Vanguard Account');
+    });
+
+    it('SCRUM-184: pauses at explicit Approve / Deny SSO consent prompt after verification before redirecting', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+        scope: 'openid profile email',
+        state: 'st-184',
+      });
+      component.serverClientName.set('Acme Dummy Portal (Angular SPA)');
+      component.email.set('employee@acme.corp');
+
+      component.presentSsoConsentPrompt({
+        redirectRes: {
+          code: 'vg_consent_code_184',
+          redirectUrl: 'http://localhost:4201/auth/callback?code=vg_consent_code_184&state=st-184',
+        },
+      });
+      fixture.detectChanges();
+
+      expect(component.ssoConsentPending()).toBe(true);
+      expect(window.location.href).toBe('');
+
+      const el: HTMLElement = fixture.nativeElement;
+      expect(el.querySelector('[data-testid="sso-consent-prompt"]')).toBeTruthy();
+
+      component.confirmSsoLoginApproval();
+      expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_consent_code_184&state=st-184');
+
+      (window as any).location = originalLocation;
+    });
+
+    it('SCRUM-184: redirects with access_denied when user clicks Deny on SSO consent prompt', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+        state: 'st-deny-184',
+      });
+      component.presentSsoConsentPrompt({});
+      component.denySsoLoginApproval();
+
+      expect(component.ssoConsentPending()).toBe(false);
+      expect(window.location.href).toContain('error=access_denied');
+      expect(window.location.href).toContain('state=st-deny-184');
+
+      (window as any).location = originalLocation;
     });
   });
 });

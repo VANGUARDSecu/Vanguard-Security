@@ -99,7 +99,55 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.isCheckingApproval.set(true);
     }
     const user = this.currentUser();
-    this.approveSsoForUser(user || undefined, silent);
+    const sso = this.ssoParams()!;
+    if (user) {
+      this.authService.approveSsoAuthorization({
+        client_id: sso['client_id'],
+        redirect_uri: sso['redirect_uri'],
+        response_type: sso['response_type'] || 'code',
+        scope: sso['scope'] || 'openid profile email roles',
+        state: sso['state'] || '',
+        nonce: sso['nonce'] || '',
+        code_challenge: sso['code_challenge'] || '',
+        code_challenge_method: sso['code_challenge_method'] || 'S256',
+        email: user.email,
+        name: this.resolveUserFullName(user, user.email),
+        role: user.role || 'user',
+        roles: [user.role || 'user', 'Vanguard Authenticated'],
+        department: user.user_metadata?.['department'] || 'Corporate Security',
+        userId: user.id,
+      }).subscribe({
+        next: () => {
+          this.stopApprovalPolling();
+          this.isCheckingApproval.set(false);
+          this.ssoApprovalRequired.set(false);
+          // Require explicit Approve / Deny login confirmation on /verify-otp (SCRUM-184)
+          this.router.navigate(['/verify-otp'], {
+            queryParams: {
+              email: user.email,
+              mode: 'signin',
+              method: 'push_approval',
+              consent: 'required',
+              ...sso,
+            },
+          });
+        },
+        error: (err: Error) => {
+          this.isCheckingApproval.set(false);
+          if (this.isApprovalRequiredError(err)) {
+            if (!silent) {
+              this.handleApprovalRequired(err);
+            }
+            return;
+          }
+          if (!silent) {
+            this.showNotification('error', err.message || 'Unable to verify admin approval.');
+          }
+        },
+      });
+      return;
+    }
+    this.isCheckingApproval.set(false);
   }
 
   ngOnDestroy(): void {
@@ -118,6 +166,9 @@ export class LoginComponent implements OnInit, OnDestroy {
     this.route.queryParams.subscribe((params) => {
       if (params['error']) {
         this.showNotification('error', params['error'], 8000);
+      } else if (this.authService.oAuthErrorMessage()) {
+        this.showNotification('error', this.authService.oAuthErrorMessage()!, 8000);
+        this.authService.oAuthErrorMessage.set(null);
       }
       if (params['message']) {
         this.showNotification('success', params['message'], 6000);

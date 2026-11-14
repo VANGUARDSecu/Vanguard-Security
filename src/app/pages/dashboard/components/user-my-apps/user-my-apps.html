@@ -2,12 +2,12 @@
           <div class="section-header">
             <div class="section-title-wrap">
               <h2 class="section-title">
-                {{ isPersonalWorkspace() ? 'Personal Applications & Bookmarks' : 'My Applications (Single Sign-On)' }}
+                {{ isPersonalWorkspace() ? 'Personal Applications & Bookmarks' : 'My Applications (Browser Extension Autofill)' }}
               </h2>
               <p class="section-subtitle">
                 {{ isPersonalWorkspace() 
                   ? 'Manage personal web app shortcuts configured for dynamic autofill via browser extension.'
-                  : 'Launch your assigned enterprise SaaS apps with zero-trust credentials.' }}
+                  : 'Launch web applications configured for Browser Extension Autofill. Federated SSO apps live in SSO Applications.' }}
               </p>
             </div>
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -73,89 +73,7 @@
             </button>
           </div>
 
-          <!-- ================================================================
-               SCRUM-57: Active SSO Integrations & Connected Client Applications
-               ================================================================ -->
-          <div class="connected-integrations-section" *ngIf="activeConnectedApps().length > 0">
-            <div class="sub-section-header">
-              <div class="sub-section-title-wrap">
-                <h3 class="sub-section-title">
-                  <span>Active SSO Integrations & Connected Applications</span>
-                  <span class="active-pulse-badge">
-                    <span class="pulse-dot"></span>
-                    {{ activeConnectedApps().length }} Active Connection
-                  </span>
-                </h3>
-                <p class="sub-section-desc">
-                  External client applications actively connected to your Vanguard Security identity via Single Sign-On.
-                </p>
-              </div>
-            </div>
-
-            <div class="connected-apps-grid">
-              <div class="connected-app-card" *ngFor="let conn of activeConnectedApps()">
-                <div class="connected-card-top">
-                  <div class="connected-icon-box">{{ conn.icon || '🌐' }}</div>
-                  <div class="connected-card-badges">
-                    <span class="status-live-pill">
-                      <span class="pulse-dot"></span>
-                      Currently Connected
-                    </span>
-                    <span class="proto-tag">{{ conn.protocol }}</span>
-                  </div>
-                </div>
-
-                <div class="connected-card-body">
-                  <h4 class="connected-app-title">{{ conn.clientName }}</h4>
-                  <div class="connected-target-pill">
-                    <span class="target-label">Target URL:</span>
-                    <a [href]="conn.originUrl" target="_blank" class="target-link">{{ conn.originUrl }}</a>
-                  </div>
-                  <p class="connected-app-desc">{{ conn.description }}</p>
-
-                  <div class="connected-meta-table">
-                    <div class="meta-row">
-                      <span class="meta-k">Client ID:</span>
-                      <code class="meta-v-code">{{ conn.clientId }}</code>
-                    </div>
-                    <div class="meta-row">
-                      <span class="meta-k">Redirect URI:</span>
-                      <span class="meta-v">{{ conn.redirectUri }}</span>
-                    </div>
-                    <div class="meta-row">
-                      <span class="meta-k">Authorized Scopes:</span>
-                      <div class="scopes-wrap">
-                        <span class="scope-chip" *ngFor="let sc of conn.scopes">{{ sc }}</span>
-                      </div>
-                    </div>
-                    <div class="meta-row">
-                      <span class="meta-k">Connection Status:</span>
-                      <span class="meta-v-active">Active Session • {{ conn.lastActiveAt || 'Just now' }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="connected-card-actions">
-                  <button type="button" class="btn-launch-connected" (click)="launchConnectedApp(conn)">
-                    <span>Open {{ conn.clientName }}</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="launch-icon">
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                      <polyline points="15 3 21 3 21 9"></polyline>
-                      <line x1="10" y1="14" x2="21" y2="3"></line>
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-disconnect-conn"
-                    (click)="disconnectApp(conn.clientId)"
-                    title="Disconnect this application from your Vanguard account"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- Federated SSO Integrations moved to dedicated SSO Applications tab (SCRUM-184) -->
 
           <div class="category-filter-bar">
             <button
@@ -346,13 +264,13 @@
           <!-- ================================================================
                SCRUM-42: Requested Applications (Pending Approval & Access Queue)
                ================================================================ -->
-          <div class="requested-apps-section" *ngIf="!isPersonalWorkspace() && myAccessRequests().length > 0">
+          <div class="requested-apps-section" *ngIf="!isPersonalWorkspace() && myExtensionAccessRequests().length > 0">
             <div class="sub-section-header">
               <div class="sub-section-title-wrap">
                 <h3 class="sub-section-title">
                   <span>Requested Applications & Access Status</span>
-                  <span class="pending-count-badge" *ngIf="pendingRequestsCount() > 0">
-                    {{ pendingRequestsCount() }} Pending Review
+                  <span class="pending-count-badge" *ngIf="pendingExtensionRequestsCount() > 0">
+                    {{ pendingExtensionRequestsCount() }} Pending Review
                   </span>
                 </h3>
                 <p class="sub-section-desc">
@@ -364,7 +282,7 @@
             <div class="requests-grid">
               <div
                 class="request-card"
-                *ngFor="let req of myAccessRequests()"
+                *ngFor="let req of myExtensionAccessRequests()"
                 [class.pending]="req.status === 'Pending Approval'"
                 [class.approved]="req.status === 'Approved'"
                 [class.rejected]="req.status === 'Rejected'"
@@ -438,17 +356,6 @@
                   <div class="request-denied-badge" *ngIf="req.status === 'Rejected'">
                     <span>🔒 Zero-Trust Guard: Assertion Blocked</span>
                   </div>
-                  <!-- User self-approval button for Dummy Web pending requests (SCRUM-167) -->
-                  <button
-                    type="button"
-                    class="btn-self-approve-action"
-                    *ngIf="canSelfApprove(req)"
-                    (click)="selfApproveAccessRequest(req, $event)"
-                    title="Approve Dummy Web access using your own Vanguard account"
-                    style="background: #10b981; color: #042f2e; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer;"
-                  >
-                    ✓ Approve with My Account
-                  </button>
                   <!-- Withdraw button for pending or rejected requests -->
                   <button
                     type="button"

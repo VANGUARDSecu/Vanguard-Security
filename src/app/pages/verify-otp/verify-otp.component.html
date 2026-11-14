@@ -110,8 +110,67 @@
         </div>
       }
 
-      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160) -->
-      @if (ssoApprovalRequired()) {
+      <!-- Explicit SSO Login Approval / Consent Prompt (SCRUM-184) -->
+      @if (ssoConsentPending()) {
+        <div class="sso-consent-notice" data-testid="sso-consent-prompt">
+          <div class="sso-consent-badge">
+            <span class="pulse-dot-emerald"></span>
+            <span>SSO Sign-In Authorization Request</span>
+          </div>
+
+          <h3 class="sso-consent-title">Approve sign-in to {{ clientDisplayName() }}?</h3>
+
+          <p class="sso-consent-text">
+            Review the application details below and confirm whether to approve this Single Sign-On login request for <strong class="highlight-email">{{ email() }}</strong>.
+          </p>
+
+          <div class="sso-approval-status-card">
+            <div class="status-row">
+              <span class="status-label">Application:</span>
+              <span class="status-val">{{ clientDisplayName() }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Account:</span>
+              <span class="status-val">{{ email() }}</span>
+            </div>
+            <div class="status-row" *ngIf="ssoRedirectOrigin()">
+              <span class="status-label">Destination:</span>
+              <span class="status-val">{{ ssoRedirectOrigin() }}</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">Requested Scopes:</span>
+              <span class="status-val">{{ ssoScopeList().join(', ') }}</span>
+            </div>
+          </div>
+
+          <div class="sso-consent-actions">
+            <button
+              type="button"
+              class="verify-btn sso-approve-btn"
+              (click)="confirmSsoLoginApproval()"
+              [disabled]="isLoading()"
+              data-testid="approve-sso-login-btn"
+            >
+              @if (isLoading()) {
+                <span class="spinner"></span>
+                <span>Authorizing...</span>
+              } @else {
+                <span>✓ Approve &amp; Sign In to {{ clientDisplayName() }}</span>
+              }
+            </button>
+            <button
+              type="button"
+              class="sso-deny-btn"
+              (click)="denySsoLoginApproval()"
+              [disabled]="isLoading()"
+              data-testid="deny-sso-login-btn"
+            >
+              ✕ Deny Sign-In &amp; Return
+            </button>
+          </div>
+        </div>
+      } @else if (ssoApprovalRequired()) {
+        <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160 / SCRUM-184) -->
         <div class="sso-approval-notice">
           <div class="sso-approval-badge">
             <span class="pulse-dot-amber"></span>
@@ -122,16 +181,12 @@
             <span class="governance-icon">🛡️</span>
           </div>
 
-          <h3 class="sso-approval-title">
-            {{ isDummyWebClient() ? 'Approve with your Vanguard Account' : 'Administrative Approval Required' }}
-          </h3>
+          <h3 class="sso-approval-title">Administrative Approval Required</h3>
           
           <p class="sso-approval-text">
             {{
               ssoApprovalMessage() ||
-                (isDummyWebClient()
-                  ? 'Self-approve this Acme Dummy Portal sign-in with your own Vanguard corporate account on your Dashboard.'
-                  : 'Your corporate organization requires administrative approval before this application can access your account.')
+                'Your corporate organization requires administrative approval before this application can access your account.'
             }}
           </p>
 
@@ -146,13 +201,7 @@
             </div>
             <div class="status-desc" style="display: flex; align-items: center; gap: 8px;">
               <span class="pulse-dot-amber"></span>
-              <span>
-                {{
-                  isDummyWebClient()
-                    ? 'Open your Vanguard Dashboard to self-approve with your own account (My Apps -> Approve with My Account, or respond to the SSO Push prompt). Once approved, this screen will automatically proceed.'
-                    : 'An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.'
-                }}
-              </span>
+              <span>An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.</span>
             </div>
           </div>
 
@@ -164,30 +213,15 @@
               (click)="checkApprovalAndProceed(false)"
               [disabled]="isCheckingApproval()"
             >
-              @if (isDummyWebClient()) {
-                {{ isCheckingApproval() ? 'Checking Account Approval...' : '↻ Check Account Approval & Continue SSO' }}
-              } @else {
-                {{ isCheckingApproval() ? 'Checking Admin Approval...' : '↻ Check Admin Approval & Continue SSO' }}
-              }
+              {{ isCheckingApproval() ? 'Checking Admin Approval...' : '↻ Check Admin Approval & Continue SSO' }}
             </button>
             <div style="display: flex; gap: 10px; justify-content: center; width: 100%;">
               <button type="button" class="sso-return-btn" style="flex: 1;" (click)="onCancelSso()">
                 Return to {{ clientDisplayName() }}
               </button>
-              @if (isDummyWebClient()) {
-                <button
-                  type="button"
-                  class="sso-dashboard-link"
-                  style="flex: 1; text-align: center; cursor: pointer;"
-                  (click)="openDashboardForApproval()"
-                >
-                  Open Vanguard Dashboard
-                </button>
-              } @else {
-                <a routerLink="/dashboard" class="sso-dashboard-link" style="flex: 1; text-align: center;">
-                  Go to Vanguard Dashboard
-                </a>
-              }
+              <a routerLink="/dashboard" class="sso-dashboard-link" style="flex: 1; text-align: center;">
+                Go to Vanguard Dashboard
+              </a>
             </div>
           </div>
         </div>

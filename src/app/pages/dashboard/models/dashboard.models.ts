@@ -468,5 +468,7 @@ export interface TotpAccount {
   icon?: string;
   currentCode?: string;
   remainingSeconds?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 

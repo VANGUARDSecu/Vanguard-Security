@@ -294,7 +294,7 @@ The application enforces strict, account-type-based workspace boundaries and hea
   - Appbar displays the **🔒 Personal Vault** badge and Personal Vault indicator.
   - Multi-tenant organization switcher, company upgrade buttons, and corporate directory options are removed.
 - **Tenant Directory Member (`accountType === 'company'`, `role === 'user'`)**:
-  - Exclusively granted access to the company-managed **User Portal** (My Applications, 2FA Authenticator, Security & MFA, Wi-Fi & VPN Profile, SSH & LDAP Keys, Sign-in Activity, Mobile Devices).
+  - Exclusively granted access to the company-managed **User Portal** (My Applications, SSO Applications, 2FA Authenticator, Security & MFA, Sign-in Activity, Mobile & Devices).
   - Appbar displays the **🏢 User Portal** badge and the Corporate Directory indicator.
   - Personal Vault navigation links and Admin Console switchers are removed.
 
@@ -308,27 +308,22 @@ Streamlined, high-assurance administrative portal for SecOps engineers and organ
      - Multi-tenant isolation: invitation dispatch automatically binds `tenantId` to link invited employees directly to the active organization (SCRUM-154).
      - Resilient error handling: network timeouts and offline backend statuses are normalized into actionable administrator notices (SCRUM-154).
      - Suspend, reactivate, change roles, force password resets, and revoke active sessions.
-  3. **OIDC Applications & SSO (SCRUM-152)**:
-     - Independent, dedicated page for federated applications and client credentials.
-     - Subnav tabs: Federated Apps, IdP Metadata & X.509 Certificate Vault, OIDC OAuth 2.0 Clients, and SSO Sandbox Assertion Inspector.
-     - Separated cleanly from Access Requests to eliminate page collision and navigation confusion.
-  4. **Access Requests Queue (SCRUM-152)**:
+  3. **Access Requests Queue (SCRUM-152)**:
      - Dedicated, standalone administrative approval queue (`AdminAccessRequests` component).
      - Live KPI metric cards: Total Requests, Pending Review, Approved & Assigned.
      - Real-time filtering by status (`All`, `Pending Approval`, `Approved`, `Rejected`) and keyword search.
      - 1-Click Approve (instantly provisions app) and contextual Reject modal with administrative audit reason capture.
      - Truthful empty states with zero hardcoded mock/seed applicants.
-  5. **Security Audit Log Stream**: Real-time authoritative event auditing with multi-field search, event category filtering, and CSV export.
-  6. **Enterprise Settings & Branding**:
+  4. **Security Audit Log Stream**: Real-time authoritative event auditing with multi-field search, event category filtering, and CSV export.
+  5. **Enterprise Settings & Branding**:
      - Enforce tenant-wide mandatory Multi-Factor Authentication (MFA).
      - Configure session timeouts and customize white-label branding (logo, colors, corporate name).
      - **Global Emergency Session Killswitch**: One-click server-side termination of all active web sessions and revocation of JWT refresh tokens.
-- **Pruned Obsolete & Simulated Features (SCRUM-151 & SCRUM-152)**:
-  - **Separation of OIDC Apps and Access Requests (SCRUM-152)**: Segregated Access Requests into its own dedicated page component, removing the embedded subtab from the OIDC/SAML console.
+- **Pruned Obsolete & Simulated Features (SCRUM-151, SCRUM-152 & SCRUM-179)**:
+  - **Separation of OIDC Apps and Access Requests (SCRUM-152)**: Segregated Access Requests into its own dedicated page component.
   - **Zero-Mock Data Policy (SCRUM-152)**: Purged all hardcoded mock applicants (e.g. Elena Rostova, Marcus Vance, Sarah Jenkins), fake groups (DevOps, SecOps), fake devices, fake connected apps (Acme Dummy Web), and simulated RADIUS activity. All collections default strictly to genuine data (from session/backend/Supabase/storage) or clean, truthful empty states.
   - Removed deferred protocol tabs from the sidebar and viewport: **Cloud LDAP (Port 636)** and **Cloud RADIUS (Port 1812)** (listeners unbonded on backend).
-  - Removed client-side mock tabs: **Webhooks & Event API** (deferred pending backend worker/SSRF protection) and **Device Fleet & MDM** (deferred remote device wipe).
-  - Re-scoped federation to focus strictly on genuine **OIDC Applications & SSO**, eliminating misleading claims of active SAML production endpoints.
+  - Removed client-side mock tabs: **Webhooks & Event API** (deferred pending backend worker/SSRF protection), **Device Fleet & MDM** (deferred remote device wipe), **OIDC Applications & SSO** (`saml-oidc` localStorage simulator), **Wi-Fi & VPN Profile** (`user-network` static RADIUS view), and **SSH & LDAP Keys / SSH Keys** (`user-ssh` localStorage mock) (`SCRUM-179`).
 
 ### 2. Employee Personal Workspace (User View)
 Tailored for corporate employees to access organizational resources:
@@ -541,8 +536,6 @@ frontend-vanguard/
 │   │   │   │   │   ├── user-my-apps/     # Employee SSO application catalog
 │   │   │   │   │   ├── user-security/    # Employee credentials & MFA management
 │   │   │   │   │   ├── user-devices/     # Hardware inspection & compliance
-│   │   │   │   │   ├── user-wifi-profile/# Corporate 802.1X Wi-Fi profiles
-│   │   │   │   │   ├── user-ssh-keys/    # SSH public key manager
 │   │   │   │   │   ├── user-activity/    # Personal security audit history
 │   │   │   │   │   └── dashboard-shared.css # Unified design system styles
 │   │   │   │   ├── models/

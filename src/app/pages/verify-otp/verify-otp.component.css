@@ -1299,3 +1299,82 @@
   color: #ffffff;
   text-decoration: underline;
 }
+
+/* Explicit SSO Sign-In Consent Card (SCRUM-184) */
+.sso-consent-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 6px 0;
+}
+
+.sso-consent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pulse-dot-emerald {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+}
+
+.sso-consent-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.sso-consent-text {
+  margin: 0;
+  font-size: 13.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.sso-consent-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.sso-approve-btn {
+  background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+  color: #022c22;
+  font-weight: 700;
+}
+
+.sso-deny-btn {
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sso-deny-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #ffffff;
+}

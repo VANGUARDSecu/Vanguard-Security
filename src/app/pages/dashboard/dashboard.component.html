@@ -25,11 +25,7 @@
               <div>
                 <h3 class="sso-prompt-title">SSO Sign-In Approval Request</h3>
                 <p class="sso-prompt-subtitle">
-                  @if (dashboardService.isSelfApprovableDummyApp(challenge.clientId || challenge.appName)) {
-                    Self-approve this Acme Dummy Web sign-in request using your own Vanguard account
-                  } @else {
-                    An application is requesting access to your Vanguard account
-                  }
+                  An application is requesting access to your Vanguard account
                 </p>
               </div>
             </div>
@@ -142,8 +138,11 @@
         <!-- 2FA Authenticator (Individual & Company Users) -->
         <app-user-authenticator *ngIf="activeTab() === 'authenticator'"></app-user-authenticator>
 
-        <!-- Applications Launcher (Personal Apps or Enterprise SSO) -->
+        <!-- Applications Launcher (Browser Extension Autofill & Bookmarks) -->
         <app-user-my-apps *ngIf="activeTab() === 'my-apps' || (!isPersonalWorkspace() && activeTab() === 'overview')"></app-user-my-apps>
+
+        <!-- Dedicated Federated SSO Applications (Dummy Web, OIDC, SAML 2.0) -->
+        <app-user-sso-apps *ngIf="activeTab() === 'sso-apps'"></app-user-sso-apps>
 
         <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
         <app-user-network *ngIf="!isIndividual() && activeTab() === 'user-network'"></app-user-network>

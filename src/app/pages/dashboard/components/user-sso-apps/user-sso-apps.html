@@ -1,0 +1,232 @@
+<section class="dash-section">
+  <div class="section-header">
+    <div class="section-title-wrap">
+      <h2 class="section-title">SSO Applications (Federated OIDC / SAML)</h2>
+      <p class="section-subtitle">
+        Dedicated launchpad for federated Single Sign-On applications (such as Acme Dummy Web). Kept strictly separate from Browser Extension Autofill apps.
+      </p>
+    </div>
+    <div class="header-actions" *ngIf="!isPersonalWorkspace()">
+      <button type="button" class="btn-primary-action" (click)="openRequestSsoModal()">
+        <span class="btn-plus">+</span>
+        <span>Request SSO Application</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Info Banner clarifying separation from Extension Autofill -->
+  <div class="sso-separation-banner">
+    <span class="sep-icon">🔐</span>
+    <div class="sep-copy">
+      <strong>Dedicated Federated SSO Workspace:</strong> Applications here authenticate through OpenID Connect / SAML 2.0 with administrator-governed access and explicit login approval—never synced to the Browser Extension autofill catalog.
+    </div>
+  </div>
+
+  <!-- Active Connected SSO Sessions -->
+  <div class="sso-subsection" *ngIf="activeConnectedApps().length > 0">
+    <div class="sub-header">
+      <h3 class="sub-title">
+        <span>Active Connected SSO Integrations</span>
+        <span class="live-badge">
+          <span class="pulse-dot"></span>
+          {{ activeConnectedApps().length }} Connected
+        </span>
+      </h3>
+      <p class="sub-desc">External client applications with active Vanguard SSO identity links.</p>
+    </div>
+
+    <div class="sso-grid">
+      <div class="sso-card sso-card-connected" *ngFor="let conn of activeConnectedApps()">
+        <div class="sso-card-top">
+          <div class="sso-icon-box">{{ conn.icon || '🌐' }}</div>
+          <div class="sso-badges">
+            <span class="status-live-pill">
+              <span class="pulse-dot"></span>
+              Connected
+            </span>
+            <span class="proto-tag">{{ conn.protocol }}</span>
+          </div>
+        </div>
+
+        <h4 class="sso-app-title">{{ conn.clientName }}</h4>
+        <a [href]="conn.originUrl" target="_blank" class="sso-origin-link">{{ conn.originUrl }}</a>
+        <p class="sso-app-desc">{{ conn.description }}</p>
+
+        <div class="sso-meta-list">
+          <div class="meta-row">
+            <span class="meta-k">Client ID</span>
+            <code class="meta-code">{{ conn.clientId }}</code>
+          </div>
+          <div class="meta-row">
+            <span class="meta-k">Scopes</span>
+            <div class="scopes-wrap">
+              <span class="scope-chip" *ngFor="let sc of conn.scopes">{{ sc }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sso-card-actions">
+          <button type="button" class="btn-launch-sso" (click)="launchConnectedApp(conn)">
+            Open {{ conn.clientName }}
+          </button>
+          <button type="button" class="btn-disconnect-sso" (click)="disconnectApp(conn.clientId)">
+            Disconnect
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Assigned Enterprise SSO Applications -->
+  <div class="sso-subsection">
+    <div class="sub-header">
+      <h3 class="sub-title">
+        <span>Assigned SSO Applications ({{ ssoApplicationsList().length }})</span>
+      </h3>
+      <p class="sub-desc">Federated enterprise SSO applications approved for your account.</p>
+    </div>
+
+    <div class="sso-grid" *ngIf="ssoApplicationsList().length > 0">
+      <div class="sso-card" *ngFor="let app of ssoApplicationsList()">
+        <div class="sso-card-top">
+          <div class="sso-icon-box">{{ app.icon || '🔐' }}</div>
+          <div class="sso-badges">
+            <span class="approved-tag">✓ SSO Approved</span>
+            <span class="proto-tag">{{ app.protocol }}</span>
+          </div>
+        </div>
+
+        <h4 class="sso-app-title">{{ app.name }}</h4>
+        <p class="sso-app-desc">{{ app.description }}</p>
+        <div class="sso-url-chip" *ngIf="app.launchUrl">{{ app.launchUrl }}</div>
+
+        <div class="sso-card-actions">
+          <button type="button" class="btn-launch-sso" (click)="launchSsoApp(app)">
+            Launch via SSO
+          </button>
+          <button type="button" class="btn-disconnect-sso" (click)="removeSsoApp(app)" title="Remove from SSO list">
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty-sso-box" *ngIf="ssoApplicationsList().length === 0 && activeConnectedApps().length === 0">
+      <div class="empty-icon">🔐</div>
+      <h4 class="empty-title">No SSO Applications Connected Yet</h4>
+      <p class="empty-desc">
+        Once an administrator approves your federated SSO application (such as Acme Dummy Web) or you authorize an OIDC/SAML sign-in, it will appear here in its dedicated SSO launchpad.
+      </p>
+      <button type="button" class="btn-primary-action" *ngIf="!isPersonalWorkspace()" (click)="openRequestSsoModal()">
+        <span>+ Request SSO Application Access</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Requested SSO Applications Queue -->
+  <div class="sso-subsection" *ngIf="!isPersonalWorkspace() && mySsoAccessRequests().length > 0">
+    <div class="sub-header">
+      <h3 class="sub-title">
+        <span>SSO Access Requests ({{ mySsoAccessRequests().length }})</span>
+        <span class="pending-badge" *ngIf="pendingSsoRequestsCount() > 0">
+          {{ pendingSsoRequestsCount() }} Pending Admin Approval
+        </span>
+      </h3>
+      <p class="sub-desc">Administrator review status for federated SSO access requests.</p>
+    </div>
+
+    <div class="requests-list">
+      <div class="request-card" *ngFor="let req of mySsoAccessRequests()">
+        <div class="request-left">
+          <span class="request-icon">{{ req.icon || '🔐' }}</span>
+          <div>
+            <div class="request-title">{{ req.appName }}</div>
+            <div class="request-meta">{{ req.protocol }} • Submitted {{ req.submittedAt | date:'mediumDate' }}</div>
+          </div>
+        </div>
+        <div class="request-right">
+          <span
+            class="status-pill"
+            [class.status-pending]="req.status === 'Pending Approval'"
+            [class.status-approved]="req.status === 'Approved'"
+            [class.status-rejected]="req.status === 'Rejected'"
+          >
+            {{ req.status }}
+          </span>
+          <button type="button" class="btn-launch-sso" *ngIf="req.status === 'Approved'" (click)="launchApprovedSsoRequest(req)">
+            Launch SSO
+          </button>
+          <button
+            type="button"
+            class="btn-disconnect-sso"
+            *ngIf="req.status === 'Pending Approval' || req.status === 'Rejected'"
+            (click)="withdrawRequest(req)"
+          >
+            Withdraw
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Request SSO Application Modal -->
+  <div class="modal-backdrop" *ngIf="showRequestSsoModal()" (click)="closeRequestSsoModal()">
+    <div class="modal-dialog" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>Request Enterprise SSO Application</h3>
+        <button type="button" class="modal-close" (click)="closeRequestSsoModal()">&times;</button>
+      </div>
+
+      <div class="preset-row">
+        <button
+          type="button"
+          class="preset-chip"
+          *ngFor="let preset of ssoCatalogPresets"
+          (click)="applyPreset(preset)"
+        >
+          <span>{{ preset.icon }} {{ preset.key === 'custom-saml' ? 'Custom SSO' : preset.name }}</span>
+        </button>
+      </div>
+
+      <div class="modal-alert alert-err" *ngIf="requestError()">{{ requestError() }}</div>
+      <div class="modal-alert alert-ok" *ngIf="requestSuccess()">SSO access request submitted for administrator review!</div>
+
+      <div class="modal-body">
+        <label class="field-label">Application Name</label>
+        <input type="text" class="field-input" [ngModel]="reqAppName()" (ngModelChange)="reqAppName.set($event)" placeholder="e.g., Acme Dummy Web" />
+
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Federation Protocol</label>
+            <select class="field-input" [ngModel]="reqProtocol()" (ngModelChange)="reqProtocol.set($event)">
+              <option value="OIDC">OIDC</option>
+              <option value="SAML 2.0">SAML 2.0</option>
+              <option value="OAuth 2.0">OAuth 2.0</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Category</label>
+            <select class="field-input" [ngModel]="reqCategory()" (ngModelChange)="reqCategory.set($event)">
+              <option value="cloud">Cloud</option>
+              <option value="developer">Developer</option>
+              <option value="collaboration">Collaboration</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="field-label">Application URL</label>
+        <input type="text" class="field-input" [ngModel]="reqUrl()" (ngModelChange)="reqUrl.set($event)" placeholder="http://localhost:4201" />
+
+        <label class="field-label">Business Justification</label>
+        <textarea rows="2" class="field-input" [ngModel]="reqJustification()" (ngModelChange)="reqJustification.set($event)"></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-disconnect-sso" (click)="closeRequestSsoModal()">Cancel</button>
+        <button type="button" class="btn-primary-action" [disabled]="isSubmitting()" (click)="submitSsoRequest()">
+          Submit SSO Request
+        </button>
+      </div>
+    </div>
+  </div>
+</section>

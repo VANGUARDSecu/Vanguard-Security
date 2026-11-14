@@ -927,3 +927,70 @@
   color: #ffffff;
   text-decoration: underline;
 }
+
+/* Google / OAuth Processing Indicator (SCRUM-184) */
+.oauth-processing-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 18px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.18);
+  margin: 8px 0 4px;
+}
+
+.oauth-processing-spinner-wrap {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.oauth-processing-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #60a5fa;
+  border-right-color: #34d399;
+  animation: oauthSpin 0.9s linear infinite;
+}
+
+.oauth-processing-google-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.oauth-processing-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.oauth-processing-status {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.oauth-processing-sub {
+  margin: 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+  line-height: 1.5;
+  max-width: 340px;
+}
+
+@keyframes oauthSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

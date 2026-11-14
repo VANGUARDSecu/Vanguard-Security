@@ -1643,7 +1643,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           }))
       : [];
 
+    // Strict isolation (SCRUM-184): Federated SSO applications (Dummy Web, OIDC, SAML 2.0)
+    // live in the dedicated SSO Applications workspace and NEVER enter Extension Autofill / extension IPC sync.
     for (const app of [...provisionedForMe, ...source, ...approvedRequests]) {
+      if (this.isSsoApplication(app)) {
+        continue;
+      }
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
@@ -1651,6 +1656,70 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       }
     }
     return deduped;
+  });
+
+  /**
+   * SCRUM-184: Dedicated computed list of Federated SSO Applications (Acme Dummy Web, OIDC, SAML 2.0).
+   * Separated cleanly from Browser Extension Autofill apps.
+   */
+  readonly ssoApplicationsList = computed<SaaSApp[]>(() => {
+    const u = this.user();
+    const email = u?.email?.toLowerCase().trim();
+    const uid = u?.id;
+
+    const rawSource = this.isPersonalWorkspace()
+      ? this.personalApps()
+      : [...this.personalApps(), ...this.apps()];
+    const source = this.isPersonalWorkspace()
+      ? rawSource
+      : rawSource.filter((app) => {
+          if (!app.targetUserId && !app.targetUserEmail) return true;
+          const matchId = uid && app.targetUserId === uid;
+          const matchEmail =
+            email && app.targetUserEmail?.toLowerCase().trim() === email;
+          return Boolean(matchId || matchEmail);
+        });
+
+    const provisionedForMe = !this.isPersonalWorkspace()
+      ? this.getAppsProvisionedForEmployee(uid, email)
+      : [];
+
+    const approvedRequests: SaaSApp[] = !this.isPersonalWorkspace()
+      ? this.appAccessRequests()
+          .filter((r) => {
+            if (r.status !== 'Approved') return false;
+            return (
+              (email && r.userEmail?.toLowerCase() === email) ||
+              (uid && r.userId === uid) ||
+              (!email && !uid && r.userEmail?.includes('@vanguard.security'))
+            );
+          })
+          .map((r) => ({
+            id: r.id,
+            name: r.appName,
+            category: (r.category as SaaSApp['category']) || 'cloud',
+            description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved SSO access)`,
+            icon: r.icon || '🔐',
+            protocol: (r.protocol as SaaSApp['protocol']) || 'OIDC',
+            launchUrl: r.launchUrl || 'http://localhost:4201',
+            assigned: true,
+            status: 'Approved',
+          }))
+      : [];
+
+    const seen = new Set<string>();
+    const ssoDeduped: SaaSApp[] = [];
+    for (const app of [...provisionedForMe, ...source, ...approvedRequests]) {
+      if (!this.isSsoApplication(app)) {
+        continue;
+      }
+      const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        ssoDeduped.push(app);
+      }
+    }
+    return ssoDeduped;
   });
 
   readonly filteredApps = computed(() => {
@@ -3838,9 +3907,39 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.accessRequestStatusFilter.set(filter);
   }
 
-  /** Whether the application or client ID identifies Acme Dummy Web (user self-approvable, SCRUM-167). */
+  /** Whether the application or client ID identifies Acme Dummy Web. */
   isSelfApprovableDummyApp(nameOrClientId?: string | null): boolean {
     return isSelfApprovableDummyApp(nameOrClientId);
+  }
+
+  /**
+   * SCRUM-184: Determine whether an application belongs to the dedicated SSO Applications space
+   * (OIDC, SAML 2.0, OAuth 2.0, or Dummy Web / Dummy Mobile SSO portals) rather than Browser Extension Autofill.
+   */
+  isSsoApplication(app: { protocol?: string; launchUrl?: string; name?: string; id?: string; appName?: string }): boolean {
+    const appName = app.name || app.appName || '';
+    if (this.isSelfApprovableDummyApp(appName) || this.isSelfApprovableDummyApp(app.id)) {
+      return true;
+    }
+    const proto = (app.protocol || '').toLowerCase().trim();
+    if (
+      proto.includes('oidc') ||
+      proto.includes('openid') ||
+      proto.includes('saml') ||
+      proto.includes('oauth')
+    ) {
+      return true;
+    }
+    const url = (app.launchUrl || '').toLowerCase().trim();
+    if (
+      url.includes('localhost:4201') ||
+      url.includes('vanguard-dummy-web.pages.dev') ||
+      url.includes('localhost:8081') ||
+      url.includes('vanguard-dummy-mobile')
+    ) {
+      return true;
+    }
+    return false;
   }
 
   /** Apply approved request state, auto-assign the app locally/in Supabase, and record audit trail. */
@@ -3953,36 +4052,11 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
-  /** Allow an owning corporate member to self-approve their pending Dummy Web request (SCRUM-167). */
-  selfApproveAccessRequest(requestId: string, notes?: string): void {
-    const request = this.appAccessRequests().find((r) => r.id === requestId);
-    if (!request || request.status !== 'Pending Approval') return;
-    if (!this.isSelfApprovableDummyApp(request.appName)) {
-      this.showAdminNotice(
-        `${request.appName} requires Super Administrator approval and cannot be self-approved.`
-      );
-      return;
-    }
-
-    const prevRequests = [...this.appAccessRequests()];
-    const prevApps = [...this.apps()];
-    const reviewer = this.displayName() || this.authService.currentUser()?.email || 'User Account';
-    const resolvedNotes = notes || 'Self-approved by user account (SCRUM-167)';
-
-    this.applyAccessRequestApprovalLocally(request, reviewer, resolvedNotes, 'User Self-Approval');
-
-    if (this.isBrowser) {
-      this.authService.selfApproveAccessRequest(requestId, resolvedNotes).subscribe({
-        error: (err) => {
-          console.warn('Backend selfApproveAccessRequest failed, rolling back optimistic update:', err);
-          this.appAccessRequests.set(prevRequests);
-          this.apps.set(prevApps);
-          this.saveStored('vanguard_access_requests', prevRequests);
-          this.saveStored('vanguard_user_apps', prevApps);
-          this.showAdminNotice('Failed to self-approve access request on the server.');
-        },
-      });
-    }
+  /** Self-approval is disabled for tenant SSO applications (SCRUM-184); requires Super Administrator approval. */
+  selfApproveAccessRequest(_requestId: string, _notes?: string): void {
+    this.showAdminNotice(
+      'Zero-Trust Access Governance: Tenant application and SSO access requests require Super Administrator approval.'
+    );
   }
 
   openRejectModal(request: AppAccessRequest): void {
@@ -6122,8 +6196,8 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const norm = appName.trim().toLowerCase();
     if (!norm) return { isDuplicate: false };
 
-    // 1. Check if already active and assigned on launchpad
-    const activeApps = this.activeAppsList();
+    // 1. Check if already active and assigned on either launchpad (Extension Autofill or SSO Applications)
+    const activeApps = [...this.activeAppsList(), ...this.ssoApplicationsList()];
     const existingApp = activeApps.find((a) => a.name.trim().toLowerCase() === norm) || this.apps().find((a) => a.name.trim().toLowerCase() === norm);
     if (existingApp) {
       return {
@@ -6151,7 +6225,10 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
   removeCompanyApp(appId: string): void {
     const currentApps = this.apps();
-    const targetApp = currentApps.find((a) => a.id === appId) || this.activeAppsList().find((a) => a.id === appId);
+    const targetApp =
+      currentApps.find((a) => a.id === appId) ||
+      this.activeAppsList().find((a) => a.id === appId) ||
+      this.ssoApplicationsList().find((a) => a.id === appId);
     const targetName = targetApp?.name?.toLowerCase().trim();
 
     // 1. Remove from apps and personalApps signals

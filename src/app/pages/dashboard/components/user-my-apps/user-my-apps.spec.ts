@@ -454,6 +454,8 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(req.request.body.appId).toBe('slack');
       req.flush({ assigned: 3 });
     });
+  });
+
   // ==========================================================================
   // SCRUM-161: End-to-End Application Request Lifecycle & Duplicate Prevention
   // ==========================================================================
@@ -867,9 +869,9 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
   });
 
   // ==========================================================================
-  // SCRUM-167: User Self-Approval for Acme Dummy Web
+  // SCRUM-184: Strict Tenant Access Governance & SSO/Extension Separation
   // ==========================================================================
-  describe('SCRUM-167 Dummy Web User Account Self-Approval', () => {
+  describe('SCRUM-184 Strict Governance & SSO App Separation', () => {
     beforeEach(() => {
       authService.currentUser.set({
         id: 'usr-member-167',
@@ -899,15 +901,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
           submittedAt: '2026-11-12T04:00:00Z',
         },
         {
-          id: 'req-figma-1',
+          id: 'req-figma-ext-1',
           userId: 'usr-member-167',
           userName: 'Marissa Gulfan',
           userEmail: 'member@acme.corp',
           department: 'Engineering',
           role: 'Member',
-          appName: 'Figma Enterprise',
+          appName: 'Figma Autofill',
           category: 'collaboration',
-          protocol: 'SAML 2.0',
+          protocol: 'Extension Autofill',
           icon: '🎨',
           launchUrl: 'https://www.figma.com/login',
           justification: 'Design review',
@@ -918,46 +920,30 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       fixture.detectChanges();
     });
 
-    it('renders Approve with My Account only for pending Dummy Web requests and self-approves via backend API', () => {
+    it('disables self-approval buttons for Acme Dummy Web and keeps requests pending admin review', () => {
       const el: HTMLElement = fixture.nativeElement;
       const selfApproveBtns = el.querySelectorAll('.btn-self-approve-action');
-      expect(selfApproveBtns.length).toBe(1);
-      expect(selfApproveBtns[0].textContent).toContain('Approve with My Account');
+      expect(selfApproveBtns.length).toBe(0);
 
       const dummyReq = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1')!;
+      expect(component.canSelfApprove(dummyReq)).toBe(false);
+
       const httpMock = TestBed.inject(HttpTestingController);
-
       (component as any).selfApproveAccessRequest(dummyReq);
+      httpMock.expectNone('http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve');
 
-      const postReq = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve'
-      );
-      expect(postReq.request.method).toBe('POST');
-      postReq.flush({ id: 'req-dummy-web-1', status: 'Approved' });
-
-      const updated = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
-      expect(updated?.status).toBe('Approved');
-      expect(component.activeAppsList().some((a) => a.name === 'Acme Dummy Portal (Angular SPA)')).toBe(true);
-
-      // Corporate non-dummy app (Figma Enterprise) must NOT be self-approvable
-      (dashboardService as any).selfApproveAccessRequest('req-figma-1');
-      httpMock.expectNone('http://localhost:3000/apps/access-requests/req-figma-1/self-approve');
-      expect(dashboardService.appAccessRequests().find((r) => r.id === 'req-figma-1')?.status).toBe('Pending Approval');
+      const stillPending = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
+      expect(stillPending?.status).toBe('Pending Approval');
     });
 
-    it('rolls back optimistic selfApproveAccessRequest when backend returns an error (SCRUM-169)', () => {
-      const httpMock = TestBed.inject(HttpTestingController);
-      const dummyReq = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1')!;
-      (component as any).selfApproveAccessRequest(dummyReq);
-
-      const postReq = httpMock.expectOne(
-        (r) => r.url === 'http://localhost:3000/apps/access-requests/req-dummy-web-1/self-approve'
-      );
-      postReq.flush({ message: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
-
-      const reverted = dashboardService.appAccessRequests().find((r) => r.id === 'req-dummy-web-1');
-      expect(reverted?.status).toBe('Pending Approval');
+    it('excludes Acme Dummy Web and OIDC/SAML apps from Extension Autofill activeAppsList and renders only extension requests', () => {
+      expect(component.myExtensionAccessRequests().some((r) => r.appName.includes('Dummy'))).toBe(false);
+      expect(component.myExtensionAccessRequests().some((r) => r.appName === 'Figma Autofill')).toBe(true);
+      expect(elTextContains(fixture.nativeElement, 'Active SSO Integrations')).toBe(false);
     });
-  });
   });
 });
+
+function elTextContains(el: HTMLElement, needle: string): boolean {
+  return (el.textContent || '').includes(needle);
+}

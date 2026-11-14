@@ -1279,6 +1279,32 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private pushTestPollTimer: any = null;
   private directoryRealtimeChannel: any = null;
   private directorySseSource: EventSource | null = null;
+  private crossDeviceSyncChannel: any = null;
+  private crossDevicePollTimer: any = null;
+  private crossDeviceFocusHandler: (() => void) | null = null;
+  private crossDeviceSyncInFlight = false;
+  private lastSyncState: {
+    totpUpdatedAt: string | null;
+    personalAppsUpdatedAt: string | null;
+    enterpriseAppsUpdatedAt: string | null;
+    connectedAppsUpdatedAt: string | null;
+    accessRequestsUpdatedAt: string | null;
+  } | null = null;
+  private readonly pendingTotpCreateIds = new Set<string>();
+  private readonly pendingTotpDeleteIds = new Set<string>();
+  private readonly pendingPersonalAppCreateIds = new Set<string>();
+  private readonly pendingPersonalAppDeleteIds = new Set<string>();
+
+  private isTestRuntime(): boolean {
+    const g = globalThis as any;
+    return Boolean(
+      g && g.process && (g.process.env?.['NODE_ENV'] === 'test' || g.process.env?.['VITEST']),
+    );
+  }
+
+  private hasLiveAuthToken(): boolean {
+    return Boolean(this.isBrowser && this.user()?.id && this.authService.token());
+  }
 
   // Remote Wipe Modal State
   readonly showWipeDeviceModal = signal<boolean>(false);
@@ -1804,16 +1830,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
     this.authService.getConnectedApps(email).subscribe({
       next: (res) => {
-        if (res.success && res.connectedApps) {
-          const userSpecific = (res.connectedApps || []).filter(
+        if (res.success && Array.isArray(res.connectedApps)) {
+          const userSpecific = res.connectedApps.filter(
             (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
           );
-          const merged = this.deduplicateConnectedAppsList([
-            ...userSpecific,
-            ...this.connectedApps().filter((a) => !a.userEmail || a.userEmail.toLowerCase().trim() === email),
-          ]);
-          this.connectedApps.set(merged);
-          this.saveStored(`vanguard_connected_apps_${email}`, merged);
+          const authoritative = this.deduplicateConnectedAppsList(userSpecific);
+          this.connectedApps.set(authoritative);
+          this.saveStored(`vanguard_connected_apps_${email}`, authoritative);
         }
       },
       error: () => {},
@@ -2351,6 +2374,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       await this.loadAccessRequests();
       this.setupAccessRequestsRealtime();
       await this.loadUserDevices();
+
+      // 7. Cross-Device Sync: TOTP Authenticator, Personal Apps, and Sync Watermarks (SCRUM-178)
+      await Promise.all([this.loadTotpAccounts(), this.loadPersonalApps()]);
+      this.setupCrossDeviceSyncRealtime();
+      this.startCrossDeviceSyncPolling();
+      await this.checkSyncState(true);
     } catch (err) {
       console.warn('Supabase: Background synchronization failed, defaulting to local cache:', err);
     }
@@ -2545,6 +2574,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
     this.cleanupDirectoryUsersRealtime();
     this.cleanupAccessRequestsRealtime();
+    this.cleanupCrossDeviceSync();
+    this.lastSyncState = null;
+    this.pendingTotpCreateIds.clear();
+    this.pendingTotpDeleteIds.clear();
+    this.pendingPersonalAppCreateIds.clear();
+    this.pendingPersonalAppDeleteIds.clear();
 
     if (this.isIndividual()) {
       this.activeWorkspaceId.set('personal');
@@ -2569,15 +2604,22 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.appAccessRequests.set(this.initAppAccessRequests());
     this.employeeProvisionedApps.set(this.loadStored<SaaSApp[]>(this.getProvisionedAppsStorageKey(), []));
     this.userDevices.set(this.loadStored<EnrolledDevice[]>(this.getUserDevicesStorageKey(), []));
+    this.totpAccounts.set(this.initTotpAccounts());
+    this.personalApps.set(this.initPersonalApps());
+    void this.refreshTotpCodes();
 
     this.initSupabaseSync();
     this.loadDirectoryUsers();
     this.setupDirectoryUsersRealtime();
     this.loadCompanyApps();
+    void this.loadPersonalApps();
+    void this.loadTotpAccounts();
     this.loadUserDevices();
     this.loadAccessRequests();
     this.setupAccessRequestsRealtime();
     this.fetchConnectedApps();
+    this.setupCrossDeviceSyncRealtime();
+    this.startCrossDeviceSyncPolling();
     this.startLiveSsoChallengePolling();
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
@@ -2833,6 +2875,149 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
+  /**
+   * SCRUM-178: Subscribe to Supabase Realtime updates for cross-device 2FA TOTP accounts,
+   * personal applications, and assigned enterprise apps.
+   */
+  setupCrossDeviceSyncRealtime(): void {
+    if (!this.isBrowser || this.isTestRuntime()) return;
+    if (this.crossDeviceSyncChannel) return;
+
+    const uid = this.user()?.id;
+    try {
+      const channels = (this.supabaseService.client as any).getChannels?.() || [];
+      const existing = channels.find((c: any) => c.topic === 'realtime:cross_device_sync');
+      if (existing) {
+        this.supabaseService.client.removeChannel(existing);
+      }
+
+      this.crossDeviceSyncChannel = this.supabaseService.client
+        .channel('realtime:cross_device_sync')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_totp_accounts' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            if (uid && row?.user_id && row.user_id !== uid) return;
+            void this.loadTotpAccounts();
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_personal_apps' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            if (uid && row?.user_id && row.user_id !== uid) return;
+            void this.loadPersonalApps();
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_assigned_apps' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            if (uid && row?.user_id && row.user_id !== uid) return;
+            this.loadCompanyApps();
+          },
+        )
+        .subscribe();
+    } catch {
+      // Non-fatal in offline/dev environments
+    }
+  }
+
+  /**
+   * SCRUM-178: Lightweight focus + periodic watermark check for connected SSO apps
+   * and Realtime fallback.
+   */
+  startCrossDeviceSyncPolling(): void {
+    if (!this.isBrowser || this.isTestRuntime()) return;
+
+    if (!this.crossDeviceFocusHandler && typeof window !== 'undefined') {
+      this.crossDeviceFocusHandler = () => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          void this.checkSyncState();
+        }
+      };
+      window.addEventListener('focus', this.crossDeviceFocusHandler);
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', this.crossDeviceFocusHandler);
+      }
+    }
+
+    if (!this.crossDevicePollTimer) {
+      this.crossDevicePollTimer = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        void this.checkSyncState();
+      }, 5000);
+    }
+  }
+
+  cleanupCrossDeviceSync(): void {
+    if (this.crossDeviceSyncChannel) {
+      try {
+        this.supabaseService.client.removeChannel(this.crossDeviceSyncChannel);
+      } catch {
+        // ignore
+      }
+      this.crossDeviceSyncChannel = null;
+    }
+    if (this.crossDevicePollTimer) {
+      clearInterval(this.crossDevicePollTimer);
+      this.crossDevicePollTimer = null;
+    }
+    if (this.crossDeviceFocusHandler && typeof window !== 'undefined') {
+      window.removeEventListener('focus', this.crossDeviceFocusHandler);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', this.crossDeviceFocusHandler);
+      }
+      this.crossDeviceFocusHandler = null;
+    }
+  }
+
+  async checkSyncState(force = false): Promise<void> {
+    if (!this.hasLiveAuthToken() || this.crossDeviceSyncInFlight) return;
+    this.crossDeviceSyncInFlight = true;
+    try {
+      const state = await firstValueFrom(
+        this.http.get<{
+          totpUpdatedAt: string | null;
+          personalAppsUpdatedAt: string | null;
+          enterpriseAppsUpdatedAt: string | null;
+          connectedAppsUpdatedAt: string | null;
+          accessRequestsUpdatedAt: string | null;
+        }>(`${this.apiBase}/sync/state`),
+      );
+      if (!state) return;
+
+      const prev = this.lastSyncState;
+      this.lastSyncState = state;
+      if (!prev && !force) {
+        return;
+      }
+
+      if (!prev || state.totpUpdatedAt !== prev.totpUpdatedAt) {
+        await this.loadTotpAccounts();
+      }
+      if (!prev || state.personalAppsUpdatedAt !== prev.personalAppsUpdatedAt) {
+        await this.loadPersonalApps();
+      }
+      if (!prev || state.enterpriseAppsUpdatedAt !== prev.enterpriseAppsUpdatedAt) {
+        this.loadCompanyApps();
+      }
+      if (!prev || state.connectedAppsUpdatedAt !== prev.connectedAppsUpdatedAt) {
+        this.fetchConnectedApps();
+      }
+      if (!prev || state.accessRequestsUpdatedAt !== prev.accessRequestsUpdatedAt) {
+        await this.loadAccessRequests();
+      }
+    } catch {
+      // Ignore transient offline errors during background sync check
+    } finally {
+      this.crossDeviceSyncInFlight = false;
+    }
+  }
+
   handleAccessRequestRealtimeChange(payload: any): void {
     if (!payload || !payload.eventType) return;
     const tenantId = this.resolveRealTenantId();
@@ -2948,8 +3133,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.loadAccessRequests();
       this.setupAccessRequestsRealtime();
     }
-    if (tab === 'my-apps') {
+    if (tab === 'authenticator') {
+      void this.loadTotpAccounts();
+    }
+    if (tab === 'my-apps' || tab === 'sso-apps') {
       this.loadCompanyApps();
+      void this.loadPersonalApps();
+      this.fetchConnectedApps();
+      void this.loadAccessRequests();
     }
     if (tab === 'user-devices') {
       this.loadUserDevices();
@@ -6256,17 +6447,23 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     );
     this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
-    // 3. Persist unassign to Supabase if applicable
-    const activeTenant = this.activeOrganizationId();
-    const resolvedTenantId =
-      activeTenant && !activeTenant.startsWith('org_')
-        ? activeTenant
-        : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
+    // 3. Persist unassign to backend & Supabase so mobile/web stay in sync
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .delete(`${this.apiBase}/apps/my/${encodeURIComponent(appId)}`)
+        .subscribe({ error: () => {} });
+    } else {
+      const activeTenant = this.activeOrganizationId();
+      const resolvedTenantId =
+        activeTenant && !activeTenant.startsWith('org_')
+          ? activeTenant
+          : u?.user_metadata?.['tenant_id'] || (u as any)?.tenantId;
 
-    if (this.isBrowser && resolvedTenantId && uid) {
-      this.supabaseService
-        .deleteUserAssignedApp(resolvedTenantId, uid, appId)
-        .catch((err) => console.warn('Supabase deleteUserAssignedApp notice:', err));
+      if (this.isBrowser && resolvedTenantId && uid) {
+        this.supabaseService
+          .deleteUserAssignedApp(resolvedTenantId, uid, appId)
+          .catch((err) => console.warn('Supabase deleteUserAssignedApp notice:', err));
+      }
     }
 
     this.logAuditEvent(
@@ -6288,8 +6485,12 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.appAccessRequests.update((prev) => prev.filter((r) => r.id !== requestId));
     this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
-    // 2. Persist to Supabase if applicable
-    if (this.isBrowser) {
+    // 2. Persist withdrawal to backend & Supabase so sync watermarks update
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .delete(`${this.apiBase}/apps/access-requests/${encodeURIComponent(requestId)}`)
+        .subscribe({ error: () => {} });
+    } else if (this.isBrowser) {
       this.supabaseService
         .deleteAccessRequest(requestId)
         .catch((err) => console.warn('Supabase deleteAccessRequest notice:', err));
@@ -6387,8 +6588,29 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.appAccessRequests.update((prev) => [newRequest, ...prev]);
     this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
 
-    // Persist to live Supabase database (SCRUM-158)
-    if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
+    // Persist to live backend (and Supabase) so mobile sync watermarks advance (SCRUM-158/178)
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .post<any>(`${this.apiBase}/apps/access-requests`, {
+          appName: newRequest.appName,
+          protocol: newRequest.protocol,
+          category: newRequest.category,
+          icon: newRequest.icon,
+          launchUrl: newRequest.launchUrl,
+          justification: newRequest.justification,
+        })
+        .subscribe({
+          next: (saved) => {
+            if (saved?.id && saved.id !== newRequest.id) {
+              this.appAccessRequests.update((prev) =>
+                prev.map((r) => (r.id === newRequest.id ? { ...r, id: saved.id } : r)),
+              );
+              this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
+            }
+          },
+          error: () => {},
+        });
+    } else if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
       this.supabaseService
         .createAccessRequest({
           id: newRequest.id,
@@ -7132,6 +7354,80 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     }
   }
 
+  async loadTotpAccounts(): Promise<void> {
+    if (!this.hasLiveAuthToken()) return;
+    const uid = this.user()?.id;
+    const migrationKey = uid ? `vanguard_totp_migrated_${uid}` : null;
+
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{
+          accounts: TotpAccount[];
+          deletedIds: string[];
+          updatedAt: string | null;
+        }>(`${this.apiBase}/totp-accounts`),
+      );
+      if (!res || !Array.isArray(res.accounts)) return;
+
+      const serverAccounts = res.accounts;
+      const deletedSet = new Set(res.deletedIds || []);
+      const alreadyMigrated = migrationKey ? Boolean(localStorage.getItem(migrationKey)) : true;
+      const currentLocal = this.totpAccounts();
+
+      if (
+        serverAccounts.length === 0 &&
+        deletedSet.size === 0 &&
+        !alreadyMigrated &&
+        currentLocal.length > 0
+      ) {
+        if (migrationKey) localStorage.setItem(migrationKey, '1');
+        for (const acc of currentLocal) {
+          this.pendingTotpCreateIds.add(acc.id);
+          try {
+            await firstValueFrom(
+              this.http.post(`${this.apiBase}/totp-accounts`, {
+                id: acc.id,
+                issuer: acc.issuer,
+                accountName: acc.accountName,
+                secret: acc.secret,
+                digits: acc.digits || 6,
+                period: acc.period || 30,
+                algorithm: acc.algorithm || 'SHA1',
+                icon: acc.icon || '🛡️',
+              }),
+            );
+          } catch {
+            // Best-effort legacy migration
+          } finally {
+            this.pendingTotpCreateIds.delete(acc.id);
+          }
+        }
+        return;
+      }
+
+      if (migrationKey) {
+        localStorage.setItem(migrationKey, '1');
+      }
+
+      const reconciled = serverAccounts.filter((a) => !this.pendingTotpDeleteIds.has(a.id));
+      for (const localAcc of currentLocal) {
+        if (
+          this.pendingTotpCreateIds.has(localAcc.id) &&
+          !this.pendingTotpDeleteIds.has(localAcc.id) &&
+          !reconciled.some((s) => s.id === localAcc.id)
+        ) {
+          reconciled.unshift(localAcc);
+        }
+      }
+
+      this.totpAccounts.set(reconciled);
+      this.persistTotpAccounts();
+      await this.refreshTotpCodes();
+    } catch {
+      // Retain cached local TOTP accounts when backend is unreachable
+    }
+  }
+
   addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
     const newAcc: TotpAccount = {
       digits: 6,
@@ -7143,6 +7439,30 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
     this.persistTotpAccounts();
     void this.refreshTotpCodes();
+
+    if (this.hasLiveAuthToken()) {
+      this.pendingTotpCreateIds.add(newAcc.id);
+      this.http
+        .post(`${this.apiBase}/totp-accounts`, {
+          id: newAcc.id,
+          issuer: newAcc.issuer,
+          accountName: newAcc.accountName,
+          secret: newAcc.secret,
+          digits: newAcc.digits || 6,
+          period: newAcc.period || 30,
+          algorithm: newAcc.algorithm || 'SHA1',
+          icon: newAcc.icon || '🛡️',
+        })
+        .subscribe({
+          next: () => {
+            this.pendingTotpCreateIds.delete(newAcc.id);
+          },
+          error: () => {
+            this.pendingTotpCreateIds.delete(newAcc.id);
+          },
+        });
+    }
+
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
   }
 
@@ -7152,6 +7472,21 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     );
     this.persistTotpAccounts();
     void this.refreshTotpCodes();
+
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .patch(`${this.apiBase}/totp-accounts/${encodeURIComponent(id)}`, {
+          ...(updates.issuer !== undefined ? { issuer: updates.issuer } : {}),
+          ...(updates.accountName !== undefined ? { accountName: updates.accountName } : {}),
+          ...(updates.secret !== undefined ? { secret: updates.secret } : {}),
+          ...(updates.digits !== undefined ? { digits: updates.digits } : {}),
+          ...(updates.period !== undefined ? { period: updates.period } : {}),
+          ...(updates.algorithm !== undefined ? { algorithm: updates.algorithm } : {}),
+          ...(updates.icon !== undefined ? { icon: updates.icon } : {}),
+        })
+        .subscribe({ error: () => {} });
+    }
+
     this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
   }
 
@@ -7159,6 +7494,21 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     const acc = this.totpAccounts().find((a) => a.id === id);
     this.totpAccounts.update((accounts) => accounts.filter((a) => a.id !== id));
     this.persistTotpAccounts();
+
+    if (this.hasLiveAuthToken()) {
+      this.pendingTotpDeleteIds.add(id);
+      this.http
+        .delete(`${this.apiBase}/totp-accounts/${encodeURIComponent(id)}`)
+        .subscribe({
+          next: () => {
+            this.pendingTotpDeleteIds.delete(id);
+          },
+          error: () => {
+            this.pendingTotpDeleteIds.delete(id);
+          },
+        });
+    }
+
     if (acc) {
       this.logAuditEvent(`Removed 2FA Authenticator token: ${acc.issuer}`, 'TOTP Authenticator', 'Revoke', 'success', 'Low');
     }
@@ -7729,6 +8079,73 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
   // ==========================================
   // SCRUM-180 / SCRUM-52: Web & Personal Applications Management
   // ==========================================
+  async loadPersonalApps(): Promise<void> {
+    if (!this.hasLiveAuthToken()) return;
+    const uid = this.user()?.id;
+    const migrationKey = uid ? `vanguard_personal_apps_migrated_${uid}` : null;
+
+    try {
+      const serverApps = await firstValueFrom(
+        this.http.get<SaaSApp[]>(`${this.apiBase}/apps/personal`),
+      );
+      if (!Array.isArray(serverApps)) return;
+
+      const alreadyMigrated = migrationKey ? Boolean(localStorage.getItem(migrationKey)) : true;
+      const currentLocal = this.personalApps();
+
+      if (serverApps.length === 0 && !alreadyMigrated && currentLocal.length > 0) {
+        if (migrationKey) localStorage.setItem(migrationKey, '1');
+        for (const app of currentLocal) {
+          this.pendingPersonalAppCreateIds.add(app.id);
+          try {
+            await firstValueFrom(
+              this.http.post(`${this.apiBase}/apps/personal`, {
+                id: app.id,
+                name: app.name,
+                category: app.category || 'cloud',
+                protocol: app.protocol || 'Extension Autofill',
+                launchUrl: app.launchUrl,
+                targetDomain: app.targetDomain,
+                description: app.description || '',
+                icon: app.icon || '🌐',
+                assignedUsername: app.assignedUsername,
+                assignedPassword: app.assignedPassword,
+              }),
+            );
+          } catch {
+            // Best-effort legacy migration
+          } finally {
+            this.pendingPersonalAppCreateIds.delete(app.id);
+          }
+        }
+        return;
+      }
+
+      if (migrationKey) {
+        localStorage.setItem(migrationKey, '1');
+      }
+
+      const reconciled = serverApps.filter(
+        (a) => !this.pendingPersonalAppDeleteIds.has(a.id),
+      );
+      for (const localApp of currentLocal) {
+        if (
+          this.pendingPersonalAppCreateIds.has(localApp.id) &&
+          !this.pendingPersonalAppDeleteIds.has(localApp.id) &&
+          !reconciled.some((s) => s.id === localApp.id)
+        ) {
+          reconciled.unshift(localApp);
+        }
+      }
+
+      this.personalApps.set(reconciled);
+      this.persistPersonalApps(reconciled);
+      this.broadcastAppsSync();
+    } catch {
+      // Keep cached local personal apps when backend is unreachable
+    }
+  }
+
   addApplication(app: {
     name: string;
     category: SaaSApp['category'];
@@ -7758,18 +8175,12 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
       targetUserEmail: email,
     };
 
-    // Update both personalApps and apps stores so it is immediately visible in any workspace view
+    // Update personalApps store (activeAppsList & ssoApplicationsList merge personalApps + company apps)
     this.personalApps.update((list) => [
       newApp,
       ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
     ]);
     this.persistPersonalApps();
-
-    this.apps.update((list) => [
-      newApp,
-      ...list.filter((a) => a.name.toLowerCase().trim() !== newApp.name.toLowerCase().trim()),
-    ]);
-    this.persistUserApps();
 
     // Save credentials to personal vault
     this.addVaultItem({
@@ -7783,29 +8194,34 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
 
     this.broadcastAppsSync();
 
-    // SCRUM-182: Synchronize application with production backend so mobile device receives it
-    if (this.isBrowser && uid) {
+    // SCRUM-178: Synchronize personal application with /apps/personal so mobile device receives it
+    if (this.hasLiveAuthToken()) {
+      this.pendingPersonalAppCreateIds.add(newApp.id);
       this.http
-        .post(
-          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}`,
-          {
-            appId: newApp.id,
-            name: newApp.name,
-            protocol: newApp.protocol,
-            launchUrl: newApp.launchUrl,
-            category: newApp.category,
-            icon: newApp.icon,
-            description: newApp.description,
-            assignedUsername: newApp.assignedUsername,
-            assignedPassword: newApp.assignedPassword,
-            targetUserEmail: newApp.targetUserEmail,
-          },
-        )
+        .post<SaaSApp>(`${this.apiBase}/apps/personal`, {
+          id: newApp.id,
+          name: newApp.name,
+          protocol: newApp.protocol,
+          launchUrl: newApp.launchUrl,
+          category: newApp.category,
+          icon: newApp.icon,
+          description: newApp.description,
+          assignedUsername: newApp.assignedUsername,
+          assignedPassword: newApp.assignedPassword,
+        })
         .subscribe({
-          next: () => {
-            this.loadCompanyApps();
+          next: (saved) => {
+            this.pendingPersonalAppCreateIds.delete(newApp.id);
+            if (saved?.id && saved.id !== newApp.id) {
+              this.personalApps.update((list) =>
+                list.map((item) => (item.id === newApp.id ? { ...item, ...saved } : item)),
+              );
+              this.persistPersonalApps();
+            }
           },
-          error: () => {},
+          error: () => {
+            this.pendingPersonalAppCreateIds.delete(newApp.id);
+          },
         });
     }
 
@@ -7884,6 +8300,15 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     }
 
     this.broadcastAppsSync();
+
+    if (this.hasLiveAuthToken() && this.personalApps().some((a) => a.id === appId)) {
+      this.http
+        .patch(`${this.apiBase}/apps/personal/${encodeURIComponent(appId)}`, {
+          ...(username !== undefined ? { assignedUsername: username } : {}),
+          ...(password !== undefined ? { assignedPassword: password } : {}),
+        })
+        .subscribe({ error: () => {} });
+    }
   }
 
   addPersonalApp(app: { name: string; category: 'cloud' | 'developer' | 'collaboration'; launchUrl: string; description?: string; icon?: string; username?: string; password?: string }): void {
@@ -7905,14 +8330,19 @@ AQEBBQADggEPADCCAQoCggEBAL5f4k6gV7aZ98d4Zk...
     this.persistUserApps();
     this.broadcastAppsSync();
 
-    // SCRUM-182: Synchronize application deletion with backend so mobile updates
-    const uid = this.user()?.id;
-    if (this.isBrowser && uid) {
+    // SCRUM-178: Synchronize personal application deletion with /apps/personal so mobile updates
+    if (this.hasLiveAuthToken()) {
+      this.pendingPersonalAppDeleteIds.add(id);
       this.http
-        .delete(
-          `${this.apiBase}/apps?targetUserId=${encodeURIComponent(uid)}&appId=${encodeURIComponent(id)}`,
-        )
-        .subscribe({ error: () => {} });
+        .delete(`${this.apiBase}/apps/personal/${encodeURIComponent(id)}`)
+        .subscribe({
+          next: () => {
+            this.pendingPersonalAppDeleteIds.delete(id);
+          },
+          error: () => {
+            this.pendingPersonalAppDeleteIds.delete(id);
+          },
+        });
     }
 
     if (app) {

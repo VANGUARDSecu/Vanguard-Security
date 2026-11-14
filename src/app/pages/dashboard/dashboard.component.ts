@@ -6,15 +6,12 @@ import { DashboardHeader } from './components/header/header';
 import { DashboardSidebar } from './components/sidebar/sidebar';
 import { AdminOverview } from './components/admin-overview/admin-overview';
 import { AdminDirectory } from './components/admin-directory/admin-directory';
-import { AdminSamlOidc } from './components/admin-saml-oidc/admin-saml-oidc';
 import { AdminAccessRequests } from './components/admin-access-requests/admin-access-requests';
 import { AdminAuditLogs } from './components/admin-audit-logs/admin-audit-logs';
 import { AdminSettings } from './components/admin-settings/admin-settings';
 import { UserMyApps } from './components/user-my-apps/user-my-apps';
 import { UserSsoApps } from './components/user-sso-apps/user-sso-apps';
 import { UserSecurity } from './components/user-security/user-security';
-import { UserNetwork } from './components/user-network/user-network';
-import { UserSsh } from './components/user-ssh/user-ssh';
 import { UserActivity } from './components/user-activity/user-activity';
 import { UserDevices } from './components/user-devices/user-devices';
 import { UserPersonalVault } from './components/user-personal-vault/user-personal-vault';
@@ -71,15 +68,12 @@ export type {
     DashboardSidebar,
     AdminOverview,
     AdminDirectory,
-    AdminSamlOidc,
     AdminAccessRequests,
     AdminAuditLogs,
     AdminSettings,
     UserMyApps,
     UserSsoApps,
     UserSecurity,
-    UserNetwork,
-    UserSsh,
     UserActivity,
     UserDevices,
     UserPersonalVault,
@@ -201,36 +195,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly sessionTimeoutMinutes = this.dashboardService.sessionTimeoutMinutes;
   readonly showGlobalKillswitchModal = this.dashboardService.showGlobalKillswitchModal;
   readonly globalKillswitchSuccess = this.dashboardService.globalKillswitchSuccess;
-
-  // SAML 2.0 & OIDC Web Federation (Phase 4)
-  readonly samlSubTab = this.dashboardService.samlSubTab;
-  readonly idpCert = this.dashboardService.idpCert;
-  readonly federatedSamlConnectors = this.dashboardService.federatedSamlConnectors;
-  readonly oidcClients = this.dashboardService.oidcClients;
-  readonly showAddAppModal = this.dashboardService.showAddAppModal;
-  readonly addAppSuccess = this.dashboardService.addAppSuccess;
-  readonly addAppError = this.dashboardService.addAppError;
-  readonly showRotateCertModal = this.dashboardService.showRotateCertModal;
-  readonly rotateCertSuccess = this.dashboardService.rotateCertSuccess;
-  readonly sandboxAssertionGenerated = this.dashboardService.sandboxAssertionGenerated;
-  readonly copiedAssertion = this.dashboardService.copiedAssertion;
-
-  get newAppName() { return this.dashboardService.newAppName; }
-  set newAppName(v: string) { this.dashboardService.newAppName = v; }
-  get newAppProtocol() { return this.dashboardService.newAppProtocol; }
-  set newAppProtocol(v: 'SAML 2.0' | 'OIDC') { this.dashboardService.newAppProtocol = v; }
-  get newAppEntityId() { return this.dashboardService.newAppEntityId; }
-  set newAppEntityId(v: string) { this.dashboardService.newAppEntityId = v; }
-  get newAppAcsUrl() { return this.dashboardService.newAppAcsUrl; }
-  set newAppAcsUrl(v: string) { this.dashboardService.newAppAcsUrl = v; }
-  get newAppDepartment() { return this.dashboardService.newAppDepartment; }
-  set newAppDepartment(v: string) { this.dashboardService.newAppDepartment = v; }
-  get sandboxSelectedUserId() { return this.dashboardService.sandboxSelectedUserId; }
-  set sandboxSelectedUserId(v: string) { this.dashboardService.sandboxSelectedUserId = v; }
-  get sandboxSelectedAppId() { return this.dashboardService.sandboxSelectedAppId; }
-  set sandboxSelectedAppId(v: string) { this.dashboardService.sandboxSelectedAppId = v; }
-  get sandboxInspectorMode() { return this.dashboardService.sandboxInspectorMode; }
-  set sandboxInspectorMode(v: 'saml' | 'oidc') { this.dashboardService.sandboxInspectorMode = v; }
 
   // SCRUM-42: Access Requests Signals & Actions
   readonly appAccessRequests = this.dashboardService.appAccessRequests;
@@ -398,17 +362,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly passwordUpdateSuccess = this.dashboardService.passwordUpdateSuccess;
   readonly isSubmittingPassword = this.dashboardService.isSubmittingPassword;
 
-  // SSH Keys & Sign-In History
-  readonly ldapBindDn = this.dashboardService.ldapBindDn;
-  readonly sshKeys = this.dashboardService.sshKeys;
-  readonly sshKeyError = this.dashboardService.sshKeyError;
-  readonly sshKeySuccess = this.dashboardService.sshKeySuccess;
-
-  get newKeyLabel() { return this.dashboardService.newKeyLabel; }
-  set newKeyLabel(v: string) { this.dashboardService.newKeyLabel = v; }
-  get newKeyContent() { return this.dashboardService.newKeyContent; }
-  set newKeyContent(v: string) { this.dashboardService.newKeyContent = v; }
-
+  // Sign-In History & Protocols
   readonly signInHistory = this.dashboardService.signInHistory;
   readonly protocols = this.dashboardService.protocols;
 
@@ -419,9 +373,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly userRoleLabel = this.dashboardService.userRoleLabel;
   readonly userPhone = this.dashboardService.userPhone;
   readonly clientInfo = this.dashboardService.clientInfo;
-  readonly simulatedSamlXml = this.dashboardService.simulatedSamlXml;
-  readonly simulatedOidcJwtHeader = this.dashboardService.simulatedOidcJwtHeader;
-  readonly simulatedOidcJwtPayload = this.dashboardService.simulatedOidcJwtPayload;
   readonly ldapDiagLog = this.dashboardService.ldapDiagLog;
   readonly radiusDiagLog = this.dashboardService.radiusDiagLog;
 
@@ -470,21 +421,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   openGlobalKillswitchModal() { return this.dashboardService.openGlobalKillswitchModal(); }
   closeGlobalKillswitchModal() { return this.dashboardService.closeGlobalKillswitchModal(); }
   executeGlobalKillswitch() { return this.dashboardService.executeGlobalKillswitch(); }
-  setSamlSubTab(tab: 'apps' | 'idp-metadata' | 'oidc-clients' | 'sso-sandbox') { return this.dashboardService.setSamlSubTab(tab); }
-  downloadIdpMetadataXml() { return this.dashboardService.downloadIdpMetadataXml(); }
-  downloadX509Cert() { return this.dashboardService.downloadX509Cert(); }
-  copyCertFingerprint() { return this.dashboardService.copyCertFingerprint(); }
-  openRotateCertModal() { return this.dashboardService.openRotateCertModal(); }
-  closeRotateCertModal() { return this.dashboardService.closeRotateCertModal(); }
-  executeRotateCert() { return this.dashboardService.executeRotateCert(); }
-  openAddAppModal() { return this.dashboardService.openAddAppModal(); }
-  closeAddAppModal() { return this.dashboardService.closeAddAppModal(); }
-  submitAddAppConnector() { return this.dashboardService.submitAddAppConnector(); }
-  deleteAppConnector(conn: string | SamlConnector) { const id = typeof conn === 'string' ? conn : conn.id; return this.dashboardService.deleteAppConnector(id); }
-  toggleAppConnectorStatus(conn: SamlConnector) { return this.dashboardService.toggleAppConnectorStatus(conn); }
-  toggleRevealClientSecret(client: OidcClient) { return this.dashboardService.toggleRevealClientSecret(client); }
-  regenerateClientSecret(client: OidcClient) { return this.dashboardService.regenerateClientSecret(client); }
-  copySimulatedAssertion() { return this.dashboardService.copySimulatedAssertion(); }
   runLdapBindTest() { return this.dashboardService.runLdapBindTest(); }
   copyLdapDiagLog() { return this.dashboardService.copyLdapDiagLog(); }
   toggleLdapAdminPwRevealed() { return this.dashboardService.toggleLdapAdminPwRevealed(); }
@@ -558,8 +494,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   submitPasswordChange(currentPassword: string, newPassword: string) {
     return this.dashboardService.submitPasswordChange(currentPassword, newPassword);
   }
-  addSshKey() { return this.dashboardService.addSshKey(); }
-  removeSshKey(id: string) { return this.dashboardService.removeSshKey(id); }
   copyUserId() { return this.dashboardService.copyUserId(); }
   revokeAllSessions() { return this.dashboardService.revokeAllSessions(); }
   onLogout() { return this.dashboardService.onLogout(); }

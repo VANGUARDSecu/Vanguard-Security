@@ -64,18 +64,42 @@ describe('DashboardSidebar Component (SCRUM-54 Individual Security Suite)', () =
     const navButtons: HTMLButtonElement[] = Array.from(fixture.nativeElement.querySelectorAll('.nav-link-btn'));
     const buttonTexts = navButtons.map((btn) => btn.textContent?.trim() || '');
 
-    // Individual users must have access to full personal cybersecurity tools
+    // Individual users must have access to personal cybersecurity tools
     expect(buttonTexts.some((t) => t.includes('Personal Vault'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('My Applications'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('2FA Authenticator'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Security & MFA'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Mobile & Devices'))).toBe(true);
-    expect(buttonTexts.some((t) => t.includes('SSH Keys'))).toBe(true);
 
-    // Corporate governance tabs must NOT be present
+    // Corporate governance and removed redundant tabs must NOT be present
     expect(buttonTexts.some((t) => t.includes('Directory Users'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud LDAP'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud RADIUS'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('SSH Keys'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('Wi-Fi & VPN Profile'))).toBe(false);
+  });
+
+  it('should hide redundant network and SSH tabs for company directory users (SCRUM-179)', () => {
+    authService.currentUser.set({
+      id: 'usr-corp-user',
+      email: 'member@sentinel.corp',
+      firstName: 'Ellen',
+      lastName: 'Ripley',
+      role: 'user',
+      accountType: 'company',
+      companyName: 'Sentinel Defense',
+    });
+    dashboardService.initDashboardForCurrentUser();
+    fixture.detectChanges();
+
+    const navButtons: HTMLButtonElement[] = Array.from(fixture.nativeElement.querySelectorAll('.nav-link-btn'));
+    const buttonTexts = navButtons.map((btn) => btn.textContent?.trim() || '');
+
+    expect(buttonTexts.some((t) => t.includes('My Applications'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('SSO Applications'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('2FA Authenticator'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('Wi-Fi & VPN Profile'))).toBe(false);
+    expect(buttonTexts.some((t) => t.includes('SSH & LDAP Keys'))).toBe(false);
   });
 
   it('should display Personal Security Vault in footer status box for individuals', () => {
@@ -105,12 +129,12 @@ describe('DashboardSidebar Component (SCRUM-54 Individual Security Suite)', () =
     // Genuine production tabs MUST be present
     expect(buttonTexts.some((t) => t.includes('Overview'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Directory Users'))).toBe(true);
-    expect(buttonTexts.some((t) => t.includes('OIDC Applications & SSO'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Access Requests'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Security Audit Log'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Enterprise Settings'))).toBe(true);
 
-    // Obsolete and deferred tabs MUST NOT be present
+    // Obsolete, deferred, and redundant simulated tabs MUST NOT be present
+    expect(buttonTexts.some((t) => t.includes('OIDC Applications & SSO'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud LDAP'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud RADIUS'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Webhooks'))).toBe(false);

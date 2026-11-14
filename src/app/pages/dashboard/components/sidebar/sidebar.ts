@@ -43,7 +43,6 @@ export class DashboardSidebar {
   readonly pendingAccessRequests = this.dashboardService.pendingAccessRequests;
   readonly ssoApplicationsList = this.dashboardService.ssoApplicationsList;
   readonly activeConnectedApps = this.dashboardService.activeConnectedApps;
-  readonly samlSubTab = this.dashboardService.samlSubTab;
   readonly isMobileSidebarOpen = this.dashboardService.isMobileSidebarOpen;
 
   setActiveTab(tab: string) {

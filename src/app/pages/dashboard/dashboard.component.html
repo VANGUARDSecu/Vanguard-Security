@@ -122,7 +122,6 @@
       <div *ngIf="viewMode() === 'admin'">
         <app-admin-overview *ngIf="activeTab() === 'overview'"></app-admin-overview>
         <app-admin-directory *ngIf="activeTab() === 'directory'"></app-admin-directory>
-        <app-admin-saml-oidc *ngIf="activeTab() === 'saml-oidc'"></app-admin-saml-oidc>
         <app-admin-access-requests *ngIf="activeTab() === 'access-requests'"></app-admin-access-requests>
         <app-admin-audit-logs *ngIf="activeTab() === 'audit-logs'"></app-admin-audit-logs>
         <app-admin-settings *ngIf="activeTab() === 'settings'"></app-admin-settings>
@@ -145,8 +144,6 @@
         <app-user-sso-apps *ngIf="activeTab() === 'sso-apps'"></app-user-sso-apps>
 
         <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
-        <app-user-network *ngIf="!isIndividual() && activeTab() === 'user-network'"></app-user-network>
-        <app-user-ssh *ngIf="activeTab() === 'user-ssh'"></app-user-ssh>
         <app-user-activity *ngIf="activeTab() === 'user-activity'"></app-user-activity>
         <app-user-devices *ngIf="activeTab() === 'user-devices'"></app-user-devices>
       </div>

@@ -41,6 +41,8 @@ export class DashboardSidebar {
   readonly vaultItems = this.dashboardService.vaultItems;
   readonly totpAccounts = this.dashboardService.totpAccounts;
   readonly pendingAccessRequests = this.dashboardService.pendingAccessRequests;
+  readonly ssoApplicationsList = this.dashboardService.ssoApplicationsList;
+  readonly activeConnectedApps = this.dashboardService.activeConnectedApps;
   readonly samlSubTab = this.dashboardService.samlSubTab;
   readonly isMobileSidebarOpen = this.dashboardService.isMobileSidebarOpen;
 

@@ -215,5 +215,21 @@ describe('LoginComponent', () => {
         }),
       });
     });
+
+    it('SCRUM-184: displays Google OAuth processing indicator card while callback verification is active', () => {
+      component.authService.isOAuthProcessing.set(true);
+      component.authService.oAuthProcessingMessage.set('Verifying Google account session...');
+      fixture.detectChanges();
+
+      const el: HTMLElement = fixture.nativeElement;
+      const indicator = el.querySelector('[data-testid="oauth-processing-indicator"]');
+      expect(indicator).toBeTruthy();
+      expect(indicator?.textContent).toContain('Processing Google Sign-In');
+      expect(indicator?.textContent).toContain('Verifying Google account session...');
+
+      component.authService.isOAuthProcessing.set(false);
+      fixture.detectChanges();
+      expect(el.querySelector('[data-testid="oauth-processing-indicator"]')).toBeNull();
+    });
   });
 });

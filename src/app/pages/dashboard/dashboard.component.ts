@@ -11,6 +11,7 @@ import { AdminAccessRequests } from './components/admin-access-requests/admin-ac
 import { AdminAuditLogs } from './components/admin-audit-logs/admin-audit-logs';
 import { AdminSettings } from './components/admin-settings/admin-settings';
 import { UserMyApps } from './components/user-my-apps/user-my-apps';
+import { UserSsoApps } from './components/user-sso-apps/user-sso-apps';
 import { UserSecurity } from './components/user-security/user-security';
 import { UserNetwork } from './components/user-network/user-network';
 import { UserSsh } from './components/user-ssh/user-ssh';
@@ -75,6 +76,7 @@ export type {
     AdminAuditLogs,
     AdminSettings,
     UserMyApps,
+    UserSsoApps,
     UserSecurity,
     UserNetwork,
     UserSsh,

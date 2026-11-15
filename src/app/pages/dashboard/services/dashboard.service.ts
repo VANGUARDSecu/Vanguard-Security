@@ -1534,7 +1534,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     assignedUsername: string;
     assignedPassword: string;
     description?: string;
-  }): SaaSApp {
+  }): SaaSApp | null {
+    if (!this.isAppInUnifiedSlots(payload.appName, payload.launchUrl)) {
+      const entitlement = this.canIntegrateAnotherApp();
+      if (!entitlement.allowed) {
+        this.showAdminNotice(entitlement.reason || 'Free tier is limited to 1 integrated application.');
+        this.openPaywallModal(entitlement.reason);
+        return null;
+      }
+    }
+
     const slug = payload.appName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const appId = `prov-${slug}-${payload.targetUserId || Date.now()}`;
     const provisionedApp: SaaSApp = {
@@ -1555,7 +1564,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       targetUserEmail: payload.targetUserEmail.toLowerCase().trim(),
     };
 
-    const existing = this.employeeProvisionedApps().filter(
+    const prevProvisioned = [...this.employeeProvisionedApps()];
+    const existing = prevProvisioned.filter(
       (a) =>
         !(
           ((a.targetUserId && a.targetUserId === payload.targetUserId) ||
@@ -1598,7 +1608,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             }
           },
           error: (err) => {
+            // Roll back optimistic local provisioning when backend rejects (e.g. 403 paywall limit)
+            this.employeeProvisionedApps.set(prevProvisioned);
+            this.saveStored(this.getProvisionedAppsStorageKey(), prevProvisioned);
             const msg = err?.error?.message || err?.message || 'Backend sync failed.';
+            if (this.isBillingLimitHttpError(err)) {
+              this.openPaywallModal(msg);
+            }
             this.showAdminNotice(`Warning: ${provisionedApp.name} provisioning failed on server (${msg}).`);
           },
         });
@@ -1884,6 +1900,66 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       return matchCat && matchQuery;
     });
   });
+
+  /**
+   * SCRUM-201: Unified set of integrated application slot keys across autofill apps,
+   * connected OIDC/SSO integrations, SSO apps, and (when in company workspace) provisioned employee apps.
+   */
+  private normalizeQuotaKey(value?: string | null): string {
+    return (value || '').trim().toLowerCase().replace(/\/+$/, '');
+  }
+
+  private collectUnifiedSlotKeys(): Set<string> {
+    const keys = new Set<string>();
+    const addKey = (name?: string | null, launchUrl?: string | null, id?: string | null) => {
+      const k =
+        this.normalizeQuotaKey(name) ||
+        this.normalizeQuotaKey(launchUrl) ||
+        this.normalizeQuotaKey(id);
+      if (k) keys.add(k);
+    };
+
+    for (const app of this.activeAppsList()) {
+      addKey(app.name, app.launchUrl, app.id);
+    }
+    for (const conn of this.activeConnectedApps()) {
+      addKey(conn.clientName, conn.originUrl, conn.clientId);
+    }
+    for (const sso of this.ssoApplicationsList()) {
+      addKey(sso.name, sso.launchUrl, sso.id);
+    }
+    if (!this.isPersonalWorkspace()) {
+      for (const app of this.apps()) {
+        addKey(app.name, app.launchUrl, app.id);
+      }
+      for (const prov of this.employeeProvisionedApps()) {
+        addKey(prov.name, prov.launchUrl, prov.id);
+      }
+    }
+    return keys;
+  }
+
+  readonly totalIntegratedAppsCount = computed<number>(() => this.collectUnifiedSlotKeys().size);
+
+  isAppInUnifiedSlots(name?: string | null, launchUrl?: string | null): boolean {
+    const slots = this.collectUnifiedSlotKeys();
+    const normName = this.normalizeQuotaKey(name);
+    if (normName && slots.has(normName)) return true;
+    const normUrl = this.normalizeQuotaKey(launchUrl);
+    if (normUrl && slots.has(normUrl)) return true;
+    return false;
+  }
+
+  private isBillingLimitHttpError(err: any): boolean {
+    if (!err || err.status !== 403) return false;
+    const body = err.error || {};
+    return (
+      body?.error === 'billing_limit_reached' ||
+      body?.code === 'PAYWALL_REQUIRED' ||
+      Boolean(body?.upgradeRequired) ||
+      /free tier|plan limit|upgrade|paymongo/i.test(String(body?.message || err?.message || ''))
+    );
+  }
 
   // ==========================================
   // SCRUM-57 & SCRUM-58: Connected & Integrated Applications (Strictly Deduplicated)
@@ -3234,7 +3310,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       if (!prev || state.devicesUpdatedAt !== prev.devicesUpdatedAt) {
         await this.loadUserDevices();
       }
-    } catch {
+    } catch (err: any) {
+      if (err?.status === 401 && !this.hasLiveAuthToken()) {
+        this.cleanupCrossDeviceSync();
+      }
       // Ignore transient offline errors during background sync check
     } finally {
       this.crossDeviceSyncInFlight = false;
@@ -4598,6 +4677,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const request = this.appAccessRequests().find((r) => r.id === requestId);
     if (!request) return;
 
+    if (!this.isAppInUnifiedSlots(request.appName, request.launchUrl)) {
+      const entitlement = this.canIntegrateAnotherApp();
+      if (!entitlement.allowed) {
+        this.openPaywallModal(entitlement.reason);
+        this.showAdminNotice(entitlement.reason || 'Free tier limit reached.');
+        return;
+      }
+    }
+
     const prevRequests = [...this.appAccessRequests()];
     const prevApps = [...this.apps()];
     const reviewer = this.displayName() || 'Vanguard Administrator';
@@ -4616,6 +4704,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.apps.set(prevApps);
             this.saveStored('vanguard_access_requests', prevRequests);
             this.saveStored('vanguard_user_apps', prevApps);
+            if (this.isBillingLimitHttpError(err)) {
+              const msg = err?.error?.message || err?.message;
+              this.openPaywallModal(msg);
+            }
             this.showAdminNotice('Failed to approve access request on the server.');
           },
         });
@@ -6397,6 +6489,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       submittedAt: new Date().toISOString(),
     };
 
+    // SCRUM-201: Gate enterprise app requests when unified integrated app slots are already full
+    if (!this.isAppInUnifiedSlots(name, launchUrl)) {
+      const entitlement = this.canIntegrateAnotherApp();
+      if (!entitlement.allowed) {
+        this.requestAppError.set(entitlement.reason || 'Free tier limit reached.');
+        this.openPaywallModal(entitlement.reason);
+        return false;
+      }
+    }
+
+    const prevRequests = [...this.appAccessRequests()];
     // Add to access requests queue with Pending Approval status - DO NOT auto-provision into apps
     this.appAccessRequests.update((prev) => [newRequest, ...prev]);
     this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
@@ -6421,7 +6524,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               this.saveStored(this.getAccessRequestsStorageKey(), this.appAccessRequests());
             }
           },
-          error: () => {},
+          error: (err) => {
+            if (this.isBillingLimitHttpError(err)) {
+              this.appAccessRequests.set(prevRequests);
+              this.saveStored(this.getAccessRequestsStorageKey(), prevRequests);
+              this.openPaywallModal(err?.error?.message || err?.message);
+            }
+          },
         });
     } else if (this.isBrowser && resolvedTenantId && !resolvedTenantId.startsWith('org_')) {
       this.supabaseService
@@ -7075,7 +7184,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
    * launcher grid, respecting plan entitlements.
    */
   pinVaultItemToApps(item: PersonalVaultItem): { ok: boolean; reason?: string } {
-    const entitlement = this.canIntegrateAnotherApp(this.activeAppsList().length);
+    const entitlement = this.canIntegrateAnotherApp();
     if (!entitlement.allowed) {
       this.openPaywallModal(entitlement.reason);
       return { ok: false, reason: entitlement.reason };
@@ -8220,6 +8329,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       targetUserEmail: email,
     };
 
+    const prevPersonalApps = [...this.personalApps()];
     // Update personalApps store (activeAppsList & ssoApplicationsList merge personalApps + company apps)
     this.personalApps.update((list) => [
       newApp,
@@ -8264,8 +8374,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               this.persistPersonalApps();
             }
           },
-          error: () => {
+          error: (err) => {
             this.pendingPersonalAppCreateIds.delete(newApp.id);
+            if (this.isBillingLimitHttpError(err)) {
+              this.personalApps.set(prevPersonalApps);
+              this.persistPersonalApps();
+              this.broadcastAppsSync();
+              this.openPaywallModal(err?.error?.message || err?.message);
+            }
           },
         });
     }
@@ -9207,7 +9323,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     const count =
       typeof currentAppCount === 'number'
         ? currentAppCount
-        : this.activeAppsList().length;
+        : this.totalIntegratedAppsCount();
     const limit = this.maxIntegratedAppsLimit();
     if (limit !== -1 && count >= limit) {
       const target = this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)';

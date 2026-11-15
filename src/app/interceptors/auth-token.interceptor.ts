@@ -59,10 +59,12 @@ export const authTokenInterceptor: HttpInterceptorFn = (req, next) => {
       if (
         error instanceof HttpErrorResponse &&
         error.status === 401 &&
-        !isNoRefresh &&
-        authService.hasRefreshToken()
+        !isNoRefresh
       ) {
-        return authService.refreshSession().pipe(
+        const refresh$ = authService.hasRefreshToken()
+          ? authService.refreshSession()
+          : authService.recoverOrLogoutOnUnauthorized();
+        return refresh$.pipe(
           switchMap((res) => {
             const newToken = res.session?.access_token || authService.token();
             return next(

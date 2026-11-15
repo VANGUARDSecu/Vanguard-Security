@@ -129,4 +129,33 @@ describe('authTokenInterceptor (SCRUM-131 & SCRUM-142)', () => {
     expect(refreshSpy).not.toHaveBeenCalled();
     expect(errorReceived.status).toBe(401);
   });
+
+  it('SCRUM-202: recovers expired session or logs out on 401 when no explicit refreshToken exists', () => {
+    (auth.refreshToken as any).set(null);
+    const recoverSpy = vi.spyOn(auth, 'recoverOrLogoutOnUnauthorized').mockReturnValue(
+      of({
+        success: true,
+        session: {
+          access_token: 'recovered-supabase-jwt',
+          refresh_token: 'recovered-refresh-jwt',
+        },
+      } as any)
+    );
+
+    let result: any = null;
+    http.get('http://localhost:3000/sync/state').subscribe((data) => {
+      result = data;
+    });
+
+    const initialReq = httpMock.expectOne('http://localhost:3000/sync/state');
+    initialReq.flush({ message: 'jwt expired' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(recoverSpy).toHaveBeenCalledTimes(1);
+
+    const retriedReq = httpMock.expectOne('http://localhost:3000/sync/state');
+    expect(retriedReq.request.headers.get('Authorization')).toBe('Bearer recovered-supabase-jwt');
+    retriedReq.flush({ totpUpdatedAt: null });
+
+    expect(result).toEqual({ totpUpdatedAt: null });
+  });
 });

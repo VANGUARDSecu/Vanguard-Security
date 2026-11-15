@@ -2,7 +2,7 @@ import { Injectable, inject, signal, computed, PLATFORM_ID } from '@angular/core
 import { isPlatformBrowser } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay } from 'rxjs';
+import { Observable, catchError, from, map, of, switchMap, tap, throwError, finalize, shareReplay } from 'rxjs';
 import { SupabaseService } from './supabase.service';
 import { environment } from '../../environments/environment';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
@@ -191,6 +191,7 @@ export class AuthService {
 
   // Proactive token auto-renewal (SCRUM-142 / NFR-02 300s TTL)
   private refreshInFlight$: Observable<AuthResponse> | null = null;
+  private recoveryInFlight$: Observable<AuthResponse> | null = null;
   private autoRefreshTimer: any = null;
   readonly isAuthenticated = computed(() => !!this.currentUser());
   readonly isPasswordResetRequired = signal<boolean>(this.loadStoredResetRequired());
@@ -1801,6 +1802,68 @@ export class AuthService {
       );
 
     return this.refreshInFlight$;
+  }
+
+  /**
+   * Attempts Supabase session recovery when a backend 401 arrives without an explicit
+   * Vanguard refresh token; logs out cleanly if no valid session can be recovered (SCRUM-202).
+   */
+  recoverOrLogoutOnUnauthorized(): Observable<AuthResponse> {
+    if (!this.isBrowser) {
+      return throwError(() => new Error('Session expired outside browser context.'));
+    }
+    if (this.hasRefreshToken()) {
+      return this.refreshSession();
+    }
+    if (this.recoveryInFlight$) {
+      return this.recoveryInFlight$;
+    }
+
+    const rejectedToken = this.token();
+    const auth = this.supabaseService?.client?.auth;
+    if (!auth || typeof auth.refreshSession !== 'function') {
+      this.logout();
+      return throwError(() => new Error('No active session recovery method available.'));
+    }
+
+    this.recoveryInFlight$ = from(auth.refreshSession()).pipe(
+      switchMap((result: any) => {
+        const session = result?.data?.session;
+        if (session?.access_token && session.access_token !== rejectedToken) {
+          this.token.set(session.access_token);
+          if (session.refresh_token) {
+            this.refreshToken.set(session.refresh_token);
+            localStorage.setItem('vanguard_refresh_token', session.refresh_token);
+          }
+          if (session.expires_at) {
+            this.tokenExpiresAt.set(session.expires_at);
+            localStorage.setItem('vanguard_token_expires_at', String(session.expires_at));
+          }
+          localStorage.setItem('vanguard_token', session.access_token);
+          this.scheduleAutoRefresh(session.expires_at);
+          return of({
+            success: true,
+            session: {
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              expires_at: session.expires_at,
+            },
+          } as AuthResponse);
+        }
+        this.logout();
+        return throwError(() => new Error('Unable to refresh expired session.'));
+      }),
+      catchError((err: any) => {
+        this.logout();
+        return throwError(() => err);
+      }),
+      finalize(() => {
+        this.recoveryInFlight$ = null;
+      }),
+      shareReplay(1),
+    );
+
+    return this.recoveryInFlight$;
   }
 
   private initSessionAutoRefresh(): void {

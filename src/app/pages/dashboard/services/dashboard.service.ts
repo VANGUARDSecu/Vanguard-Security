@@ -1333,6 +1333,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private crossDeviceSyncInFlight = false;
   private lastSyncState: {
     totpUpdatedAt: string | null;
+    vaultUpdatedAt?: string | null;
+    vaultRevision?: number;
     personalAppsUpdatedAt: string | null;
     enterpriseAppsUpdatedAt: string | null;
     connectedAppsUpdatedAt: string | null;
@@ -3002,6 +3004,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         )
         .on(
           'postgres_changes',
+          { event: '*', schema: 'public', table: 'vault_items' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            if (uid && row?.user_id && row.user_id !== uid) return;
+            void this.refreshVaultFromBackend();
+          },
+        )
+        .on(
+          'postgres_changes',
           { event: '*', schema: 'public', table: 'user_personal_apps' },
           (payload: any) => {
             const row = payload?.new || payload?.old;
@@ -3092,6 +3103,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const state = await firstValueFrom(
         this.http.get<{
           totpUpdatedAt: string | null;
+          vaultUpdatedAt?: string | null;
+          vaultRevision?: number;
           personalAppsUpdatedAt: string | null;
           enterpriseAppsUpdatedAt: string | null;
           connectedAppsUpdatedAt: string | null;
@@ -3109,6 +3122,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
       if (!prev || state.totpUpdatedAt !== prev.totpUpdatedAt) {
         await this.loadTotpAccounts();
+      }
+      if (
+        !prev ||
+        state.vaultUpdatedAt !== prev.vaultUpdatedAt ||
+        state.vaultRevision !== prev.vaultRevision
+      ) {
+        await this.refreshVaultFromBackend();
       }
       if (!prev || state.personalAppsUpdatedAt !== prev.personalAppsUpdatedAt) {
         await this.loadPersonalApps();

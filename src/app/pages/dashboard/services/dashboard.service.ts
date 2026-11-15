@@ -1196,6 +1196,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     enterpriseAppsUpdatedAt: string | null;
     connectedAppsUpdatedAt: string | null;
     accessRequestsUpdatedAt: string | null;
+    billingUpdatedAt?: string | null;
   } | null = null;
   private readonly pendingTotpCreateIds = new Set<string>();
   private readonly pendingTotpDeleteIds = new Set<string>();
@@ -2846,6 +2847,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.loadCompanyApps();
           },
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'billing_subscriptions' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            const tenantId = this.resolveRealTenantId();
+            const matchesUser = uid && row?.user_id && row.user_id === uid;
+            const matchesTenant = tenantId && row?.tenant_id && row.tenant_id === tenantId;
+            if ((uid || tenantId) && row && !matchesUser && !matchesTenant) return;
+            this.loadBillingSubscription();
+          },
+        )
         .subscribe();
     } catch {
       // Non-fatal in offline/dev environments
@@ -2912,6 +2925,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           enterpriseAppsUpdatedAt: string | null;
           connectedAppsUpdatedAt: string | null;
           accessRequestsUpdatedAt: string | null;
+          billingUpdatedAt?: string | null;
         }>(`${this.apiBase}/sync/state`),
       );
       if (!state) return;
@@ -2936,6 +2950,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       }
       if (!prev || state.accessRequestsUpdatedAt !== prev.accessRequestsUpdatedAt) {
         await this.loadAccessRequests();
+      }
+      if (!prev || state.billingUpdatedAt !== prev.billingUpdatedAt) {
+        this.loadBillingSubscription();
       }
     } catch {
       // Ignore transient offline errors during background sync check

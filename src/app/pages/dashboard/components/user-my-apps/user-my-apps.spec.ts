@@ -728,8 +728,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.showPaywallModal()).toBe(true);
       expect(component.addAppError()).toContain('Free tier is limited to 1 integrated application');
 
-      // Upgrade to Personal Pro ($5/mo Sandbox) unlocks unlimited apps
+      // Triggering upgrade initiates PayMongo Sandbox redirect and keeps Free tier locked until payment succeeds
       component.upgradePlan('personal_pro');
+      expect(dashboardService.subscriptionPlanId()).toBe('free');
+      const checkoutUrl = dashboardService.lastPaymongoCheckoutUrl() || '';
+      expect(checkoutUrl).toContain('/paymongo-sandbox');
+      const sid = new URLSearchParams(checkoutUrl.split('?')[1]).get('session')!;
+
+      // Simulating PayMongo checkout return with status=success unlocks Personal Pro & unlimited apps
+      dashboardService.finalizePaymongoReturn(sid, 'success');
       expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
       expect(component.showPaywallModal()).toBe(false);
 

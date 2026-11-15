@@ -114,6 +114,8 @@ export class UserMyApps {
   readonly paywallFeatureMessage = this.dashboardService.paywallFeatureMessage;
   readonly subscriptionPlanId = this.dashboardService.subscriptionPlanId;
   readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly isTenantMember = this.dashboardService.isTenantMember;
+  readonly canManageBilling = this.dashboardService.canManageBilling;
   readonly maxIntegratedAppsLimit = this.dashboardService.maxIntegratedAppsLimit;
   readonly currentPlanDisplayName = this.dashboardService.currentPlanDisplayName;
   readonly billingInvoices = this.dashboardService.billingInvoices;
@@ -653,9 +655,7 @@ export class UserMyApps {
     this.gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
     this.gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
     this.gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
-    this.dashboardService.openPaywallModal(
-      'Manage your monthly subscription plan, paywall limits, and Sandbox Payment Gateway API configuration.'
-    );
+    this.dashboardService.openPaywallModal();
   }
 
   closeBillingModal(): void {

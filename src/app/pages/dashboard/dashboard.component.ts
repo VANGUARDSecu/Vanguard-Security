@@ -1,7 +1,7 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { DashboardService } from './services/dashboard.service';
 import { DashboardHeader } from './components/header/header';
@@ -17,6 +17,7 @@ import { UserSecurity } from './components/user-security/user-security';
 import { UserActivity } from './components/user-activity/user-activity';
 import { UserDevices } from './components/user-devices/user-devices';
 import { UserAuthenticator } from './components/user-authenticator/user-authenticator';
+import { BillingModal } from './components/billing-modal/billing-modal';
 import {
   ProtocolStatus,
   SaaSApp,
@@ -78,6 +79,7 @@ export type {
     UserActivity,
     UserDevices,
     UserAuthenticator,
+    BillingModal,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.css'
@@ -85,6 +87,7 @@ export type {
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
   private readonly route = inject(ActivatedRoute, { optional: true });
+  private readonly router = inject(Router, { optional: true });
   private queryParamsSub: Subscription | null = null;
 
   ngOnInit(): void {
@@ -103,6 +106,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.dashboardService.showAdminNotice(
             'Review connected external apps, active devices, or change your password below to revoke untrusted access.'
           );
+        }
+        const billingStatus = params['billing_status'];
+        const billingSession = params['billing_session'];
+        if (billingStatus) {
+          this.dashboardService.finalizePaymongoReturn(billingSession || '', billingStatus);
+          if (this.router && this.route) {
+            void this.router.navigate([], {
+              relativeTo: this.route,
+              queryParams: { billing_status: null, billing_session: null },
+              queryParamsHandling: 'merge',
+              replaceUrl: true,
+            });
+          }
         }
       });
     }

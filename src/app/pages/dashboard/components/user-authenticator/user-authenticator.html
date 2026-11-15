@@ -19,6 +19,19 @@
     </div>
 
     <div class="hero-right" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+      <!-- SCRUM-184: TOTP Vault Quota Pill -->
+      <button
+        type="button"
+        class="btn-cyber-secondary"
+        (click)="dashboardService.openPaywallModal()"
+        style="padding: 8px 12px; border-radius: 10px; font-size: 12px;"
+        [title]="isTenantMember() ? 'Quota managed by your Company Admin' : 'View subscription limits'"
+      >
+        <span>🔐 {{ activeTotpAccounts().length }}/{{ maxTotpAccountsLimit() === -1 ? '∞' : maxTotpAccountsLimit() }} Tokens</span>
+        <span *ngIf="isFreeTier() && canManageBilling()" style="margin-left: 6px; color: #38bdf8; font-weight: 700;">• Upgrade</span>
+        <span *ngIf="isFreeTier() && isTenantMember()" style="margin-left: 6px; color: #fbbf24; font-weight: 600;">• Company Free</span>
+      </button>
+
       <!-- Live Rolling Timer Badge -->
       <div class="totp-timer-badge" [class.urgent]="totpSecondsRemaining() <= 7">
         <div class="pulse-ring"></div>

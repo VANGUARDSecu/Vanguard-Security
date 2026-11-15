@@ -31,6 +31,8 @@ export class UserActivity implements OnInit {
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly signInHistory = this.dashboardService.signInHistory;
+  readonly canExportAuditCsv = this.dashboardService.canExportAuditCsv;
+  readonly auditRetentionDays = this.dashboardService.auditRetentionDays;
   readonly movementFilter = signal<'all' | 'LOGIN' | 'LOGOUT' | 'APP_LAUNCH' | 'SECURITY'>('all');
   readonly searchQuery = signal<string>('');
 
@@ -40,6 +42,10 @@ export class UserActivity implements OnInit {
 
   refreshMyActivity(): void {
     this.dashboardService.loadServerAuditLogs();
+  }
+
+  exportPersonalActivityCsv(): void {
+    this.dashboardService.exportAuditLogs('personal', this.myMovementAuditTrail());
   }
 
   readonly myMovementAuditTrail = computed<SignInEvent[]>(() => {

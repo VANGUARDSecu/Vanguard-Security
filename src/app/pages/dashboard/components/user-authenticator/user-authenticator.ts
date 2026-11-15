@@ -24,6 +24,10 @@ export class UserAuthenticator {
   readonly totpAccounts = this.dashboardService.totpAccounts;
   readonly activeTotpAccounts = this.dashboardService.activeTotpAccounts;
   readonly totpSecondsRemaining = this.dashboardService.totpSecondsRemaining;
+  readonly maxTotpAccountsLimit = this.dashboardService.maxTotpAccountsLimit;
+  readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly canManageBilling = this.dashboardService.canManageBilling;
+  readonly isTenantMember = this.dashboardService.isTenantMember;
 
   // Search & filter state
   readonly searchQuery = signal<string>('');
@@ -90,6 +94,11 @@ export class UserAuthenticator {
   private barcodeDetector: any = null;
 
   openAddModal(mode: 'manual' | 'uri' | 'qr' = 'manual'): void {
+    const quotaCheck = this.dashboardService.canAddAnotherTotpAccount(this.activeTotpAccounts().length);
+    if (!quotaCheck.allowed) {
+      this.dashboardService.openPaywallModal(quotaCheck.reason);
+      return;
+    }
     this.editingAccountId.set(null);
     this.enrollMode.set(mode);
     this.formIssuer = '';
@@ -574,6 +583,12 @@ export class UserAuthenticator {
         algorithm: this.formAlgorithm,
       });
     } else {
+      const quotaCheck = this.dashboardService.canAddAnotherTotpAccount(this.activeTotpAccounts().length);
+      if (!quotaCheck.allowed) {
+        this.formErrorMessage.set(quotaCheck.reason || 'Free plan TOTP limit reached.');
+        this.dashboardService.openPaywallModal(quotaCheck.reason);
+        return;
+      }
       this.dashboardService.addTotpAccount({
         issuer,
         accountName,

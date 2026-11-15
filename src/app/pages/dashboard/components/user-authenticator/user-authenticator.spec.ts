@@ -310,4 +310,30 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
     expect(component.formSecret).toBe('HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ');
     expect(component.enrollMode()).toBe('manual');
   });
+
+  it('SCRUM-184: enforces 3 TOTP token limit on Free tier and unlocks after PayMongo checkout completion', () => {
+    dashboardService.cancelSubscriptionPlan();
+    for (let i = 1; i <= 3; i++) {
+      dashboardService.addTotpAccount({
+        issuer: `Service-${i}`,
+        accountName: `user${i}@vanguard.local`,
+        secret: 'JBSWY3DPEHPK3PXP',
+      });
+    }
+    expect(component.activeTotpAccounts().length).toBe(3);
+
+    // 4th TOTP enrollment is blocked on Free tier and opens paywall modal
+    component.openAddModal('manual');
+    expect(component.showAddModal()).toBe(false);
+    expect(dashboardService.showPaywallModal()).toBe(true);
+    expect(dashboardService.paywallFeatureMessage()).toContain('3');
+
+    // Complete PayMongo checkout -> unlimited 2FA accounts unlocked
+    dashboardService.startPaymongoCheckout('personal_pro');
+    const sid = new URLSearchParams((dashboardService.lastPaymongoCheckoutUrl() || '').split('?')[1]).get('session')!;
+    dashboardService.finalizePaymongoReturn(sid, 'success');
+
+    component.openAddModal('manual');
+    expect(component.showAddModal()).toBe(true);
+  });
 });

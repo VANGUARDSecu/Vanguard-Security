@@ -92,4 +92,79 @@ describe('BillingModal Component (SCRUM-184 Isolation)', () => {
     expect(text).not.toContain('Subscribe via PayMongo');
     expect(text).not.toContain('Personal Pro');
   });
+
+  it('shows $0 Restore button after downgrading within an active paid cycle and restores without PayMongo charge', () => {
+    authService.currentUser.set({
+      id: 'usr-indiv-restore',
+      email: 'registered@altmail.test',
+      firstName: 'Reg',
+      lastName: 'User',
+      role: 'user',
+      accountType: 'individual',
+    });
+
+    dashboardService.subscriptionPlanId.set('personal_pro');
+    dashboardService.subscriptionStatus.set('active');
+    dashboardService.currentPeriodEnd.set(
+      new Date(Date.now() + 20 * 24 * 3600 * 1000).toISOString(),
+    );
+    dashboardService.cancelSubscriptionPlan();
+    dashboardService.openPaywallModal();
+    fixture.detectChanges();
+
+    expect(dashboardService.subscriptionPlanId()).toBe('free');
+    expect(dashboardService.paidCredit()?.planId).toBe('personal_pro');
+
+    const textAfterDowngrade = fixture.nativeElement.textContent as string;
+    expect(textAfterDowngrade).toContain('Restore Personal Pro ($0');
+
+    component.restorePlan('personal_pro');
+    fixture.detectChanges();
+
+    expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
+    expect(dashboardService.isFreeTier()).toBe(false);
+  });
+
+  it('displays official Vanguard receipt sent to registered account email separately from PayMongo checkout email and expands details', () => {
+    authService.currentUser.set({
+      id: 'usr-indiv-rcpt',
+      email: 'account-login@vanguard.test',
+      firstName: 'Re',
+      lastName: 'Ceipt',
+      role: 'user',
+      accountType: 'individual',
+    });
+
+    dashboardService.billingInvoices.set([
+      {
+        id: 'inv_101',
+        receiptNumber: 'VG-RCPT-20261115-4821',
+        date: '2026-11-15',
+        planName: 'Personal Pro',
+        amountUsd: 5,
+        amountPhp: 290,
+        paymentMethod: 'PayMongo Test Card',
+        status: 'paid',
+        transactionId: 'cs_pm_4821',
+        buyerEmail: 'account-login@vanguard.test',
+        receiptSentTo: 'account-login@vanguard.test',
+        gatewayPayerEmail: 'main-gmail@gmail.com',
+        receiptDeliveryStatus: 'sent',
+      },
+    ]);
+    dashboardService.openPaywallModal();
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Official Vanguard Purchase Receipts');
+    expect(text).toContain('VG-RCPT-20261115-4821');
+    expect(text).toContain('account-login@vanguard.test');
+    expect(text).toContain('PayMongo Checkout Email: main-gmail@gmail.com');
+
+    component.toggleReceiptView('inv_101');
+    fixture.detectChanges();
+    const drawer = fixture.nativeElement.querySelector('[data-testid="receipt-detail-drawer"]');
+    expect(drawer).toBeTruthy();
+    expect(drawer?.textContent).toContain('VANGUARD OFFICIAL TAX & SUBSCRIPTION RECEIPT');
+  });
 });

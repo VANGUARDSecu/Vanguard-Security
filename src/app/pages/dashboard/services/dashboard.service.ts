@@ -8197,6 +8197,16 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   readonly subscriptionPlanId = signal<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>('free');
   readonly subscriptionStatus = signal<'active' | 'past_due' | 'canceled'>('active');
+  readonly currentPeriodEnd = signal<string | null>(null);
+  readonly paidCredit = signal<{
+    planId: 'personal_pro' | 'business_pro' | 'enterprise';
+    planName: string;
+    paidUntil: string;
+    lastTransactionId: string;
+    downgradedAt?: string;
+  } | null>(null);
+  readonly isRestoringPaidPlan = signal<boolean>(false);
+  readonly resendingReceiptId = signal<string | null>(null);
   readonly showPaywallModal = signal<boolean>(false);
   readonly paywallFeatureMessage = signal<string>('');
   readonly isRedirectingToPaymongo = signal<boolean>(false);
@@ -8219,13 +8229,22 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   );
   readonly billingInvoices = signal<Array<{
     id: string;
+    receiptNumber?: string;
     date: string;
     planName: string;
+    accountType?: 'individual' | 'company';
     amountUsd: number;
     amountPhp?: number;
     paymentMethod?: string;
     status: 'paid' | 'open' | 'void';
     transactionId: string;
+    buyerEmail?: string;
+    receiptSentTo?: string;
+    gatewayPayerEmail?: string;
+    receiptDeliveryStatus?: 'sent' | 'logged' | 'failed';
+    receiptSentAt?: string;
+    periodStart?: string;
+    periodEnd?: string;
   }>>([]);
 
   readonly isFreeTier = computed<boolean>(() => {
@@ -8351,10 +8370,44 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return [];
   });
 
+  private getBillingTierRank(planId: string): number {
+    if (planId === 'enterprise') return 3;
+    if (planId === 'business_pro') return 2;
+    if (planId === 'personal_pro') return 1;
+    return 0;
+  }
+
+  private normalizePaidCredit(
+    credit: {
+      planId: 'personal_pro' | 'business_pro' | 'enterprise';
+      planName: string;
+      paidUntil: string;
+      lastTransactionId: string;
+      downgradedAt?: string;
+    } | null | undefined,
+  ) {
+    if (!credit || !credit.planId || !credit.paidUntil) return null;
+    if (!this.isPlanValidForCurrentAccount(credit.planId)) return null;
+    const exp = new Date(credit.paidUntil).getTime();
+    if (!Number.isFinite(exp) || exp <= Date.now()) return null;
+    return credit;
+  }
+
+  canRestorePlanWithoutCharge(planId: 'personal_pro' | 'business_pro' | 'enterprise'): boolean {
+    if (this.subscriptionPlanId() === planId && this.subscriptionStatus() === 'active') {
+      return false;
+    }
+    const credit = this.normalizePaidCredit(this.paidCredit());
+    if (!credit || !this.isPlanValidForCurrentAccount(planId)) return false;
+    return this.getBillingTierRank(planId) <= this.getBillingTierRank(credit.planId);
+  }
+
   private persistScopedBillingState(): void {
     const suffix = this.getBillingScopeSuffix();
     this.saveStored(`vanguard_billing_plan_${suffix}`, this.subscriptionPlanId());
     this.saveStored(`vanguard_billing_status_${suffix}`, this.subscriptionStatus());
+    this.saveStored(`vanguard_billing_period_end_${suffix}`, this.currentPeriodEnd());
+    this.saveStored(`vanguard_billing_paid_credit_${suffix}`, this.paidCredit());
     this.saveStored(`vanguard_billing_invoices_${suffix}`, this.billingInvoices());
   }
 
@@ -8366,10 +8419,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       `vanguard_billing_status_${suffix}`,
       'active',
     );
+    const storedPeriodEnd = this.loadStored<string | null>(
+      `vanguard_billing_period_end_${suffix}`,
+      null,
+    );
+    const storedCredit = this.loadStored<any>(`vanguard_billing_paid_credit_${suffix}`, null);
     const storedInvoices = this.loadStored<any[]>(`vanguard_billing_invoices_${suffix}`, []);
 
     this.subscriptionPlanId.set(safePlan);
     this.subscriptionStatus.set(storedStatus);
+    this.currentPeriodEnd.set(storedPeriodEnd);
+    this.paidCredit.set(this.normalizePaidCredit(storedCredit));
     this.billingInvoices.set(Array.isArray(storedInvoices) ? storedInvoices : []);
   }
 
@@ -8383,13 +8443,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
     this.subscriptionPlanId.set(safePlan);
     this.subscriptionStatus.set(safeStatus);
+    this.currentPeriodEnd.set(sub.currentPeriodEnd || null);
+    this.paidCredit.set(
+      this.normalizePaidCredit(sub.paidCredit ?? sub.paymentGateway?.paidCredit ?? null),
+    );
 
     if (Array.isArray(sub.invoices)) {
       this.billingInvoices.set(
         sub.invoices.map((inv: any) => ({
           id: String(inv.id || `inv_${Date.now()}`),
+          receiptNumber: inv.receiptNumber,
           date: String(inv.date || inv.createdAt || new Date().toISOString()).split('T')[0],
           planName: String(inv.planName || safePlan),
+          accountType: inv.accountType,
           amountUsd: Number(inv.amountUsd ?? 0),
           amountPhp: inv.amountPhp !== undefined ? Number(inv.amountPhp) : undefined,
           paymentMethod: inv.paymentMethod,
@@ -8397,6 +8463,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           transactionId: String(
             inv.transactionId || sub?.paymentGateway?.lastTransactionId || inv.id || 'paymongo_sbx',
           ),
+          buyerEmail: inv.buyerEmail,
+          receiptSentTo: inv.receiptSentTo || inv.buyerEmail,
+          gatewayPayerEmail: inv.gatewayPayerEmail,
+          receiptDeliveryStatus: inv.receiptDeliveryStatus,
+          receiptSentAt: inv.receiptSentAt,
+          periodStart: inv.periodStart,
+          periodEnd: inv.periodEnd,
         })),
       );
     }
@@ -8714,6 +8787,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           next: (res) => {
             if (res?.unlocked && res?.subscription) {
               this.applyServerSubscription(res.subscription);
+              const latestInv = res.subscription?.invoices?.[0];
               this.logAuditEvent(
                 `Upgraded subscription to ${res.subscription.planName} via PayMongo Sandbox`,
                 'PayMongo Sandbox',
@@ -8722,9 +8796,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
                 'Low',
               );
               this.showPaywallModal.set(false);
+              const receiptNote = latestInv?.receiptSentTo
+                ? ` Official receipt ${latestInv.receiptNumber || ''} sent to registered email ${latestInv.receiptSentTo}.`
+                : '';
               this.showAdminNotice(
-                res?.message ||
-                  `Subscribed to ${res.subscription.planName} via PayMongo Sandbox! Unlimited apps, unlimited 2FA, and CSV audit export unlocked.`,
+                (res?.message ||
+                  `Subscribed to ${res.subscription.planName} via PayMongo Sandbox!`) + receiptNote,
               );
             } else {
               this.showAdminNotice(
@@ -8761,18 +8838,35 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     pricePhp: number,
     paymentMethod: string,
   ): void {
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString();
+    const registeredEmail = this.user()?.email || 'user@vanguard.local';
+    const stamp = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = Math.floor(1000 + Math.random() * 9000);
+    const txnId = `paymongo_sbx_${Math.random().toString(36).slice(2, 10)}`;
+
     this.subscriptionPlanId.set(planId);
     this.subscriptionStatus.set('active');
+    this.currentPeriodEnd.set(periodEnd);
+    this.paidCredit.set(null);
 
     const invoice = {
-      id: `inv_pm_${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
+      id: `inv_pm_${now.getTime()}`,
+      receiptNumber: `VG-RCPT-${stamp}-${suffix}`,
+      date: now.toISOString().split('T')[0],
       planName: name,
+      accountType: this.accountType(),
       amountUsd: priceUsd,
       amountPhp: pricePhp,
       paymentMethod,
       status: 'paid' as const,
-      transactionId: `paymongo_sbx_${Math.random().toString(36).slice(2, 10)}`,
+      transactionId: txnId,
+      buyerEmail: registeredEmail,
+      receiptSentTo: registeredEmail,
+      receiptDeliveryStatus: 'logged' as const,
+      receiptSentAt: now.toISOString(),
+      periodStart: now.toISOString(),
+      periodEnd,
     };
     const nextInvoices = [invoice, ...this.billingInvoices()];
     this.billingInvoices.set(nextInvoices);
@@ -8787,7 +8881,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.showPaywallModal.set(false);
     this.showAdminNotice(
-      `Subscribed to ${name} via PayMongo Sandbox! Unlimited apps, unlimited 2FA accounts, and CSV audit export unlocked.`,
+      `Subscribed to ${name}! Official receipt ${invoice.receiptNumber} recorded for registered email ${registeredEmail}.`,
     );
   }
 
@@ -8796,26 +8890,183 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.showAdminNotice('Only your Company Administrator can downgrade the organization subscription.');
       return;
     }
+
+    const prevPlanId = this.subscriptionPlanId();
+    const prevPlanDef = [...this.individualBillingPlans, ...this.companyBillingPlans].find(
+      (p) => p.id === prevPlanId,
+    );
+    const cycleEnd =
+      this.currentPeriodEnd() ||
+      new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+
+    if (prevPlanId !== 'free' && prevPlanDef) {
+      const existingCredit = this.normalizePaidCredit(this.paidCredit());
+      if (
+        !existingCredit ||
+        this.getBillingTierRank(prevPlanId) >= this.getBillingTierRank(existingCredit.planId)
+      ) {
+        const latestPaid = this.billingInvoices().find((inv) => inv.status === 'paid');
+        this.paidCredit.set({
+          planId: prevPlanId,
+          planName: prevPlanDef.name,
+          paidUntil: cycleEnd,
+          lastTransactionId: latestPaid?.transactionId || 'paymongo_cycle_credit',
+          downgradedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     this.subscriptionPlanId.set('free');
     this.subscriptionStatus.set('active');
     this.persistScopedBillingState();
 
     if (this.hasLiveAuthToken()) {
       this.http
-        .post(`${this.apiBase}/billing/cancel`, {
+        .post<any>(`${this.apiBase}/billing/cancel`, {
           accountType: this.accountType(),
         })
-        .subscribe({ error: () => {} });
+        .subscribe({
+          next: (sub) => {
+            if (sub) this.applyServerSubscription(sub);
+          },
+          error: () => {},
+        });
     }
 
     this.logAuditEvent(
-      'Downgraded monthly subscription to Free tier (1-application & 3-2FA limit active)',
+      'Downgraded monthly subscription to Free tier (paid cycle credit preserved until period end)',
       'PayMongo Billing',
       'Subscription Manager',
       'success',
       'Low',
     );
-    this.showAdminNotice('Subscription downgraded to Free tier (max 1 app & 3 2FA accounts).');
+    const creditUntil = this.paidCredit()?.paidUntil?.split('T')[0];
+    this.showAdminNotice(
+      creditUntil
+        ? `Subscription downgraded to Free tier. You can restore your paid plan for $0 anytime before ${creditUntil}.`
+        : 'Subscription downgraded to Free tier (max 1 app & 3 2FA accounts).',
+    );
+  }
+
+  resumePaidSubscription(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.billingCheckoutError.set(null);
+    if (!this.canManageBilling()) {
+      this.billingCheckoutError.set(
+        'Only your Company Administrator can restore the organization subscription.',
+      );
+      return;
+    }
+    if (!this.canRestorePlanWithoutCharge(planId)) {
+      this.startPaymongoCheckout(planId);
+      return;
+    }
+
+    const planDef = [...this.individualBillingPlans, ...this.companyBillingPlans].find(
+      (p) => p.id === planId,
+    );
+    if (!planDef) return;
+
+    if (this.hasLiveAuthToken()) {
+      this.isRestoringPaidPlan.set(true);
+      this.http
+        .post<any>(`${this.apiBase}/billing/resume`, {
+          planId,
+          accountType: this.accountType(),
+        })
+        .subscribe({
+          next: (res) => {
+            this.isRestoringPaidPlan.set(false);
+            if (res?.subscription) {
+              this.applyServerSubscription(res.subscription);
+            }
+            this.logAuditEvent(
+              `Restored ${planDef.name} at $0 within already-paid billing cycle`,
+              'PayMongo Billing',
+              'Subscription Restore',
+              'success',
+              'Low',
+            );
+            this.showPaywallModal.set(false);
+            this.showAdminNotice(
+              res?.message || `${planDef.name} restored with $0 due within your paid cycle.`,
+            );
+          },
+          error: (err) => {
+            this.isRestoringPaidPlan.set(false);
+            this.billingCheckoutError.set(
+              err?.error?.message || 'Unable to restore paid subscription within current cycle.',
+            );
+          },
+        });
+      return;
+    }
+
+    // Offline restore
+    const credit = this.normalizePaidCredit(this.paidCredit());
+    if (!credit) return;
+    const remainingCredit =
+      this.getBillingTierRank(planId) < this.getBillingTierRank(credit.planId) ? credit : null;
+
+    this.subscriptionPlanId.set(planId);
+    this.subscriptionStatus.set('active');
+    this.currentPeriodEnd.set(credit.paidUntil);
+    this.paidCredit.set(remainingCredit);
+    this.persistScopedBillingState();
+
+    this.logAuditEvent(
+      `Restored ${planDef.name} at $0 (already paid through ${credit.paidUntil.split('T')[0]})`,
+      'PayMongo Billing',
+      'Subscription Restore',
+      'success',
+      'Low',
+    );
+    this.showPaywallModal.set(false);
+    this.showAdminNotice(
+      `${planDef.name} restored with $0 due (paid through ${credit.paidUntil.split('T')[0]}).`,
+    );
+  }
+
+  resendBillingReceipt(invoiceId?: string): void {
+    this.billingCheckoutError.set(null);
+    if (!this.canManageBilling()) {
+      this.billingCheckoutError.set(
+        'Only your Company Administrator can dispatch organization billing receipts.',
+      );
+      return;
+    }
+
+    const registeredEmail = this.user()?.email || 'registered account email';
+    if (!this.hasLiveAuthToken()) {
+      this.showAdminNotice(
+        `Offline mode: Vanguard receipts are addressed to your registered email (${registeredEmail}).`,
+      );
+      return;
+    }
+
+    this.resendingReceiptId.set(invoiceId || 'latest');
+    this.http
+      .post<any>(`${this.apiBase}/billing/receipts/resend`, {
+        invoiceId,
+        accountType: this.accountType(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.resendingReceiptId.set(null);
+          if (res?.subscription) {
+            this.applyServerSubscription(res.subscription);
+          }
+          this.showAdminNotice(
+            res?.message ||
+              `Vanguard receipt sent directly to registered email ${res?.sentTo || registeredEmail}.`,
+          );
+        },
+        error: (err) => {
+          this.resendingReceiptId.set(null);
+          this.billingCheckoutError.set(
+            err?.error?.message || 'Unable to send Vanguard receipt email.',
+          );
+        },
+      });
   }
 
 }

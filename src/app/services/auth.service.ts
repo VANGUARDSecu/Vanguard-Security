@@ -6,6 +6,7 @@ import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay
 import { SupabaseService } from './supabase.service';
 import { environment } from '../../environments/environment';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
+import { isAllowedMobileRedirectUri } from '../utils/mobile-oauth-relay.util';
 
 export interface UserProfile {
   id?: string;
@@ -334,6 +335,15 @@ export class AuthService {
 
   private checkForOAuthCallback(): void {
     if (!this.isBrowser) return;
+
+    const currentPath = window.location.pathname || '';
+    const query = new URLSearchParams(window.location.search || '');
+    if (
+      currentPath.startsWith('/auth/mobile-callback') ||
+      isAllowedMobileRedirectUri(query.get('mobile_redirect'))
+    ) {
+      return;
+    }
 
     try {
       // 1. Check URL Hash (e.g. #access_token=... from Google OAuth or email confirmation)

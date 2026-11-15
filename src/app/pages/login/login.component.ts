@@ -4,6 +4,10 @@ import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angula
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, sanitizeReturnUrl, consumeSavedReturnUrl } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
+import {
+  buildMobileOAuthDeepLink,
+  isAllowedMobileRedirectUri,
+} from '../../utils/mobile-oauth-relay.util';
 
 @Component({
   selector: 'app-login',
@@ -163,6 +167,24 @@ export class LoginComponent implements OnInit, OnDestroy {
   private notificationTimer: any = null;
 
   ngOnInit(): void {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search || '');
+      const mobileRedirect = searchParams.get('mobile_redirect');
+      const hasOAuthPayload =
+        (window.location.hash || '').includes('access_token=') ||
+        (window.location.hash || '').includes('error=') ||
+        searchParams.has('code') ||
+        searchParams.has('error');
+      if (isAllowedMobileRedirectUri(mobileRedirect) && hasOAuthPayload) {
+        const deepLink = buildMobileOAuthDeepLink({
+          search: window.location.search,
+          hash: window.location.hash,
+        });
+        window.location.replace(deepLink);
+        return;
+      }
+    }
+
     // Check if URL contains query params like error, message, or SSO/OIDC parameters
     this.route.queryParams.subscribe((params) => {
       const safeReturnUrl = sanitizeReturnUrl(params['returnUrl']);

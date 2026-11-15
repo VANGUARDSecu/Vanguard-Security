@@ -477,6 +477,37 @@
   color: #34d399;
 }
 
+.proto-status-pill.proto-offline {
+  color: #94a3b8;
+}
+
+.proto-status-pill .pulse-dot {
+  background-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.proto-status-pill .pulse-dot.pulse-offline {
+  background-color: #64748b;
+  box-shadow: none;
+}
+
+.tag-check.tag-warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.session-revoked-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .proto-name {
   font-size: 16px;
   font-weight: 700;

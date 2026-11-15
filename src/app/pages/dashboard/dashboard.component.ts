@@ -18,6 +18,8 @@ import { UserActivity } from './components/user-activity/user-activity';
 import { UserDevices } from './components/user-devices/user-devices';
 import { UserAuthenticator } from './components/user-authenticator/user-authenticator';
 import { BillingModal } from './components/billing-modal/billing-modal';
+import { KillswitchModal } from './components/killswitch-modal/killswitch-modal';
+import { CreateOrgModal } from './components/create-org-modal/create-org-modal';
 import {
   ProtocolStatus,
   SaaSApp,
@@ -80,6 +82,8 @@ export type {
     UserDevices,
     UserAuthenticator,
     BillingModal,
+    KillswitchModal,
+    CreateOrgModal,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.css'

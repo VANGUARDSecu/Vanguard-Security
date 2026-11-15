@@ -50,13 +50,14 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should initialize with protocol gateway status items', () => {
+  it('should initialize with active production protocol gateway status items (SCRUM-191)', () => {
     expect(component.protocols.length).toBe(4);
     const names = component.protocols.map((p) => p.name);
-    expect(names).toContain('SAML 2.0 Web SSO');
     expect(names).toContain('OpenID Connect (OIDC)');
-    expect(names).toContain('Cloud LDAP Directory');
-    expect(names).toContain('Cloud RADIUS Gateway');
+    expect(names).toContain('MFA, TOTP & Push Approval');
+    expect(names).toContain('Zero-Knowledge Vault & Extension');
+    expect(names).toContain('Enterprise Audit & Session Guard');
+    expect(component.protocols.every((p) => p.status === 'healthy')).toBe(true);
   });
 
   it('should restrict company account to admin console only (SCRUM-150)', () => {

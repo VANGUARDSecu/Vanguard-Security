@@ -111,6 +111,7 @@
           type="button"
           class="btn-toggle"
           [class.active]="enforceMfaAll()"
+          [disabled]="isSavingPolicy()"
           (click)="toggleEnforceMfa()"
         >
           {{ enforceMfaAll() ? 'ON' : 'OFF' }}
@@ -126,6 +127,7 @@
           type="button"
           class="btn-toggle"
           [class.active]="blockHighRiskIps()"
+          [disabled]="isSavingPolicy()"
           (click)="toggleBlockHighRiskIps()"
         >
           {{ blockHighRiskIps() ? 'ON' : 'OFF' }}
@@ -290,7 +292,7 @@
               </div>
               <div class="dns-field">
                 <span class="dns-tag">HOST</span>
-                <code>sso</code>
+                <code>{{ cnameHostLabel() }}</code>
               </div>
               <div class="dns-field">
                 <span class="dns-tag">POINTS TO</span>
@@ -301,12 +303,27 @@
                 <span
                   class="dns-status-pill"
                   [class.verified]="domainVerificationStatus() === 'verified' || tenantBranding().ssoDomainVerified"
-                  [class.pending]="domainVerificationStatus() !== 'verified' && !tenantBranding().ssoDomainVerified"
+                  [class.failed]="domainVerificationStatus() === 'failed'"
+                  [class.pending]="domainVerificationStatus() !== 'verified' && domainVerificationStatus() !== 'failed' && !tenantBranding().ssoDomainVerified"
                 >
-                  {{ (domainVerificationStatus() === 'verified' || tenantBranding().ssoDomainVerified) ? 'Verified' : 'Pending' }}
+                  {{
+                    (domainVerificationStatus() === 'verified' || tenantBranding().ssoDomainVerified)
+                      ? 'Verified'
+                      : domainVerificationStatus() === 'failed'
+                        ? 'Failed'
+                        : 'Pending'
+                  }}
                 </span>
               </div>
             </div>
+            <p
+              class="field-hint"
+              *ngIf="dnsVerificationMessage()"
+              [style.color]="domainVerificationStatus() === 'verified' ? '#34d399' : '#fca5a5'"
+              style="margin-top: 8px;"
+            >
+              {{ dnsVerificationMessage() }}
+            </p>
           </div>
         </div>
 
@@ -319,6 +336,30 @@
             placeholder="security@yourcompany.com"
             [ngModel]="brandSupportEmail()"
             (ngModelChange)="brandSupportEmail.set($event)"
+          />
+        </div>
+
+        <!-- Onboarding Email Greeting -->
+        <div class="form-group">
+          <label class="form-label">Onboarding Email Greeting</label>
+          <textarea
+            rows="2"
+            class="form-control"
+            placeholder="Welcome to your enterprise Zero-Trust Identity workspace."
+            [ngModel]="brandGreeting()"
+            (ngModelChange)="brandGreeting.set($event)"
+          ></textarea>
+        </div>
+
+        <!-- Email CTA Button Text -->
+        <div class="form-group">
+          <label class="form-label">Email CTA Button Label</label>
+          <input
+            type="text"
+            class="form-control"
+            placeholder="Activate Account & Set Password"
+            [ngModel]="brandButtonText()"
+            (ngModelChange)="brandButtonText.set($event)"
           />
         </div>
 
@@ -335,6 +376,10 @@
           <button type="button" class="btn-secondary-action" (click)="resetBranding()">
             <span>Restore Vanguard Theme</span>
           </button>
+        </div>
+
+        <div class="alert-banner alert-success" *ngIf="brandingSavedNotice()" style="margin-top: 12px;">
+          <span>✓ White-label branding customizations saved!</span>
         </div>
       </div>
 
@@ -503,7 +548,7 @@
 
             <!-- Member Count -->
             <td>
-              <span class="member-count-pill">{{ org.memberCount || 1 }} active</span>
+              <span class="member-count-pill">{{ getOrgMemberCount(org) }} active</span>
             </td>
 
             <!-- Actions -->
@@ -537,88 +582,6 @@
           </tr>
         </tbody>
       </table>
-    </div>
-  </div>
-
-  <!-- ====================================================================
-       MODAL: REGISTER NEW TENANT ORGANIZATION
-       ==================================================================== -->
-  <div class="modal-backdrop" *ngIf="showCreateOrgModal()" (click)="closeCreateOrg()">
-    <div class="cyber-modal modal-md" (click)="$event.stopPropagation()">
-      <div class="modal-header">
-        <div class="modal-header-icon icon-cyan">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-            <polyline points="9 22 9 12 15 12 15 22"></polyline>
-          </svg>
-        </div>
-        <div class="modal-header-info">
-          <h3 class="modal-title">Register New Tenant Organization</h3>
-          <p class="modal-desc">
-            Partition your directory into a new isolated organizational workspace with custom branding and policies.
-          </p>
-        </div>
-        <button type="button" class="btn-close-modal" (click)="closeCreateOrg()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-
-      <div class="modal-body">
-        <div class="alert-banner alert-danger" *ngIf="newOrgError()">
-          <span>{{ newOrgError() }}</span>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Organization Legal Name <span class="required">*</span></label>
-          <input
-            type="text"
-            class="form-control"
-            placeholder="e.g. Initech Corporation, Cyber Defense Labs"
-            [ngModel]="newOrgName()"
-            (ngModelChange)="newOrgName.set($event)"
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Subscription Tier</label>
-          <select
-            class="form-control"
-            [ngModel]="newOrgTier()"
-            (ngModelChange)="newOrgTier.set($event)"
-          >
-            <option value="Enterprise">Enterprise (Full Protocol Suite)</option>
-            <option value="Business">Business (SSO + RADIUS)</option>
-            <option value="Starter">Starter (Basic Web SSO)</option>
-            <option value="Trial">Trial (14-Day Evaluation)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Primary Organization Domain (Optional)</label>
-          <input
-            type="text"
-            class="form-control"
-            placeholder="e.g. initech.com"
-            [ngModel]="newOrgDomain()"
-            (ngModelChange)="newOrgDomain.set($event)"
-          />
-          <span class="field-hint">Used for automated CNAME mapping and directory email claim matching.</span>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn-secondary-action" (click)="closeCreateOrg()">Cancel</button>
-        <button type="button" class="btn-primary-action" (click)="createOrg()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          <span>Create & Switch to Organization</span>
-        </button>
-      </div>
     </div>
   </div>
 </section>

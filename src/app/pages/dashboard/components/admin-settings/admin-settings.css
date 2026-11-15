@@ -548,6 +548,12 @@
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+.dns-status-pill.failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
 /* Actions Row */
 .branding-actions-row {
   display: flex;

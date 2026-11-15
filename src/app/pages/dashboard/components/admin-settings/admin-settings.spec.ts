@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { AdminSettings } from './admin-settings';
 import { DashboardService } from '../../services/dashboard.service';
@@ -226,22 +226,71 @@ describe('AdminSettings Component (SCRUM-28 Multi-Tenant & Branding Studio)', ()
       expect(dashboardService.tenantBranding().primaryAccentColor).toBe('#3b82f6');
     });
 
-    it('should trigger simulated DNS CNAME verification', async () => {
-      vi.useFakeTimers();
-      try {
-        component.verifyDns();
-        expect(dashboardService.domainVerificationStatus()).toBe('checking');
+    it('should trigger backend DNS CNAME verification and update state on verified response (SCRUM-191)', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      component.brandCustomDomain.set('sso.acme-defense.io');
 
-        await vi.advanceTimersByTimeAsync(500);
-        expect(dashboardService.domainVerificationStatus()).toBe('verified');
-        expect(dashboardService.tenantBranding().ssoDomainVerified).toBe(true);
-      } finally {
-        vi.useRealTimers();
-      }
+      const verifyPromise = dashboardService.verifyCustomDomainDns(component.brandCustomDomain());
+      expect(dashboardService.domainVerificationStatus()).toBe('checking');
+
+      const req = httpMock.expectOne((r) => r.url.includes('/auth/verify-dns') && r.url.includes('sso.acme-defense.io'));
+      expect(req.request.method).toBe('GET');
+      req.flush({
+        verified: true,
+        domain: 'sso.acme-defense.io',
+        expectedTarget: 'auth.vanguard.security',
+        foundRecords: ['auth.vanguard.security'],
+        message: 'CNAME verified for sso.acme-defense.io -> auth.vanguard.security.',
+      });
+
+      await verifyPromise;
+      expect(dashboardService.domainVerificationStatus()).toBe('verified');
+      expect(dashboardService.tenantBranding().ssoDomainVerified).toBe(true);
+      expect(dashboardService.dnsVerificationMessage()).toContain('CNAME verified');
+    });
+
+    it('should handle failed DNS CNAME lookups cleanly (SCRUM-191)', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      component.brandCustomDomain.set('bad.acme-defense.io');
+
+      const verifyPromise = dashboardService.verifyCustomDomainDns(component.brandCustomDomain());
+      const req = httpMock.expectOne((r) => r.url.includes('/auth/verify-dns') && r.url.includes('bad.acme-defense.io'));
+      req.flush({
+        verified: false,
+        domain: 'bad.acme-defense.io',
+        expectedTarget: 'auth.vanguard.security',
+        foundRecords: [],
+        message: 'No CNAME record found for bad.acme-defense.io.',
+      });
+
+      await verifyPromise;
+      expect(dashboardService.domainVerificationStatus()).toBe('failed');
+      expect(dashboardService.tenantBranding().ssoDomainVerified).toBe(false);
+      expect(dashboardService.dnsVerificationMessage()).toContain('No CNAME record found');
+    });
+
+    it('should compute dynamic CNAME host label and active org member count (SCRUM-191)', () => {
+      component.brandCustomDomain.set('portal.acme-defense.io');
+      expect(component.cnameHostLabel()).toBe('portal');
+
+      component.brandCustomDomain.set('acme-defense.io');
+      expect(component.cnameHostLabel()).toBe('@');
+
+      const activeOrg = component.activeOrganization();
+      expect(component.getOrgMemberCount(activeOrg)).toBeGreaterThanOrEqual(1);
     });
   });
 
   describe('Zero-Trust Governance Actions', () => {
+    it('should recalculate dynamic security posture score when governance toggles change (SCRUM-191)', () => {
+      dashboardService.enforceMfaAll.set(true);
+      dashboardService.blockHighRiskIps.set(true);
+      const highScore = dashboardService.securityPostureScore();
+
+      dashboardService.toggleEnforceMfa();
+      const lowerScore = dashboardService.securityPostureScore();
+      expect(lowerScore).toBeLessThan(highScore);
+    });
     it('should delegate governance toggle actions to dashboard service', () => {
       const mfaSpy = vi.spyOn(dashboardService, 'toggleEnforceMfa');
       const ipSpy = vi.spyOn(dashboardService, 'toggleBlockHighRiskIps');

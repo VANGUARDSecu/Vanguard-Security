@@ -6,7 +6,60 @@
     </div>
   </div>
 
+  <!-- SCRUM-190: Emergency Alert Banner when deep-linked with ?action=revoke -->
+  <div class="security-alert-banner" *ngIf="securityRevokePrompt()" data-testid="security-revoke-banner">
+    <div class="alert-banner-body">
+      <strong>Security Alert Action Requested:</strong> Don't recognize a recent sign-in? Revoke all active sessions below, review connected apps, and update your password.
+    </div>
+    <div class="alert-banner-actions">
+      <button
+        type="button"
+        class="btn-danger-action"
+        [disabled]="isRevokingSessions()"
+        (click)="revokeAllActiveSessions()"
+      >
+        {{ isRevokingSessions() ? 'Revoking Sessions...' : 'Revoke All Active Sessions' }}
+      </button>
+      <button type="button" class="btn-ghost-sm" (click)="dismissRevokePrompt()">Dismiss</button>
+    </div>
+  </div>
+
+  <div class="security-revoked-banner" *ngIf="sessionRevoked()" data-testid="security-revoked-confirmation">
+    <div class="alert-banner-body">
+      <strong>Active Sessions Revoked:</strong>
+      {{ sessionRevocationResult()?.message || 'All other Vanguard sessions and refresh tokens have been invalidated.' }}
+      <span *ngIf="sessionRevocationResult() as res">
+        (OIDC grants revoked: {{ res.oidcGrantsRevoked }})
+      </span>
+    </div>
+    <div class="alert-banner-actions">
+      <button type="button" class="btn-ghost-sm" (click)="signOutAfterRevoke()">Sign Out This Browser Too</button>
+    </div>
+  </div>
+
   <div class="security-cards-grid">
+    <!-- SCRUM-190: Active Sessions & Emergency Global Revocation -->
+    <div class="security-card full-span">
+      <div class="sec-card-header">
+        <div class="sec-icon-box">🛑</div>
+        <div class="sec-header-meta">
+          <h3 class="sec-title">Active Sessions &amp; Global Sign-Out</h3>
+          <p class="sec-desc">
+            Immediately invalidate all active Vanguard portal refresh sessions and connected SSO app refresh tokens across every device.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn-danger-action"
+          [disabled]="isRevokingSessions()"
+          (click)="revokeAllActiveSessions()"
+          data-testid="revoke-all-sessions-btn"
+        >
+          {{ isRevokingSessions() ? 'Revoking...' : 'Revoke All Active Sessions' }}
+        </button>
+      </div>
+    </div>
+
     <!-- CARD 1: TOTP Authenticator App -->
     <div class="security-card">
       <div class="sec-card-header">

@@ -35,6 +35,13 @@ export class AdminDirectory implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.dashboardService.loadDirectoryUsers();
     this.dashboardService.setupDirectoryUsersRealtime();
+    const pending = this.dashboardService.pendingDirectoryAction();
+    if (pending === 'invite') {
+      this.dashboardService.pendingDirectoryAction.set(null);
+      this.openInviteModal();
+    } else if (pending === 'groups') {
+      this.dashboardService.pendingDirectoryAction.set(null);
+    }
   }
 
   ngOnDestroy(): void {
@@ -283,16 +290,33 @@ export class AdminDirectory implements OnInit, OnDestroy {
     this.provisionSuccess.set(null);
 
     switch (preset) {
-      case 'dummy-web':
+      case 'dummy-web': {
+        const existingDummy = this.dashboardService.apps().find(
+          (a) => a.id === 'dummy-web' || a.name.toLowerCase().includes('dummy web'),
+        );
+        let dummyOrigin = 'http://localhost:4201';
+        if (existingDummy?.launchUrl && /^https?:\/\//i.test(existingDummy.launchUrl)) {
+          try {
+            dummyOrigin = new URL(existingDummy.launchUrl).origin;
+          } catch {
+            // Keep localhost fallback when URL cannot be parsed
+          }
+        } else if (
+          typeof window !== 'undefined' &&
+          !['localhost', '127.0.0.1'].includes(window.location.hostname)
+        ) {
+          dummyOrigin = window.location.origin;
+        }
         this.provisionAppName.set('Acme Dummy Web');
-        this.provisionAppUrl.set('http://localhost:4201/login');
-        this.provisionRegisterUrl.set('http://localhost:4201/signup');
+        this.provisionAppUrl.set(`${dummyOrigin}/login`);
+        this.provisionRegisterUrl.set(`${dummyOrigin}/signup`);
         this.provisionAppCategory.set('cloud');
         this.provisionAppProtocol.set('OIDC');
         this.provisionAppIcon.set('🏢');
         this.provisionUsername.set(defaultEmail);
         this.provisionDescription.set('Internal employee portal account created by Administrator');
         break;
+      }
       case 'figma':
         this.provisionAppName.set('Figma Enterprise');
         this.provisionAppUrl.set('https://www.figma.com/login');

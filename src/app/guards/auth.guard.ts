@@ -1,8 +1,8 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { AuthService } from '../services/auth.service';
+import { AuthService, sanitizeReturnUrl } from '../services/auth.service';
 
-export const authGuard: CanActivateFn = () => {
+export const authGuard: CanActivateFn = (_route, state) => {
   const authService = inject(AuthService);
   const router = inject(Router);
 
@@ -28,9 +28,19 @@ export const authGuard: CanActivateFn = () => {
     }
   }
 
-  // If not authenticated, redirect to login
+  // If not authenticated, redirect to login while preserving safe internal returnUrl
   if (!authService.isLoggedIn()) {
-    router.navigate(['/login']);
+    const safeUrl = sanitizeReturnUrl(state?.url);
+    if (safeUrl && safeUrl !== '/dashboard') {
+      if (typeof sessionStorage !== 'undefined') {
+        try {
+          sessionStorage.setItem('vanguard_return_url', safeUrl);
+        } catch {}
+      }
+      router.navigate(['/login'], { queryParams: { returnUrl: safeUrl } });
+    } else {
+      router.navigate(['/login']);
+    }
     return false;
   }
 

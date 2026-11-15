@@ -1,0 +1,97 @@
+<div class="modal-backdrop" *ngIf="showGlobalKillswitchModal()" (click)="onBackdropClick()">
+  <div class="modal-card modal-danger" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="modal-title text-danger">⚠️ Confirm Global Emergency Killswitch</h3>
+      <button
+        type="button"
+        class="modal-close-btn"
+        [disabled]="globalKillswitchPending()"
+        (click)="close()"
+        aria-label="Close Global Emergency Killswitch modal"
+      >
+        ✕
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <p class="modal-desc text-danger">
+        <strong>WARNING: High-Impact Security Containment Action</strong><br />
+        This action immediately suspends active memberships, terminates active Vanguard sessions, and revokes OAuth/OIDC refresh grants for
+        <strong>{{ nonAdminMemberCount() }} non-admin directory member{{ nonAdminMemberCount() === 1 ? '' : 's' }}</strong>
+        across the organization.
+      </p>
+
+      <p class="modal-desc">
+        Your acting administrator session stays active by default so you remain in control during incident response. Affected employees must be reactivated and complete 2-Step Verification to regain access.
+      </p>
+
+      <!-- Dual-option toggle: keep acting admin active OR also sign out current admin session -->
+      <label class="killswitch-admin-option">
+        <input
+          type="checkbox"
+          [ngModel]="signOutCurrentAdmin()"
+          (ngModelChange)="signOutCurrentAdmin.set($event)"
+          [disabled]="globalKillswitchPending()"
+        />
+        <span>
+          <strong>Also sign out my current administrator session</strong>
+          <small>Terminates your own active tokens &amp; OIDC grants immediately after tenant killswitch completes.</small>
+        </span>
+      </label>
+
+      <!-- Pending Spinner -->
+      <div class="killswitch-status-banner banner-pending" *ngIf="globalKillswitchPending()">
+        <span class="ks-spinner" aria-hidden="true"></span>
+        <span>Executing tenant-wide session revocation and membership containment...</span>
+      </div>
+
+      <!-- Backend Error Alert -->
+      <div class="killswitch-status-banner banner-error" *ngIf="globalKillswitchError()">
+        <span>✖ <strong>Killswitch Error:</strong> {{ globalKillswitchError() }}</span>
+      </div>
+
+      <!-- Structured Outcome Summary -->
+      <div class="killswitch-result-box" *ngIf="globalKillswitchResult() as res">
+        <div class="result-headline" [class.has-failures]="res.failed > 0">
+          {{ res.failed === 0 ? '✓ Global Killswitch Executed' : '⚠️ Killswitch Completed with Partial Failures' }}
+        </div>
+        <div class="result-metrics-grid">
+          <div class="res-stat">
+            <span class="res-label">Sessions Revoked</span>
+            <span class="res-val">{{ res.revoked }} / {{ res.totalMembers }}</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-label">Failed Revocations</span>
+            <span class="res-val">{{ res.failed }}</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-label">Residual Token Bound</span>
+            <span class="res-val">~{{ residualMinutes() }} min</span>
+          </div>
+        </div>
+        <div class="res-not-covered" *ngIf="res.notCovered && res.notCovered.length > 0">
+          <strong>Scope Note:</strong> {{ res.notCovered.join(' • ') }}
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button
+        type="button"
+        class="btn-ghost"
+        [disabled]="globalKillswitchPending()"
+        (click)="close()"
+      >
+        {{ globalKillswitchResult() ? 'Close' : 'Cancel' }}
+      </button>
+      <button
+        type="button"
+        class="btn-danger-killswitch"
+        [disabled]="globalKillswitchPending()"
+        (click)="execute()"
+      >
+        {{ globalKillswitchPending() ? 'Terminating Sessions...' : 'Confirm & Terminate Sessions' }}
+      </button>
+    </div>
+  </div>
+</div>

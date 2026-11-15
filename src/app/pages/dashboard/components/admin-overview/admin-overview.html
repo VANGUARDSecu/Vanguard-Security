@@ -43,7 +43,7 @@
             <div style="display: flex; gap: 14px; flex-wrap: wrap;">
               <button
                 type="button"
-                (click)="setActiveTab('directory')"
+                (click)="openDirectoryProvisioning()"
                 style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #fff; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);"
               >
                 <span style="font-size: 18px;">🔑</span>
@@ -52,7 +52,7 @@
 
               <button
                 type="button"
-                (click)="setActiveTab('directory')"
+                (click)="quickInviteEmployee()"
                 style="background: #2563eb; border: none; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #fff;"
               >
                 <span style="font-size: 18px;">👤</span>
@@ -152,7 +152,9 @@
                 <div class="field-box">
                   <span class="field-label">Multi-Factor Status</span>
                   <span class="field-value text-success">
-                    <span class="status-dot"></span> Email OTP + TOTP Ready
+                    <span class="status-dot"></span>
+                    {{ hasTotpEnrolled() ? 'Authenticator TOTP Active' : 'Email OTP Active' }} •
+                    {{ enforceMfaAll() ? 'Policy Enforced' : 'Policy Optional' }}
                   </span>
                 </div>
 
@@ -185,16 +187,30 @@
             <div class="metrics-grid">
               <div class="metric-card score-card">
                 <div class="score-circle">
-                  <div class="score-number">94</div>
+                  <div class="score-number">{{ securityPostureScore() }}</div>
                   <div class="score-total">/100</div>
                 </div>
                 <div class="score-info">
-                  <h3 class="score-title">Optimal Security Score</h3>
-                  <p class="score-desc">Directory posture meets zero-trust requirements with active multi-factor enforcement.</p>
+                  <h3 class="score-title">
+                    {{
+                      securityPostureScore() >= 80
+                        ? 'Optimal Security Score'
+                        : securityPostureScore() >= 60
+                          ? 'Moderate Security Score'
+                          : 'Action Required'
+                    }}
+                  </h3>
+                  <p class="score-desc">
+                    Computed from tenant MFA enforcement, IP threat blocking, TOTP adoption, and domain verification.
+                  </p>
                   <div class="posture-tags">
-                    <span class="tag-check">✓ 100% MFA Enforced</span>
-                    <span class="tag-check">✓ OWASP API Guard</span>
-                    <span class="tag-check">✓ No Stale Certs</span>
+                    <span
+                      *ngFor="let tag of securityPostureTags()"
+                      class="tag-check"
+                      [class.tag-warn]="tag.tone === 'amber' || tag.tone === 'rose'"
+                    >
+                      {{ tag.tone === 'amber' || tag.tone === 'rose' ? '!' : '✓' }} {{ tag.label }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -204,9 +220,9 @@
                   <span class="metric-icon">👥</span>
                   <span class="metric-badge">Directory</span>
                 </div>
-                <div class="metric-value">{{ directoryUsers().length }} Active</div>
+                <div class="metric-value">{{ activeDirectoryUsersCount() }} Active</div>
                 <div class="metric-label">Managed Identities</div>
-                <div class="metric-subtext">Active Users & Service Accounts</div>
+                <div class="metric-subtext">of {{ directoryUsers().length }} total directory accounts</div>
               </div>
 
               <div class="metric-card">
@@ -214,9 +230,9 @@
                   <span class="metric-icon">⚡</span>
                   <span class="metric-badge badge-green">Operational</span>
                 </div>
-                <div class="metric-value">1 Active</div>
-                <div class="metric-label">Active SSO Gateway</div>
-                <div class="metric-subtext">OpenID Connect (OIDC) / OAuth 2.0</div>
+                <div class="metric-value">{{ oidcClientsCount() ?? 0 }} Registered</div>
+                <div class="metric-label">OIDC / OAuth 2.0 Clients</div>
+                <div class="metric-subtext">Active OpenID Connect Relying Parties</div>
               </div>
 
               <div class="metric-card">
@@ -224,9 +240,9 @@
                   <span class="metric-icon">🛡️</span>
                   <span class="metric-badge badge-orange">Security Audit</span>
                 </div>
-                <div class="metric-value">{{ tenantAuditEvents().length }}</div>
+                <div class="metric-value">{{ mergedAuditEventsCount() }}</div>
                 <div class="metric-label">Audit Events Logged</div>
-                <div class="metric-subtext">Live Directory Security Stream</div>
+                <div class="metric-subtext">Live & Server Security Stream</div>
               </div>
             </div>
           </section>
@@ -236,7 +252,7 @@
             <div class="section-header">
               <div class="section-title-wrap">
                 <h2 class="section-title">Communication Protocol Gateways</h2>
-                <p class="section-subtitle">Federated web single sign-on, legacy cloud directories, and network access points.</p>
+                <p class="section-subtitle">Active OIDC single sign-on, multi-factor authentication, zero-knowledge vault sync, and session governance gateways.</p>
               </div>
             </div>
 
@@ -244,8 +260,8 @@
               <div class="protocol-card" *ngFor="let proto of protocols">
                 <div class="proto-header">
                   <div class="proto-type-badge">{{ proto.type }}</div>
-                  <span class="proto-status-pill">
-                    <span class="pulse-dot"></span>
+                  <span class="proto-status-pill" [class.proto-offline]="proto.status === 'offline'">
+                    <span class="pulse-dot" [class.pulse-offline]="proto.status === 'offline'"></span>
                     {{ proto.badge }}
                   </span>
                 </div>
@@ -266,13 +282,17 @@
                 <h2 class="section-title">Active Sessions & Device Vault</h2>
                 <p class="section-subtitle">Real-time session monitoring and emergency session revocation.</p>
               </div>
-              <button type="button" class="btn-revoke-all" (click)="revokeAllSessions()">
+              <button type="button" class="btn-revoke-all" [disabled]="isRevokingSessions()" (click)="revokeAllSessions()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
                   <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
                   <line x1="12" y1="2" x2="12" y2="12"></line>
                 </svg>
-                <span>Sign Out of All Other Devices</span>
+                <span>{{ isRevokingSessions() ? 'Revoking Sessions...' : 'Sign Out of All Other Devices' }}</span>
               </button>
+            </div>
+
+            <div class="session-revoked-banner" *ngIf="sessionRevoked()">
+              ✓ All other sessions and OIDC refresh grants have been revoked.
             </div>
 
             <div class="session-card">
@@ -300,41 +320,3 @@
             </div>
           </section>
         </div>
-
-        <!-- ==================================================================
-             ADMIN TAB 2: DIRECTORY USERS & GROUPS (JUMPCLOUD STYLE)
-             ================================================================== -->
-
-  <div class="modal-backdrop" *ngIf="showGlobalKillswitchModal()">
-    <div class="modal-card modal-danger">
-      <div class="modal-header">
-        <h3 class="modal-title text-danger">⚠️ Confirm Global Emergency Killswitch</h3>
-        <button type="button" class="modal-close-btn" (click)="closeGlobalKillswitchModal()">✕</button>
-      </div>
-
-      <div class="modal-body">
-        <p class="modal-desc text-danger">
-          <strong>WARNING: High Impact Security Action</strong><br>
-          This action will immediately terminate all active web sessions, invalidate JWT refresh tokens, and revoke OAuth access for <strong>all {{ directoryUsers().length }} users</strong> across the entire organization.
-        </p>
-        <p class="modal-desc">
-          Employees will be required to re-authenticate with their password and complete 2-Step Verification (Email OTP / Authenticator App).
-        </p>
-
-        <div class="form-success-text" *ngIf="globalKillswitchSuccess()">
-          ✓ Global Killswitch executed. All tenant tokens purged.
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn-ghost" (click)="closeGlobalKillswitchModal()">Cancel</button>
-        <button type="button" class="btn-danger-killswitch" (click)="executeGlobalKillswitch()">
-          Confirm & Terminate All Sessions
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ========================================================================
-       MODAL: REQUEST APPLICATION ACCESS (USER)
-       ======================================================================== -->

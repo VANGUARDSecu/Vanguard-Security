@@ -129,6 +129,15 @@ export class DashboardService {
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
   readonly sessionRevoked = signal<boolean>(false);
+  readonly isRevokingSessions = signal<boolean>(false);
+  readonly securityRevokePrompt = signal<boolean>(false);
+  readonly sessionRevocationResult = signal<{
+    success: boolean;
+    refreshRevoked: boolean;
+    oidcGrantsRevoked: number;
+    maxResidualAccessSeconds: number;
+    message: string;
+  } | null>(null);
   readonly adminActionNotice = signal<string | null>(null);
 
   // ==========================================
@@ -743,6 +752,138 @@ export class DashboardService {
     notCovered: string[];
   } | null>(null);
   readonly globalKillswitchError = signal<string | null>(null);
+  readonly isSavingPolicy = signal<boolean>(false);
+  readonly dnsVerificationMessage = signal<string | null>(null);
+  readonly oidcClientsCount = signal<number | null>(null);
+  readonly settingsSubTab = signal<'governance' | 'branding' | 'tenants'>('governance');
+  readonly pendingDirectoryAction = signal<'invite' | 'groups' | null>(null);
+
+  /** Deduplicated count across authoritative server audit logs and local tenant audit events. */
+  readonly mergedAuditEventsCount = computed<number>(() => {
+    const seen = new Set<string>();
+    for (const evt of [...this.serverAuditEvents(), ...this.tenantAuditEvents()]) {
+      if (evt.id) seen.add(evt.id);
+    }
+    return seen.size;
+  });
+
+  readonly activeDirectoryUsersCount = computed<number>(
+    () => this.directoryUsers().filter((u) => u.accountStatus === 'Active').length,
+  );
+
+  /** Dynamic 0-100 posture score calculated from real governance, MFA, and domain verification state. */
+  readonly securityPostureScore = computed<number>(() => {
+    let score = 35; // Baseline: Supabase JWT + OWASP Throttler Guard active
+    if (this.enforceMfaAll()) score += 25;
+    if (this.blockHighRiskIps()) score += 15;
+
+    const activeUsers = this.directoryUsers().filter((u) => u.accountStatus === 'Active');
+    if (activeUsers.length > 0) {
+      const totpCount = activeUsers.filter((u) => u.mfaStatus === 'Enrolled (TOTP)').length;
+      score += Math.round((totpCount / activeUsers.length) * 15);
+    } else if (this.enforceMfaAll()) {
+      score += 10;
+    }
+
+    if (this.tenantBranding().ssoDomainVerified || this.activeOrganization().isCustomDomainVerified) {
+      score += 10;
+    }
+    return Math.min(100, Math.max(0, score));
+  });
+
+  readonly securityPostureTags = computed<{ label: string; tone: 'emerald' | 'blue' | 'amber' | 'rose' }[]>(() => [
+    this.enforceMfaAll()
+      ? { label: 'Mandatory MFA Enforced', tone: 'emerald' }
+      : { label: 'MFA Optional', tone: 'amber' },
+    this.blockHighRiskIps()
+      ? { label: 'High-Risk IP Blocking On', tone: 'blue' }
+      : { label: 'IP Blocking Disabled', tone: 'amber' },
+    this.tenantBranding().ssoDomainVerified || this.activeOrganization().isCustomDomainVerified
+      ? { label: 'Verified Custom Domain', tone: 'emerald' }
+      : { label: 'DNS Verification Pending', tone: 'blue' },
+  ]);
+
+  setSettingsSubTab(tab: 'governance' | 'branding' | 'tenants'): void {
+    this.settingsSubTab.set(tab);
+  }
+
+  requestDirectoryQuickAction(action: 'invite' | 'groups'): void {
+    this.closeMobileSidebar();
+    this.pendingDirectoryAction.set(action);
+    this.viewMode.set('admin');
+    this.activeTab.set('directory');
+  }
+
+  loadOidcClientsSummary(): void {
+    if (!this.isBrowser) return;
+    this.http
+      .get<{ success?: boolean; clients?: Array<{ clientId?: string }> }>(`${this.apiBase}/oauth/clients`)
+      .subscribe({
+        next: (res) => {
+          this.oidcClientsCount.set(Array.isArray(res?.clients) ? res.clients.length : 0);
+        },
+        error: () => {
+          // Retain current signal value if OIDC registry endpoint is temporarily unavailable.
+        },
+      });
+  }
+
+  loadTenantSettingsFromBackend(): void {
+    if (!this.isBrowser || !this.authService.token()) return;
+    this.http
+      .get<{
+        success?: boolean;
+        tenantId?: string;
+        settings?: { mfaEnforced?: boolean; blockHighRiskIps?: boolean; sessionDurationMinutes?: number };
+        branding?: Record<string, any>;
+        domain?: string | null;
+        name?: string | null;
+      }>(`${this.apiBase}/auth/tenant-settings`)
+      .subscribe({
+        next: (res) => {
+          const settings = res?.settings;
+          if (settings) {
+            if (typeof settings.mfaEnforced === 'boolean') {
+              this.enforceMfaAll.set(settings.mfaEnforced);
+              this.saveStored('vanguard_policy_enforce_mfa', settings.mfaEnforced);
+            }
+            if (typeof settings.blockHighRiskIps === 'boolean') {
+              this.blockHighRiskIps.set(settings.blockHighRiskIps);
+              this.saveStored('vanguard_policy_block_high_risk', settings.blockHighRiskIps);
+            }
+            if (typeof settings.sessionDurationMinutes === 'number') {
+              this.sessionTimeoutMinutes.set(settings.sessionDurationMinutes);
+            }
+          }
+          if (res?.branding) {
+            const b = res.branding;
+            const current = this.tenantBranding();
+            const mergedBranding: TenantBranding = {
+              ...current,
+              organizationId: res.tenantId || current.organizationId,
+              companyName: res.name || b['companyName'] || current.companyName,
+              primaryAccentColor: b['primaryAccentColor'] || b['primaryColor'] || current.primaryAccentColor,
+              ssoCustomDomain: b['ssoCustomDomain'] || res.domain || current.ssoCustomDomain,
+              ssoDomainVerified: typeof b['ssoDomainVerified'] === 'boolean' ? b['ssoDomainVerified'] : current.ssoDomainVerified,
+              logoUrl: b['logoUrl'] ?? current.logoUrl,
+              faviconUrl: b['faviconUrl'] ?? current.faviconUrl,
+              supportEmail: b['supportEmail'] ?? current.supportEmail,
+              emailCustomGreeting: b['emailCustomGreeting'] ?? current.emailCustomGreeting,
+              emailButtonText: b['emailButtonText'] ?? current.emailButtonText,
+            };
+            this.tenantBranding.set(mergedBranding);
+            this.saveStored('vanguard_tenant_branding', mergedBranding);
+            this.applyBrandAccent(mergedBranding.primaryAccentColor);
+            if (mergedBranding.ssoDomainVerified) {
+              this.domainVerificationStatus.set('verified');
+            }
+          }
+        },
+        error: () => {
+          // Keep locally cached / Supabase synced state if backend is unreachable.
+        },
+      });
+  }
 
   // ==========================================
   // SCRUM-42: Application Access Requests & Admin Approval Queue State
@@ -1877,39 +2018,39 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   readonly signInHistory = signal<SignInEvent[]>(this.initSignInHistory());
 
-  // Protocol Gateway status items
+  // Protocol Gateway status items (Active Production Gateways)
   readonly protocols: ProtocolStatus[] = [
     {
       name: 'OpenID Connect (OIDC)',
-      type: 'OAuth 2.0 / JWT Issuer',
+      type: 'OAuth 2.0 / PKCE JWT Issuer',
       port: 'HTTPS (443)',
       status: 'healthy',
-      description: 'Discovery & JWKS token authentication for cloud services and mobile clients.',
+      description: 'Discovery, PKCE authorization, and JWKS token issuance for web and mobile SSO clients.',
       badge: 'Active (Production)',
     },
     {
-      name: 'SAML 2.0 Web SSO',
-      type: 'Identity Provider (IdP)',
+      name: 'MFA, TOTP & Push Approval',
+      type: 'RFC 6238 & Mobile Approval',
       port: 'HTTPS (443)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Production endpoint returns 404.',
-      badge: 'Deferred (PRD §3)',
+      status: 'healthy',
+      description: '8-digit email OTP, authenticator app TOTP, recovery codes, and encrypted mobile push challenges.',
+      badge: 'Active (Production)',
     },
     {
-      name: 'Cloud LDAP Directory',
-      type: 'Directory Bind Endpoint',
-      port: 'LDAPS (636)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
-      badge: 'Deferred (PRD §3)',
+      name: 'Zero-Knowledge Vault & Extension',
+      type: 'AES-GCM Encrypted Sync API',
+      port: 'HTTPS (443)',
+      status: 'healthy',
+      description: 'Cross-device TOTP/credential vault sync, real-time watermark checks, and browser extension bridge.',
+      badge: 'Active (Production)',
     },
     {
-      name: 'Cloud RADIUS Gateway',
-      type: 'Network Access (802.1X)',
-      port: 'UDP (1812 / 1813)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
-      badge: 'Deferred (PRD §3)',
+      name: 'Enterprise Audit & Session Guard',
+      type: 'Tenant RBAC & Killswitch Engine',
+      port: 'HTTPS (443)',
+      status: 'healthy',
+      description: 'Immutable security audit trail, alert revocation links, and tenant-wide emergency killswitch.',
+      badge: 'Active (Production)',
     },
   ];
 
@@ -2084,11 +2225,21 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS Mobile';
     }
 
+    const latestServer = this.serverAuditEvents().find(
+      (evt) => evt.clientIp && evt.clientIp !== '—' && evt.clientIp !== 'Unknown',
+    );
+    const latestHistory = this.signInHistory().find(
+      (evt) => evt.ip && evt.ip !== '—' && !evt.ip.startsWith('127.0.0.1'),
+    );
+
     return {
       browser,
       os,
-      ip: '127.0.0.1 (Loopback / Secure TLS)',
-      location: 'Local Workstation',
+      ip: latestServer?.clientIp || latestHistory?.ip || 'Current Authenticated Session',
+      location:
+        (latestServer?.location && latestServer.location !== '—' ? latestServer.location : '') ||
+        latestHistory?.location ||
+        'Verified via TLS',
       verifiedMethod: 'Supabase JWT + OWASP Throttler Guard',
     };
   });
@@ -2156,8 +2307,23 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.saveStored('vanguard_tenant_branding', mergedBranding);
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
+          if (activeCloud.settings) {
+            const s = activeCloud.settings;
+            if (typeof s.mfaEnforced === 'boolean') {
+              this.enforceMfaAll.set(s.mfaEnforced);
+              this.saveStored('vanguard_policy_enforce_mfa', s.mfaEnforced);
+            }
+            if (typeof s.blockHighRiskIps === 'boolean') {
+              this.blockHighRiskIps.set(s.blockHighRiskIps);
+              this.saveStored('vanguard_policy_block_high_risk', s.blockHighRiskIps);
+            }
+            if (typeof s.sessionDurationMinutes === 'number') {
+              this.sessionTimeoutMinutes.set(s.sessionDurationMinutes);
+            }
+          }
         }
         this.loadDirectoryUsers();
+        this.loadTenantSettingsFromBackend();
         }
       }
 
@@ -2548,6 +2714,11 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.setupCrossDeviceSyncRealtime();
     this.startCrossDeviceSyncPolling();
     this.startLiveSsoChallengePolling();
+    if (this.isAdmin()) {
+      this.loadTenantSettingsFromBackend();
+      this.loadOidcClientsSummary();
+      this.loadServerAuditLogs();
+    }
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
     if (storedGroups && storedGroups.length > 0) {
@@ -3118,6 +3289,30 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Suspend account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Medium');
+
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ membershipSuspended?: boolean; revocation?: { oidcGrantsRevoked?: number } }>(
+          `${this.apiBase}/apps/revoke-sessions?targetUserId=${encodeURIComponent(user.id)}&suspend=true`,
+          {},
+        )
+        .subscribe({
+          next: (res) => {
+            const grants = res?.revocation?.oidcGrantsRevoked ?? 0;
+            this.showAdminNotice(
+              `Account for ${user.name} suspended and active tokens revoked (${grants} OIDC grant(s)).`,
+            );
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Account suspended locally; backend revocation warning: ${err?.error?.message || 'request failed'}.`,
+            );
+          },
+        });
+      return;
+    }
+
     this.showAdminNotice(`Account for ${user.name} has been suspended.`);
   }
 
@@ -3127,6 +3322,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Reactivate account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Low');
+
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ success?: boolean }>(`${this.apiBase}/apps/reactivate-member?targetUserId=${encodeURIComponent(user.id)}`, {})
+        .subscribe({
+          next: () => {
+            this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Account reactivated locally; backend sync warning: ${err?.error?.message || 'request failed'}.`,
+            );
+          },
+        });
+      return;
+    }
+
     this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
   }
 
@@ -3141,11 +3354,44 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   forceUserPasswordReset(user: DirectoryUser): void {
     this.logAuditEvent(`Dispatched password reset for ${user.email}`, 'Auth Service', 'Password Recovery', 'success', 'Low');
+    if (this.isBrowser && this.authService.token() && user.email && typeof this.authService.forgotPassword === 'function') {
+      this.authService.forgotPassword(user.email).subscribe({
+        next: () => {
+          this.showAdminNotice(`Password reset recovery email dispatched to ${user.email}.`);
+        },
+        error: (err: Error) => {
+          this.showAdminNotice(`Password reset request failed for ${user.email}: ${err?.message || 'Unavailable'}.`);
+        },
+      });
+      return;
+    }
     this.showAdminNotice(`Password reset recovery email dispatched to ${user.email}.`);
   }
 
   adminRevokeUserSessions(user: DirectoryUser): void {
     this.logAuditEvent(`Revoked all active sessions for ${user.name}`, 'Session Vault', 'JWT Guard', 'success', 'High');
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ revocation?: { oidcGrantsRevoked?: number } }>(
+          `${this.apiBase}/apps/revoke-sessions?targetUserId=${encodeURIComponent(user.id)}&suspend=false`,
+          {},
+        )
+        .subscribe({
+          next: (res) => {
+            const grants = res?.revocation?.oidcGrantsRevoked ?? 0;
+            this.showAdminNotice(
+              `Active sessions and ${grants} OIDC refresh grant(s) revoked for ${user.name}.`,
+            );
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Session revocation failed for ${user.name}: ${err?.error?.message || 'Unavailable'}.`,
+            );
+          },
+        });
+      return;
+    }
     this.showAdminNotice(`All active sessions and tokens revoked for ${user.name}.`);
   }
 
@@ -3981,23 +4227,77 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // ==========================================
   // PHASE 3: Vault Settings & Killswitch
   // ==========================================
+  private persistTenantPatch(
+    patch: Record<string, any>,
+    onRollback: () => void,
+    onSuccess: () => void,
+  ): void {
+    if (!this.isBrowser || !this.authService.token()) {
+      onSuccess();
+      return;
+    }
+    this.isSavingPolicy.set(true);
+    this.http.patch(`${this.apiBase}/auth/tenant-settings`, patch).subscribe({
+      next: () => {
+        this.isSavingPolicy.set(false);
+        onSuccess();
+        this.loadServerAuditLogs();
+      },
+      error: (err) => {
+        this.isSavingPolicy.set(false);
+        onRollback();
+        this.showAdminNotice(
+          `Failed to save tenant policy: ${err?.error?.message || 'Server unavailable'}. Reverted change.`,
+        );
+      },
+    });
+  }
+
   toggleEnforceMfa(): void {
-    this.enforceMfaAll.update((v) => !v);
-    this.saveStored('vanguard_policy_enforce_mfa', this.enforceMfaAll());
-    const status = this.enforceMfaAll() ? 'Enforced' : 'Optional';
-    this.logAuditEvent(`MFA Policy updated to ${status}`, 'Policy Engine', 'Auth Guard', 'success', 'Medium');
-    this.showAdminNotice(`Tenant Multi-Factor policy: ${status} for all members.`);
+    const previous = this.enforceMfaAll();
+    const next = !previous;
+    this.enforceMfaAll.set(next);
+    this.saveStored('vanguard_policy_enforce_mfa', next);
+    const status = next ? 'Enforced' : 'Optional';
+
+    this.persistTenantPatch(
+      { mfaEnforced: next },
+      () => {
+        this.enforceMfaAll.set(previous);
+        this.saveStored('vanguard_policy_enforce_mfa', previous);
+      },
+      () => {
+        this.logAuditEvent(`MFA Policy updated to ${status}`, 'Policy Engine', 'Auth Guard', 'success', 'Medium');
+        this.showAdminNotice(`Tenant Multi-Factor policy: ${status} for all members.`);
+      },
+    );
   }
 
   toggleBlockHighRiskIps(): void {
-    this.blockHighRiskIps.update((v) => !v);
-    this.saveStored('vanguard_policy_block_high_risk', this.blockHighRiskIps());
-    const status = this.blockHighRiskIps() ? 'Active' : 'Disabled';
-    this.logAuditEvent(`Tor / High-Risk IP Blocking updated to ${status}`, 'WAF / Rate Limiter', 'Network Guard', 'success', 'Medium');
-    this.showAdminNotice(`Automated Tor & proxy IP blocking: ${status}.`);
+    const previous = this.blockHighRiskIps();
+    const next = !previous;
+    this.blockHighRiskIps.set(next);
+    this.saveStored('vanguard_policy_block_high_risk', next);
+    const status = next ? 'Active' : 'Disabled';
+
+    this.persistTenantPatch(
+      { blockHighRiskIps: next },
+      () => {
+        this.blockHighRiskIps.set(previous);
+        this.saveStored('vanguard_policy_block_high_risk', previous);
+      },
+      () => {
+        this.logAuditEvent(`Tor / High-Risk IP Blocking updated to ${status}`, 'WAF / Rate Limiter', 'Network Guard', 'success', 'Medium');
+        this.showAdminNotice(`Automated Tor & proxy IP blocking: ${status}.`);
+      },
+    );
   }
 
   openGlobalKillswitchModal(): void {
+    this.globalKillswitchPending.set(false);
+    this.globalKillswitchSuccess.set(false);
+    this.globalKillswitchError.set(null);
+    this.globalKillswitchResult.set(null);
     this.showGlobalKillswitchModal.set(true);
   }
 
@@ -4005,10 +4305,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showGlobalKillswitchModal.set(false);
   }
 
-  executeGlobalKillswitch(): void {
-    // SCRUM-131: real tenant-wide revocation via the backend. Reports the
-    // CONFIRMED per-tenant outcome and residual-access bound — no fabricated
-    // "all tokens terminated everywhere" claim.
+  executeGlobalKillswitch(signOutAdmin = false): void {
+    // SCRUM-131 & SCRUM-191: real tenant-wide revocation via the backend. Reports the
+    // CONFIRMED per-tenant outcome and residual-access bound — and optionally revokes
+    // the acting administrator's own session when signOutAdmin is selected.
     this.globalKillswitchPending.set(true);
     this.globalKillswitchError.set(null);
     this.globalKillswitchResult.set(null);
@@ -4040,6 +4340,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               `. Existing access tokens expire within ~${residualMin} min. ` +
               `Not covered: ${res.notCovered.join('; ') || 'none reported'}.`,
           );
+          if (signOutAdmin) {
+            this.showGlobalKillswitchModal.set(false);
+            this.revokeAllSessions(true);
+          }
         },
         error: (err) => {
           this.globalKillswitchPending.set(false);
@@ -8051,8 +8355,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.saveStored('vanguard_organizations', this.organizations());
     }
 
-    // Persist branding to Supabase
+    // Persist branding via authenticated backend API (service-role bypasses RLS safely) and Supabase cache
     if (this.isBrowser) {
+      if (this.authService.token()) {
+        this.http
+          .patch(`${this.apiBase}/auth/tenant-settings`, {
+            name: merged.companyName,
+            domain: merged.ssoCustomDomain || this.activeOrganization().domain || null,
+            branding: { ...merged },
+          })
+          .subscribe({
+            error: (err) => console.warn('Backend branding save notice:', err),
+          });
+      }
       const activeOrgId = this.activeOrganizationId();
       this.supabaseService
         .upsertTenant({
@@ -8096,6 +8411,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.tenantBranding.set(defaults);
     this.saveStored('vanguard_tenant_branding', defaults);
     this.applyBrandAccent('#3b82f6');
+    this.domainVerificationStatus.set('idle');
+    this.dnsVerificationMessage.set(null);
+
+    if (this.isBrowser && this.authService.token()) {
+      this.http
+        .patch(`${this.apiBase}/auth/tenant-settings`, {
+          domain: defaults.ssoCustomDomain,
+          branding: { ...defaults },
+        })
+        .subscribe({ error: () => {} });
+    }
 
     this.logAuditEvent(
       'Reset branding settings to Vanguard default theme',
@@ -8107,28 +8433,84 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showAdminNotice('Branding reset to default Vanguard cyber theme.');
   }
 
-  async verifyCustomDomainDns(): Promise<void> {
+  async verifyCustomDomainDns(domainOverride?: string): Promise<void> {
+    const targetDomain = (domainOverride ?? this.tenantBranding().ssoCustomDomain ?? '').trim().toLowerCase();
+    if (!targetDomain) {
+      this.domainVerificationStatus.set('failed');
+      this.dnsVerificationMessage.set('Enter a custom SSO hostname before running DNS verification.');
+      return;
+    }
+
     this.domainVerificationStatus.set('checking');
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    this.dnsVerificationMessage.set(null);
 
-    this.domainVerificationStatus.set('verified');
-    this.tenantBranding.update((b) => ({ ...b, ssoDomainVerified: true }));
-    this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+    if (!this.isBrowser) return;
 
-    // Mark verified on active org
-    this.organizations.update((list) =>
-      list.map((org) => (org.id === this.activeOrganizationId() ? { ...org, isCustomDomainVerified: true } : org))
-    );
-    this.saveStored('vanguard_organizations', this.organizations());
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{
+          verified: boolean;
+          domain: string;
+          expectedTarget: string;
+          foundRecords: string[];
+          message: string;
+        }>(`${this.apiBase}/auth/verify-dns?domain=${encodeURIComponent(targetDomain)}`),
+      );
 
-    this.logAuditEvent(
-      `DNS CNAME verification passed for custom SSO domain: ${this.tenantBranding().ssoCustomDomain}`,
-      'Branding Studio',
-      'DNS Verifier',
-      'success',
-      'Low'
-    );
-    this.showAdminNotice(`Custom SSO domain ${this.tenantBranding().ssoCustomDomain} verified successfully.`);
+      this.dnsVerificationMessage.set(res.message);
+
+      if (res.verified) {
+        this.domainVerificationStatus.set('verified');
+        this.tenantBranding.update((b) => ({
+          ...b,
+          ssoCustomDomain: res.domain || targetDomain,
+          ssoDomainVerified: true,
+        }));
+        this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+
+        this.organizations.update((list) =>
+          list.map((org) =>
+            org.id === this.activeOrganizationId()
+              ? { ...org, domain: res.domain || targetDomain, isCustomDomainVerified: true }
+              : org,
+          ),
+        );
+        this.saveStored('vanguard_organizations', this.organizations());
+
+        if (this.authService.token()) {
+          this.http
+            .patch(`${this.apiBase}/auth/tenant-settings`, {
+              domain: res.domain || targetDomain,
+              branding: { ...this.tenantBranding(), ssoCustomDomain: res.domain || targetDomain, ssoDomainVerified: true },
+            })
+            .subscribe({ error: () => {} });
+        }
+
+        this.logAuditEvent(
+          `DNS CNAME verification passed for custom SSO domain: ${res.domain || targetDomain}`,
+          'Branding Studio',
+          'DNS Verifier',
+          'success',
+          'Low',
+        );
+        this.showAdminNotice(`Custom SSO domain ${res.domain || targetDomain} verified successfully.`);
+      } else {
+        this.domainVerificationStatus.set('failed');
+        this.tenantBranding.update((b) => ({
+          ...b,
+          ssoCustomDomain: targetDomain,
+          ssoDomainVerified: false,
+        }));
+        this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+        this.showAdminNotice(res.message || `DNS verification failed for ${targetDomain}.`);
+      }
+    } catch (err: any) {
+      const message =
+        err?.error?.message || err?.message || `DNS lookup failed for ${targetDomain}.`;
+      this.domainVerificationStatus.set('failed');
+      this.dnsVerificationMessage.set(message);
+      this.showAdminNotice(message);
+    }
   }
 
   // ==========================================
@@ -8163,10 +8545,52 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
-  revokeAllSessions(): void {
-    this.sessionRevoked.set(true);
-    this.logAuditEvent('Revoked all other active sessions', 'User Session Manager', 'Supabase JWT', 'success', 'Medium');
-    setTimeout(() => this.sessionRevoked.set(false), 4000);
+  revokeAllSessions(signOutCurrent = false): void {
+    const token = this.authService.token();
+    if (!token || typeof this.authService.revokeSelfSessions !== 'function') {
+      this.sessionRevoked.set(true);
+      this.securityRevokePrompt.set(false);
+      this.logAuditEvent(
+        'Revoked all other active sessions',
+        'User Session Manager',
+        'Supabase JWT',
+        'success',
+        'Medium'
+      );
+      setTimeout(() => this.sessionRevoked.set(false), 4000);
+      return;
+    }
+
+    this.isRevokingSessions.set(true);
+    this.authService.revokeSelfSessions().subscribe({
+      next: (res) => {
+        this.isRevokingSessions.set(false);
+        this.sessionRevoked.set(true);
+        this.sessionRevocationResult.set(res);
+        this.securityRevokePrompt.set(false);
+        this.logAuditEvent(
+          `Revoked all active sessions and ${res.oidcGrantsRevoked} OIDC refresh grant(s)`,
+          'User Session Manager',
+          'Session Revocation',
+          'success',
+          'High'
+        );
+        this.showAdminNotice(
+          res.message || 'All active Vanguard sessions and SSO refresh grants have been revoked.'
+        );
+        if (signOutCurrent) {
+          this.authService.logout();
+        } else {
+          setTimeout(() => this.sessionRevoked.set(false), 6000);
+        }
+      },
+      error: (err: Error) => {
+        this.isRevokingSessions.set(false);
+        this.showAdminNotice(
+          err?.message || 'Unable to revoke active sessions. Please try again or reset your password.'
+        );
+      },
+    });
   }
 
   onLogout(): void {

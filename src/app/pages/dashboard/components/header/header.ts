@@ -98,6 +98,7 @@ export class DashboardHeader {
 
   goToBrandingStudio(): void {
     this.showOrgDropdown.set(false);
+    this.dashboardService.setSettingsSubTab('branding');
     this.dashboardService.setActiveTab('settings');
   }
 

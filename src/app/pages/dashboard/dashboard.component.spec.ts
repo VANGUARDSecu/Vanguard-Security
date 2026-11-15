@@ -50,13 +50,14 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should initialize with protocol gateway status items', () => {
+  it('should initialize with active production protocol gateway status items (SCRUM-191)', () => {
     expect(component.protocols.length).toBe(4);
     const names = component.protocols.map((p) => p.name);
-    expect(names).toContain('SAML 2.0 Web SSO');
     expect(names).toContain('OpenID Connect (OIDC)');
-    expect(names).toContain('Cloud LDAP Directory');
-    expect(names).toContain('Cloud RADIUS Gateway');
+    expect(names).toContain('MFA, TOTP & Push Approval');
+    expect(names).toContain('Zero-Knowledge Vault & Extension');
+    expect(names).toContain('Enterprise Audit & Session Guard');
+    expect(component.protocols.every((p) => p.status === 'healthy')).toBe(true);
   });
 
   it('should restrict company account to admin console only (SCRUM-150)', () => {
@@ -1613,9 +1614,31 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
       component.ngOnInit();
       expect(setTabSpy).toHaveBeenCalledWith('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
       expect(noticeSpy).toHaveBeenCalledWith(
         expect.stringContaining('revoke untrusted access')
       );
+    });
+
+    it('renders <app-user-security> on ?tab=security&action=revoke even when Company Admin is in admin viewMode (SCRUM-190)', () => {
+      authService.currentUser.set({
+        id: 'adm-190',
+        email: 'admin@acme.com',
+        role: 'admin',
+        accountType: 'company',
+      });
+      component.dashboardService.viewMode.set('admin');
+      (component as any).route = {
+        queryParams: of({ tab: 'security', action: 'revoke' }),
+      };
+
+      component.ngOnInit();
+      fixture.detectChanges();
+
+      expect(component.dashboardService.activeTab()).toBe('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
+      const secEl = fixture.nativeElement.querySelector('app-user-security');
+      expect(secEl).toBeTruthy();
     });
   });
 

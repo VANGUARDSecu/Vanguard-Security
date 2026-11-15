@@ -942,6 +942,32 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(elTextContains(fixture.nativeElement, 'Active SSO Integrations')).toBe(false);
     });
   });
+
+  describe('Migrated Password Generator & Vault Unlock (SCRUM-183)', () => {
+    it('generates high-entropy passwords and populates newAppPassword when applying from the generator modal', () => {
+      component.openAddPersonalAppModal();
+      component.openGeneratorModal();
+      expect(component.showGeneratorModal()).toBe(true);
+      expect(component.generatedPassword().length).toBe(20);
+
+      component.genLength = 28;
+      component.regeneratePassword();
+      const generated = component.generatedPassword();
+      expect(generated.length).toBe(28);
+      expect(component.getGeneratedPasswordStrength().score).toBeGreaterThanOrEqual(70);
+
+      component.useGeneratedPasswordInAppForm();
+      expect(component.showGeneratorModal()).toBe(false);
+      expect(component.newAppPassword).toBe(generated);
+      expect(component.getNewAppPasswordStrength().score).toBeGreaterThanOrEqual(70);
+    });
+
+    it('validates empty password on inline vault unlock without calling backend', async () => {
+      component.vaultUnlockPassword = '';
+      await component.unlockVaultSession();
+      expect(component.vaultUnlockError()).toContain('Enter your Vanguard password');
+    });
+  });
 });
 
 function elTextContains(el: HTMLElement, needle: string): boolean {

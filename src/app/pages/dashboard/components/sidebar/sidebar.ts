@@ -38,7 +38,6 @@ export class DashboardSidebar {
   readonly isIndividual = this.dashboardService.isIndividual;
   readonly isPersonalWorkspace = this.dashboardService.isPersonalWorkspace;
   readonly personalApps = this.dashboardService.personalApps;
-  readonly vaultItems = this.dashboardService.vaultItems;
   readonly totpAccounts = this.dashboardService.totpAccounts;
   readonly pendingAccessRequests = this.dashboardService.pendingAccessRequests;
   readonly ssoApplicationsList = this.dashboardService.ssoApplicationsList;

@@ -82,6 +82,21 @@ export class UserMyApps {
   newAppUsername = '';
   newAppPassword = '';
 
+  // SCRUM-183: Migrated Zero-Knowledge Unlock & High-Entropy Password Generator from removed Personal Vault UI
+  readonly isVaultUnlocked = this.dashboardService.isVaultUnlocked;
+  vaultUnlockPassword = '';
+  readonly vaultUnlockError = signal<string | null>(null);
+  readonly isUnlockingVault = signal<boolean>(false);
+
+  readonly showGeneratorModal = signal<boolean>(false);
+  genLength = 20;
+  genUppercase = true;
+  genLowercase = true;
+  genNumbers = true;
+  genSymbols = true;
+  readonly generatedPassword = signal<string>('');
+  readonly generatorCopied = signal<boolean>(false);
+
   // SCRUM-169: Pre-Launch Security Verification & Auto-Fill State
   readonly showLaunchVerifyModal = signal<boolean>(false);
   readonly pendingLaunchApp = signal<SaaSApp | null>(null);
@@ -110,6 +125,7 @@ export class UserMyApps {
   constructor() {
     // SCRUM-180: Ensure My Applications catalog is broadcast and synchronized to the browser extension on page load
     this.dashboardService.broadcastAppsSync();
+    this.regeneratePassword();
   }
 
   // Request Application Form Signals
@@ -661,5 +677,69 @@ export class UserMyApps {
       this.gatewayApiKeyInput,
     );
     this.showGatewayConfigForm.set(false);
+  }
+
+  // SCRUM-183: Vault unlock & Password Generator actions migrated from UserPersonalVault
+  async unlockVaultSession(): Promise<void> {
+    this.vaultUnlockError.set(null);
+    if (!this.vaultUnlockPassword) {
+      this.vaultUnlockError.set('Enter your Vanguard password to unlock encrypted sync.');
+      return;
+    }
+    this.isUnlockingVault.set(true);
+    try {
+      await this.dashboardService.unlockVault(this.vaultUnlockPassword);
+      this.vaultUnlockPassword = '';
+    } catch (e: any) {
+      this.vaultUnlockError.set(
+        /VAULT_DECRYPT_FAILED/.test(e?.message || '')
+          ? 'Wrong password — could not decrypt your vault.'
+          : 'Could not unlock the encrypted vault.',
+      );
+    } finally {
+      this.isUnlockingVault.set(false);
+    }
+  }
+
+  getNewAppPasswordStrength(): { score: number; label: string; color: string } {
+    return this.dashboardService.calculatePasswordStrength(this.newAppPassword);
+  }
+
+  getGeneratedPasswordStrength(): { score: number; label: string; color: string } {
+    return this.dashboardService.calculatePasswordStrength(this.generatedPassword());
+  }
+
+  openGeneratorModal(): void {
+    this.regeneratePassword();
+    this.showGeneratorModal.set(true);
+  }
+
+  closeGeneratorModal(): void {
+    this.showGeneratorModal.set(false);
+  }
+
+  regeneratePassword(): void {
+    const pw = this.dashboardService.generateStrongPassword({
+      length: this.genLength,
+      uppercase: this.genUppercase,
+      lowercase: this.genLowercase,
+      numbers: this.genNumbers,
+      symbols: this.genSymbols,
+    });
+    this.generatedPassword.set(pw);
+  }
+
+  copyGeneratedPassword(): void {
+    const pw = this.generatedPassword();
+    if (!pw || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(pw).then(() => {
+      this.generatorCopied.set(true);
+      setTimeout(() => this.generatorCopied.set(false), 2500);
+    }).catch(() => {});
+  }
+
+  useGeneratedPasswordInAppForm(): void {
+    this.newAppPassword = this.generatedPassword();
+    this.closeGeneratorModal();
   }
 }

@@ -16,7 +16,6 @@ import { UserSsoApps } from './components/user-sso-apps/user-sso-apps';
 import { UserSecurity } from './components/user-security/user-security';
 import { UserActivity } from './components/user-activity/user-activity';
 import { UserDevices } from './components/user-devices/user-devices';
-import { UserPersonalVault } from './components/user-personal-vault/user-personal-vault';
 import { UserAuthenticator } from './components/user-authenticator/user-authenticator';
 import {
   ProtocolStatus,
@@ -78,7 +77,6 @@ export type {
     UserSecurity,
     UserActivity,
     UserDevices,
-    UserPersonalVault,
     UserAuthenticator,
   ],
   templateUrl: './dashboard.component.html',

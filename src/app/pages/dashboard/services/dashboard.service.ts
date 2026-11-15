@@ -107,7 +107,7 @@ export class DashboardService {
   searchQuery = '';
 
   // Active navigation tab
-  readonly activeTab = signal<string>(this.isIndividual() ? 'personal-vault' : (this.isAdmin() ? 'overview' : 'my-apps'));
+  readonly activeTab = signal<string>(this.isAdmin() && !this.isIndividual() ? 'overview' : 'my-apps');
 
   // ==========================================
   // Responsive Mobile Navigation Drawer State (SCRUM-179)
@@ -2305,7 +2305,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // Default view mode to the user's role and account type (SCRUM-150)
     if (this.isIndividual()) {
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
     } else if (this.isAdmin()) {
       this.viewMode.set('admin');
       this.activeTab.set('overview');
@@ -2500,7 +2500,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (this.isIndividual()) {
       this.activeWorkspaceId.set('personal');
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
     } else if (this.isAdmin()) {
       if (this.activeWorkspaceId() === 'personal') {
         this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
@@ -2652,7 +2652,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   toggleViewMode(mode: 'admin' | 'user'): void {
     if (this.isIndividual()) {
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
       return;
     }
     if (this.isAdmin()) {
@@ -3043,7 +3043,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   setActiveTab(tab: string): void {
     this.closeMobileSidebar();
     const userTabs = [
-      'personal-vault', 'my-apps', 'authenticator', 'user-security',
+      'my-apps', 'sso-apps', 'authenticator', 'user-security',
       'user-activity', 'user-devices'
     ];
     if (userTabs.includes(tab) && this.viewMode() === 'admin' && !this.isAdmin()) {
@@ -7473,7 +7473,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.activeWorkspaceId.set('personal');
       this.saveStored('vanguard_active_workspace', 'personal');
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
       return;
     }
 

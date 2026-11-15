@@ -21,6 +21,14 @@
               </button>
               <button
                 type="button"
+                class="btn-ghost"
+                style="border: 1px solid rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.1); color: #7dd3fc; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;"
+                (click)="openGeneratorModal()"
+              >
+                🎲 Password Generator
+              </button>
+              <button
+                type="button"
                 class="btn-primary-action"
                 (click)="openAddAppModal()"
               >
@@ -74,6 +82,34 @@
           </div>
 
           <!-- Federated SSO Integrations moved to dedicated SSO Applications tab (SCRUM-184) -->
+
+          <!-- SCRUM-183: Inline Zero-Knowledge Vault Sync Unlock (shown after browser reload when key is cleared from memory) -->
+          <div class="vault-unlock-strip" *ngIf="isPersonalWorkspace() && !isVaultUnlocked()">
+            <div class="vault-unlock-copy">
+              <strong>🔒 Encrypted Vault Sync Locked</strong>
+              <span>Enter your Vanguard password to re-enable client-side zero-knowledge credential sync with the browser extension.</span>
+            </div>
+            <div class="vault-unlock-controls">
+              <input
+                type="password"
+                [(ngModel)]="vaultUnlockPassword"
+                (keydown.enter)="unlockVaultSession()"
+                placeholder="Vanguard password"
+                class="form-input vault-unlock-input"
+              />
+              <button
+                type="button"
+                class="btn-primary-action btn-sm"
+                (click)="unlockVaultSession()"
+                [disabled]="isUnlockingVault()"
+              >
+                {{ isUnlockingVault() ? 'Unlocking…' : 'Unlock Sync' }}
+              </button>
+            </div>
+            <div class="form-error-alert" *ngIf="vaultUnlockError()" style="width: 100%; margin-top: 6px;">
+              {{ vaultUnlockError() }}
+            </div>
+          </div>
 
           <div class="category-filter-bar">
             <button
@@ -462,13 +498,30 @@
             />
           </div>
           <div class="form-group flex-1">
-            <label class="form-label">Auto-Fill Password (Optional)</label>
+            <div class="label-with-action">
+              <label class="form-label">Auto-Fill Password (Optional)</label>
+              <button type="button" class="btn-inline-gen" (click)="openGeneratorModal()">
+                🎲 Generate Strong
+              </button>
+            </div>
             <input
               type="password"
               [(ngModel)]="newAppPassword"
               placeholder="••••••••••••"
               class="form-input"
             />
+            <div class="strength-bar-wrapper" *ngIf="newAppPassword">
+              <div class="strength-bar">
+                <div
+                  class="strength-fill"
+                  [style.width.%]="getNewAppPasswordStrength().score"
+                  [style.background-color]="getNewAppPasswordStrength().color"
+                ></div>
+              </div>
+              <span class="strength-text" [style.color]="getNewAppPasswordStrength().color">
+                {{ getNewAppPasswordStrength().label }} ({{ getNewAppPasswordStrength().score }}%)
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1125,6 +1178,124 @@
 
       <div class="modal-footer">
         <button type="button" class="btn-ghost" (click)="closeBillingModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL: HIGH-ENTROPY PASSWORD GENERATOR (SCRUM-183)
+       ======================================================================== -->
+  <div class="modal-backdrop" *ngIf="showGeneratorModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">High-Entropy Password Generator</h3>
+        <button type="button" class="modal-close-btn" (click)="closeGeneratorModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="gen-display-box">
+          <span class="gen-password-text font-mono">{{ generatedPassword() }}</span>
+          <button type="button" class="gen-btn-reload" (click)="regeneratePassword()" title="Generate new password">
+            🔄
+          </button>
+        </div>
+
+        <div class="strength-bar-wrapper">
+          <div class="strength-bar">
+            <div
+              class="strength-fill"
+              [style.width.%]="getGeneratedPasswordStrength().score"
+              [style.background-color]="getGeneratedPasswordStrength().color"
+            ></div>
+          </div>
+          <span class="strength-text" [style.color]="getGeneratedPasswordStrength().color">
+            {{ getGeneratedPasswordStrength().label }} ({{ getGeneratedPasswordStrength().score }}% entropy)
+          </span>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span class="form-label">Password Length</span>
+            <span class="slider-value-pill">{{ genLength }} characters</span>
+          </div>
+          <input
+            type="range"
+            min="8"
+            max="64"
+            [(ngModel)]="genLength"
+            (ngModelChange)="regeneratePassword()"
+            class="cyber-slider"
+          />
+        </div>
+
+        <div class="options-grid">
+          <div class="toggle-option">
+            <input
+              type="checkbox"
+              id="optMyAppUpper"
+              [(ngModel)]="genUppercase"
+              (ngModelChange)="regeneratePassword()"
+              class="cyber-checkbox"
+            />
+            <label for="optMyAppUpper">Uppercase (A-Z)</label>
+          </div>
+
+          <div class="toggle-option">
+            <input
+              type="checkbox"
+              id="optMyAppLower"
+              [(ngModel)]="genLowercase"
+              (ngModelChange)="regeneratePassword()"
+              class="cyber-checkbox"
+            />
+            <label for="optMyAppLower">Lowercase (a-z)</label>
+          </div>
+
+          <div class="toggle-option">
+            <input
+              type="checkbox"
+              id="optMyAppNums"
+              [(ngModel)]="genNumbers"
+              (ngModelChange)="regeneratePassword()"
+              class="cyber-checkbox"
+            />
+            <label for="optMyAppNums">Numbers (0-9)</label>
+          </div>
+
+          <div class="toggle-option">
+            <input
+              type="checkbox"
+              id="optMyAppSyms"
+              [(ngModel)]="genSymbols"
+              (ngModelChange)="regeneratePassword()"
+              class="cyber-checkbox"
+            />
+            <label for="optMyAppSyms">Symbols (!@#$%^&amp;*)</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost" (click)="copyGeneratedPassword()">
+          <span *ngIf="generatorCopied()">Copied to Clipboard!</span>
+          <span *ngIf="!generatorCopied()">Copy Password</span>
+        </button>
+        <button
+          type="button"
+          class="btn-primary-action"
+          (click)="useGeneratedPasswordInAppForm()"
+          *ngIf="showAddPersonalAppModal()"
+        >
+          Use in Application Form
+        </button>
+        <button
+          type="button"
+          class="btn-primary-action"
+          (click)="closeGeneratorModal()"
+          *ngIf="!showAddPersonalAppModal()"
+        >
+          Done
+        </button>
       </div>
     </div>
   </div>

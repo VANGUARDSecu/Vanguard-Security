@@ -131,9 +131,6 @@
            VIEW 2: USER PORTAL & PERSONAL VAULT
            ==================================================================== -->
       <div *ngIf="viewMode() === 'user'">
-        <!-- Personal Credential Vault (Individual & Company Users) -->
-        <app-user-personal-vault *ngIf="activeTab() === 'personal-vault'"></app-user-personal-vault>
-
         <!-- 2FA Authenticator (Individual & Company Users) -->
         <app-user-authenticator *ngIf="activeTab() === 'authenticator'"></app-user-authenticator>
 

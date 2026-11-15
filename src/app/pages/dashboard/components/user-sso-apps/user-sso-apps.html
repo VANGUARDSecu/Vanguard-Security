@@ -77,50 +77,15 @@
     </div>
   </div>
 
-  <!-- Assigned Enterprise SSO Applications -->
-  <div class="sso-subsection">
-    <div class="sub-header">
-      <h3 class="sub-title">
-        <span>Assigned SSO Applications ({{ ssoApplicationsList().length }})</span>
-      </h3>
-      <p class="sub-desc">Federated enterprise SSO applications approved for your account.</p>
-    </div>
-
-    <div class="sso-grid" *ngIf="ssoApplicationsList().length > 0">
-      <div class="sso-card" *ngFor="let app of ssoApplicationsList()">
-        <div class="sso-card-top">
-          <div class="sso-icon-box">{{ app.icon || '🔐' }}</div>
-          <div class="sso-badges">
-            <span class="approved-tag">✓ SSO Approved</span>
-            <span class="proto-tag">{{ app.protocol }}</span>
-          </div>
-        </div>
-
-        <h4 class="sso-app-title">{{ app.name }}</h4>
-        <p class="sso-app-desc">{{ app.description }}</p>
-        <div class="sso-url-chip" *ngIf="app.launchUrl">{{ app.launchUrl }}</div>
-
-        <div class="sso-card-actions">
-          <button type="button" class="btn-launch-sso" (click)="launchSsoApp(app)">
-            Launch via SSO
-          </button>
-          <button type="button" class="btn-disconnect-sso" (click)="removeSsoApp(app)" title="Remove from SSO list">
-            Remove
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="empty-sso-box" *ngIf="ssoApplicationsList().length === 0 && activeConnectedApps().length === 0">
-      <div class="empty-icon">🔐</div>
-      <h4 class="empty-title">No SSO Applications Connected Yet</h4>
-      <p class="empty-desc">
-        Once an administrator approves your federated SSO application (such as Acme Dummy Web) or you authorize an OIDC/SAML sign-in, it will appear here in its dedicated SSO launchpad.
-      </p>
-      <button type="button" class="btn-primary-action" *ngIf="!isPersonalWorkspace()" (click)="openRequestSsoModal()">
-        <span>+ Request SSO Application Access</span>
-      </button>
-    </div>
+  <div class="empty-sso-box" *ngIf="activeConnectedApps().length === 0">
+    <div class="empty-icon">🔐</div>
+    <h4 class="empty-title">No SSO Applications Connected Yet</h4>
+    <p class="empty-desc">
+      Once an administrator approves your federated SSO application (such as Acme Dummy Web) or you authorize an OIDC/SAML sign-in, it will appear here in its dedicated SSO launchpad.
+    </p>
+    <button type="button" class="btn-primary-action" *ngIf="!isPersonalWorkspace()" (click)="openRequestSsoModal()">
+      <span>+ Request SSO Application Access</span>
+    </button>
   </div>
 
   <!-- Requested SSO Applications Queue -->

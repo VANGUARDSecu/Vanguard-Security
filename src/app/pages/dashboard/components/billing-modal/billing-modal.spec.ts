@@ -167,4 +167,51 @@ describe('BillingModal Component (SCRUM-184 Isolation)', () => {
     expect(drawer).toBeTruthy();
     expect(drawer?.textContent).toContain('VANGUARD OFFICIAL TAX & SUBSCRIPTION RECEIPT');
   });
+
+  it('SCRUM-201: blocks provisioning a 2nd distinct app on Company Free Trial when Connected SSO already consumes slot 1', () => {
+    authService.currentUser.set({
+      id: 'usr-admin-free-1',
+      email: 'admin@acme.com',
+      firstName: 'Ada',
+      lastName: 'Admin',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Acme Corp',
+    });
+    dashboardService.connectedApps.set([
+      {
+        id: 'conn-dummy-201',
+        clientId: 'vanguard-dummy-portal',
+        clientName: 'Acme Dummy Web',
+        protocol: 'OpenID Connect 1.0 (PKCE)',
+        scopes: ['openid', 'profile', 'email'],
+        redirectUri: 'http://localhost:4201/auth/callback',
+        originUrl: 'http://localhost:4201',
+        status: 'Connected',
+        connectedAt: 'Nov 15, 2026',
+        description: 'Connected OIDC client',
+        userEmail: 'admin@acme.com',
+      },
+    ]);
+
+    expect(dashboardService.totalIntegratedAppsCount()).toBe(1);
+    expect(dashboardService.canIntegrateAnotherApp().allowed).toBe(false);
+
+    const blocked = dashboardService.provisionEmployeeAppAccount({
+      targetUserId: 'usr-emp-99',
+      targetUserEmail: 'bob@acme.com',
+      targetUserName: 'Bob Member',
+      appName: 'GitHub',
+      launchUrl: 'https://github.com/login',
+      category: 'developer',
+      protocol: 'Extension Autofill',
+      icon: '🐙',
+      assignedUsername: 'bob-gh',
+      assignedPassword: 'Secret123!',
+    });
+
+    expect(blocked).toBeNull();
+    expect(dashboardService.showPaywallModal()).toBe(true);
+    expect(dashboardService.totalIntegratedAppsCount()).toBe(1);
+  });
 });

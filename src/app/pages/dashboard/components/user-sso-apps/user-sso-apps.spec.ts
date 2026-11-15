@@ -110,6 +110,43 @@ describe('UserSsoApps (SCRUM-184 Dedicated SSO Applications Separation)', () => 
 
     component.disconnectApp('vanguard-dummy-portal');
     expect(component.activeConnectedApps().length).toBe(0);
+    fixture.detectChanges();
+    expect(el.textContent).toContain('No SSO Applications Connected Yet');
+  });
+
+  it('SCRUM-201: removes duplicate Assigned SSO Applications subsection from template', () => {
+    dashboardService.connectedApps.set([
+      {
+        id: 'conn-dummy-201',
+        clientId: 'vanguard-dummy-portal',
+        clientName: 'Acme Dummy Web',
+        protocol: 'OpenID Connect 1.0 (PKCE)',
+        scopes: ['openid', 'profile', 'email'],
+        redirectUri: 'http://localhost:4201/auth/callback',
+        originUrl: 'http://localhost:4201',
+        status: 'Connected',
+        connectedAt: 'Nov 15, 2026',
+        description: 'Connected OIDC client',
+        userEmail: 'employee@acme.corp',
+      },
+    ]);
+    dashboardService.apps.set([
+      {
+        id: 'vanguard-dummy-portal',
+        name: 'Acme Dummy Web',
+        category: 'cloud',
+        description: 'Dummy OIDC SSO app',
+        icon: '🏢',
+        protocol: 'OIDC',
+        launchUrl: 'http://localhost:4201',
+        assigned: true,
+        status: 'Approved',
+      },
+    ]);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.textContent).not.toContain('Assigned SSO Applications');
+    expect(el.textContent).toContain('Active Connected SSO Integrations');
   });
 
   it('SCRUM-181: strips /auth/callback from SSO launchUrl and initiates OIDC login via ?sso=vanguard', () => {

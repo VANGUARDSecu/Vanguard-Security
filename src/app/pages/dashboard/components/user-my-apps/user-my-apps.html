@@ -17,7 +17,7 @@
                 style="border: 1px solid rgba(139, 92, 246, 0.45); background: rgba(139, 92, 246, 0.12); color: #c4b5fd; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;"
                 (click)="openBillingModal()"
               >
-                💳 Plan: {{ currentPlanDisplayName() }} • {{ activeAppsList().length }}/{{ isFreeTier() ? '1' : '∞' }} Apps
+                💳 Plan: {{ currentPlanDisplayName() }} • {{ totalIntegratedAppsCount() }}/{{ isFreeTier() ? '1' : '∞' }} Apps
               </button>
               <button
                 type="button"
@@ -65,7 +65,7 @@
               <span style="font-size: 13px; color: #e2e8f0;">
                 <strong>{{ currentPlanDisplayName() }}</strong> —
                 <span *ngIf="isFreeTier()">
-                  Free tier allows <strong>1 integrated application</strong> ({{ activeAppsList().length }}/1 used). Upgrade to unlock unlimited application integrations &amp; advanced zero-trust features.
+                  Free tier allows <strong>1 integrated application</strong> ({{ totalIntegratedAppsCount() }}/1 used). Upgrade to unlock unlimited application integrations &amp; advanced zero-trust features.
                 </span>
                 <span *ngIf="!isFreeTier()">
                   Unlimited application integrations, 3rd-party 2FA accounts, and movement audit exports are active.

@@ -408,7 +408,10 @@ export class AdminDirectory implements OnInit, OnDestroy {
       return;
     }
 
-    this.dashboardService.provisionEmployeeAppAccount({
+    this.provisionError.set(null);
+    this.provisionSuccess.set(null);
+
+    const created = this.dashboardService.provisionEmployeeAppAccount({
       targetUserId: target.id,
       targetUserEmail: target.email,
       targetUserName: target.name,
@@ -421,6 +424,14 @@ export class AdminDirectory implements OnInit, OnDestroy {
       assignedPassword: this.provisionPassword(),
       description: this.provisionDescription().trim(),
     });
+
+    if (!created) {
+      this.provisionError.set(
+        this.dashboardService.paywallFeatureMessage() ||
+          'Free tier integrated application limit reached. Please upgrade your company plan via PayMongo.',
+      );
+      return;
+    }
 
     this.provisionSuccess.set(
       `Assigned ${this.provisionAppName().trim()} (${this.provisionUsername().trim()}) exclusively to ${target.name}. Only ${target.name} can see and launch this account in their dashboard.`,

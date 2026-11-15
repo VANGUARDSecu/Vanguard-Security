@@ -57,6 +57,7 @@ export class UserMyApps implements OnInit, OnDestroy {
   readonly personalApps = this.dashboardService.personalApps;
   readonly isPersonalWorkspace = this.dashboardService.isPersonalWorkspace;
   readonly activeAppsList = this.dashboardService.activeAppsList;
+  readonly totalIntegratedAppsCount = this.dashboardService.totalIntegratedAppsCount;
   readonly filteredApps = this.dashboardService.filteredApps;
   readonly showRequestAppModal = this.dashboardService.showRequestAppModal;
   readonly requestAppSuccess = this.dashboardService.requestAppSuccess;
@@ -504,8 +505,8 @@ export class UserMyApps implements OnInit, OnDestroy {
       return;
     }
 
-    // SCRUM-173: Enforce 1-application Free tier paywall restriction
-    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.activeAppsList().length);
+    // SCRUM-173 / SCRUM-201: Enforce 1-application Free tier paywall across all integrated slots (Autofill + Connected SSO)
+    const entitlement = this.dashboardService.canIntegrateAnotherApp();
     if (!entitlement.allowed) {
       this.dashboardService.requestAppError.set(entitlement.reason || 'Free tier limit reached.');
       this.dashboardService.openPaywallModal(entitlement.reason);
@@ -670,8 +671,8 @@ export class UserMyApps implements OnInit, OnDestroy {
       return;
     }
 
-    // SCRUM-173: Enforce 1-application Free tier paywall restriction
-    const entitlement = this.dashboardService.canIntegrateAnotherApp(this.activeAppsList().length);
+    // SCRUM-173 / SCRUM-201: Enforce 1-application Free tier paywall across all integrated slots (Autofill + Connected SSO)
+    const entitlement = this.dashboardService.canIntegrateAnotherApp();
     if (!entitlement.allowed) {
       this.addAppError.set(entitlement.reason || 'Free tier is limited to 1 integrated application.');
       this.dashboardService.openPaywallModal(entitlement.reason);

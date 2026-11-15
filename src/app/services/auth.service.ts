@@ -6,6 +6,7 @@ import { Observable, catchError, map, of, tap, throwError, finalize, shareReplay
 import { SupabaseService } from './supabase.service';
 import { environment } from '../../environments/environment';
 import { UserConnectedApp } from '../pages/dashboard/models/dashboard.models';
+import { isAllowedMobileRedirectUri } from '../utils/mobile-oauth-relay.util';
 
 export interface UserProfile {
   id?: string;
@@ -335,6 +336,15 @@ export class AuthService {
   private checkForOAuthCallback(): void {
     if (!this.isBrowser) return;
 
+    const currentPath = window.location.pathname || '';
+    const query = new URLSearchParams(window.location.search || '');
+    if (
+      currentPath.startsWith('/auth/mobile-callback') ||
+      isAllowedMobileRedirectUri(query.get('mobile_redirect'))
+    ) {
+      return;
+    }
+
     try {
       // 1. Check URL Hash (e.g. #access_token=... from Google OAuth or email confirmation)
       const hash = window.location.hash;
@@ -411,12 +421,20 @@ export class AuthService {
                   if (raw) pendingSso = JSON.parse(raw);
                 } catch {}
 
+                let returnUrl = '';
+                try {
+                  returnUrl = this.sanitizeReturnUrl(sessionStorage.getItem('vanguard_return_url')) || '';
+                } catch {}
+
                 const queryParams: Record<string, string> = {
                   email: targetEmail,
                   mode: 'signin',
                   hasTotp: res.hasTotp ? 'true' : 'false',
                   provider: 'google',
                 };
+                if (returnUrl) {
+                  queryParams['returnUrl'] = returnUrl;
+                }
                 if (pendingSso) {
                   Object.assign(queryParams, pendingSso);
                   queryParams['method'] = 'push_approval';
@@ -545,12 +563,20 @@ export class AuthService {
                     if (raw) pendingSso = JSON.parse(raw);
                   } catch {}
 
+                  let returnUrl = '';
+                  try {
+                    returnUrl = this.sanitizeReturnUrl(sessionStorage.getItem('vanguard_return_url')) || '';
+                  } catch {}
+
                   const queryParams: Record<string, string> = {
                     email: targetEmail,
                     mode: 'signin',
                     hasTotp: res.hasTotp ? 'true' : 'false',
                     provider: 'google',
                   };
+                  if (returnUrl) {
+                    queryParams['returnUrl'] = returnUrl;
+                  }
                   if (pendingSso) {
                     Object.assign(queryParams, pendingSso);
                     queryParams['method'] = 'push_approval';
@@ -600,7 +626,12 @@ export class AuthService {
           if (this.isBrowser) localStorage.setItem('vanguard_reset_required', 'true');
           this.router.navigate(['/reset-password']);
         } else {
-          this.router.navigate(['/dashboard']);
+          const returnUrl = this.consumeSavedReturnUrl();
+          if (returnUrl && typeof this.router.navigateByUrl === 'function') {
+            this.router.navigateByUrl(returnUrl);
+          } else {
+            this.router.navigate(['/dashboard']);
+          }
         }
       }
     } catch (e) {
@@ -1873,5 +1904,149 @@ export class AuthService {
 
   isLoggedIn(): boolean {
     return !!this.currentUser();
+  }
+
+  sanitizeReturnUrl(raw?: string | null): string | null {
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('://')) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  consumeSavedReturnUrl(): string | null {
+    if (!this.isBrowser) return null;
+    try {
+      const saved = this.sanitizeReturnUrl(sessionStorage.getItem('vanguard_return_url'));
+      sessionStorage.removeItem('vanguard_return_url');
+      return saved;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * SCRUM-190: Scanner-safe GET preview of a signed security alert revocation token.
+   */
+  previewAlertRevocation(token: string): Observable<{
+    valid: boolean;
+    emailMasked: string;
+    applicationName: string;
+    ipAddress: string;
+    device: string;
+    timestamp: string;
+    expiresAt: string;
+  }> {
+    return this.http
+      .get<{
+        valid: boolean;
+        emailMasked: string;
+        applicationName: string;
+        ipAddress: string;
+        device: string;
+        timestamp: string;
+        expiresAt: string;
+      }>(`${this.API_URL}/revoke-from-alert`, { params: { token } })
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg =
+            (Array.isArray(error.error?.message)
+              ? error.error.message.join(', ')
+              : error.error?.message) || 'Unable to verify security revocation link.';
+          return throwError(() => new Error(msg));
+        })
+      );
+  }
+
+  /**
+   * SCRUM-190: Single-use POST confirmation that executes global Vanguard + OIDC session revocation.
+   */
+  confirmAlertRevocation(token: string): Observable<{
+    success: boolean;
+    emailMasked?: string;
+    refreshRevoked: boolean;
+    oidcGrantsRevoked: number;
+    maxResidualAccessSeconds: number;
+    notCovered?: string[];
+    resetPasswordPath?: string;
+    message: string;
+  }> {
+    return this.http
+      .post<{
+        success: boolean;
+        emailMasked?: string;
+        refreshRevoked: boolean;
+        oidcGrantsRevoked: number;
+        maxResidualAccessSeconds: number;
+        notCovered?: string[];
+        resetPasswordPath?: string;
+        message: string;
+      }>(`${this.API_URL}/revoke-from-alert`, { token })
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg =
+            (Array.isArray(error.error?.message)
+              ? error.error.message.join(', ')
+              : error.error?.message) || 'Failed to execute emergency session revocation.';
+          return throwError(() => new Error(msg));
+        })
+      );
+  }
+
+  /**
+   * SCRUM-190: Authenticated self-service global session & OIDC refresh-grant revocation.
+   */
+  revokeSelfSessions(): Observable<{
+    success: boolean;
+    refreshRevoked: boolean;
+    oidcGrantsRevoked: number;
+    maxResidualAccessSeconds: number;
+    notCovered?: string[];
+    message: string;
+  }> {
+    const token = this.token();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return this.http
+      .post<{
+        success: boolean;
+        refreshRevoked: boolean;
+        oidcGrantsRevoked: number;
+        maxResidualAccessSeconds: number;
+        notCovered?: string[];
+        message: string;
+      }>(`${this.API_URL}/revoke-sessions`, {}, { headers })
+      .pipe(
+        catchError((error: HttpErrorResponse) => {
+          const msg =
+            (Array.isArray(error.error?.message)
+              ? error.error.message.join(', ')
+              : error.error?.message) || 'Failed to revoke active sessions.';
+          return throwError(() => new Error(msg));
+        })
+      );
+  }
+}
+
+export function sanitizeReturnUrl(raw?: string | null): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('://')) {
+    return null;
+  }
+  return trimmed;
+}
+
+export function consumeSavedReturnUrl(): string | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    const saved = sanitizeReturnUrl(sessionStorage.getItem('vanguard_return_url'));
+    sessionStorage.removeItem('vanguard_return_url');
+    return saved;
+  } catch {
+    return null;
   }
 }

@@ -194,9 +194,11 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 - **Comprehensive Account Movement Audit Trail (SCRUM-172)**:
   - Company Admins can filter **Security Audit Logs** by **Employee** and **Movement Type** (`All Movements`, `Sign-In / SSO`, `Sign-Out / Revoke`, `App Launches`, `MFA & Verification`, `Vault & Security`).
   - Individual accounts have matching movement filter pills in **Personal Activity History**.
-- **Billing System / Monthly Subscription & Paywall Restrictions (SCRUM-173)**:
+- **Billing System / Monthly Subscription, No-Charge Restore & Vanguard Receipts (SCRUM-173, SCRUM-189)**:
   - Free tier accounts (Individual and Company) are restricted to **1 integrated application** (`1/1 Apps`). Attempting to integrate a 2nd application opens the **Subscription & Paywall Modal**.
-  - Includes **Personal Pro ($5/mo)**, **Business Pro ($29/mo)**, and **Enterprise Zero-Trust ($79/mo)** plans with 1-click **Sandbox Payment Gateway Checkout** and runtime **Sandbox Gateway API URL & Secret Key** configuration.
+  - Includes **Personal Pro ($5/mo)**, **Business Pro ($29/mo)**, and **Enterprise Zero-Trust ($79/mo)** plans with PayMongo Checkout and runtime **Sandbox Gateway API URL & Secret Key** configuration.
+  - **No-Charge Plan Restore Within Paid Cycle**: Downgrading to Free immediately enforces Free quotas while preserving active `paidCredit` until `paidUntil`; re-upgrading to an equal or lower paid tier renders **Restore `<Plan>` ($0 — Paid until `<date>`)** via `POST /billing/resume` with zero duplicate payment.
+  - **Official Vanguard Purchase Receipts**: Displays `VG-RCPT-*` receipt records showing the registered Vanguard email destination (`Sent to Registered Email`), distinct PayMongo checkout payer email when different, expandable printable receipt details (**View Receipt** / **Print / PDF**), and **Send to Registered Email** (`POST /billing/receipts/resend`).
 
 ### Functional Application Request Modal, Duplicate Prevention & Admin Governance (SCRUM-161)
 - **Interactive Multi-Protocol Request Modal**:
@@ -329,7 +331,7 @@ Streamlined, high-assurance administrative portal for SecOps engineers and organ
 Tailored for corporate employees to access organizational resources:
 - **My Apps Launchpad**: One-click single sign-on into authorized corporate SaaS applications.
 - **SSO Applications Launchpad (`SCRUM-184`, `SCRUM-181`)**: Dedicated Federated OIDC/SAML launchpad that strips `/auth/callback` / `/oauth/callback` paths from launch URLs and launches Acme Dummy Web with `?sso=vanguard&login_hint=<email>` to initiate a fresh PKCE flow automatically.
-- **Security & Password Management (SCRUM-32, SCRUM-60 & SCRUM-143)**: Self-service permanent password updates, TOTP authenticator pairing, Out-of-Band Mobile Push & Biometric MFA factor preference toggle, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), elevated modal backdrop layering (z-index 1050), high-visibility active sidebar navigation highlighting with MFA badges, universal appbar workspace mode switching (Admin Console / User Portal / Personal Vault), resilient authentication trail event rendering with raw and localized timestamp fallback (preventing DatePipe parsing failures), event-propagated organization switcher dropdowns, and dedicated personal authentication event audit trail.
+- **Security & Password Management (SCRUM-32, SCRUM-60, SCRUM-143 & SCRUM-190)**: Self-service permanent password updates, **Active Sessions & Global Sign-Out** (`POST /auth/revoke-sessions`, rendered for both Individual and Company Admin users including `/dashboard?tab=security&action=revoke`), TOTP authenticator pairing, Out-of-Band Mobile Push & Biometric MFA factor preference toggle, 10 single-use emergency recovery codes, automated sign-in email alert preferences (master toggle, secondary alert email, threshold filtering), elevated modal backdrop layering (z-index 1050), high-visibility active sidebar navigation highlighting with MFA badges, universal appbar workspace mode switching (Admin Console / User Portal / Personal Vault), resilient authentication trail event rendering with raw and localized timestamp fallback (preventing DatePipe parsing failures), event-propagated organization switcher dropdowns, and dedicated personal authentication event audit trail.
 - **Device Trust & Hardware**: Inspect enrolled laptops, phones, and MDM compliance state.
 - **Corporate Wi-Fi Profile**: Download pre-configured 802.1X / EAP-TLS profiles and certificates for immediate enterprise network access.
 - **SSH Key Manager**: Upload and manage public SSH keys (`ssh-ed25519`, `ssh-rsa`) for infrastructure access.
@@ -341,7 +343,8 @@ Tailored for corporate employees to access organizational resources:
   - Enforced strong password policy: minimum 8 characters with lowercase, uppercase, and special character validation.
   - Automatic dispatch of an 8-digit email OTP verification code upon registration with 10-minute validity.
   - Strict 1-account-per-email enforcement: rejects duplicate registration attempts across Individual, Company, and Directory Tenant account types with clear user feedback.
-- **Login Portal (`/login`)**: Email/password entry with "Remember Me" caching and seamless employee directory session recognition.
+- **Login Portal (`/login`)**: Email/password entry with "Remember Me" caching, seamless employee directory session recognition, and safe `returnUrl` preservation across `authGuard` -> `/login` -> `/verify-otp` (`SCRUM-190`).
+- **Emergency Alert Session Revocation (`/revoke-session`, SCRUM-190)**: Standalone confirmation page linked from Security Alert emails (`/revoke-session?token=...`). Performs a scanner-safe `GET /auth/revoke-from-alert` preview so email link prefetchers cannot log users out, then executes one-click global Supabase & OIDC refresh-grant revocation on explicit `POST /auth/revoke-from-alert` confirmation and purges local browser/extension tokens.
 - **2-Step Verification (`/verify-otp`)**:
   - 8-digit Email OTP codes with 60-second cooldown resend countdown for direct portal logins.
   - 6-digit Authenticator TOTP codes with QR code enrollment.

@@ -161,6 +161,18 @@
       >
         <span class="guide-btn-mark" aria-hidden="true">?</span>
         <span class="guide-btn-label">Guide</span>
+      <!-- SCRUM-184: Account-Isolated Plan & PayMongo Billing Trigger -->
+      <button
+        type="button"
+        class="account-scope-badge"
+        (click)="openBillingModal()"
+        [title]="isTenantMember() ? 'Company plan status (managed by your Company Administrator)' : 'Manage subscription & PayMongo Sandbox billing'"
+        style="cursor: pointer; border: 1px solid rgba(139, 92, 246, 0.45); background: rgba(139, 92, 246, 0.14); color: #ddd6fe;"
+      >
+        <span class="scope-icon">{{ isTenantMember() ? '🏢' : '💳' }}</span>
+        <span class="scope-label">
+          {{ isTenantMember() ? 'Org Plan: ' + currentPlanDisplayName() : currentPlanDisplayName() }}
+        </span>
       </button>
 
       <!-- SCRUM-150: Scoped Access Badge (Strict role and account-scoped UI) -->

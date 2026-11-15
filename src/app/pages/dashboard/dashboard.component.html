@@ -127,13 +127,13 @@
         <app-admin-settings *ngIf="activeTab() === 'settings'"></app-admin-settings>
       </div>
 
+      <!-- User Security Center renders in both Admin and User modes (SCRUM-190) -->
+      <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
+
       <!-- ====================================================================
            VIEW 2: USER PORTAL & PERSONAL VAULT
            ==================================================================== -->
       <div *ngIf="viewMode() === 'user'">
-        <!-- Personal Credential Vault (Individual & Company Users) -->
-        <app-user-personal-vault *ngIf="activeTab() === 'personal-vault'"></app-user-personal-vault>
-
         <!-- 2FA Authenticator (Individual & Company Users) -->
         <app-user-authenticator *ngIf="activeTab() === 'authenticator'"></app-user-authenticator>
 
@@ -143,10 +143,16 @@
         <!-- Dedicated Federated SSO Applications (Dummy Web, OIDC, SAML 2.0) -->
         <app-user-sso-apps *ngIf="activeTab() === 'sso-apps'"></app-user-sso-apps>
 
-        <app-user-security *ngIf="activeTab() === 'user-security'"></app-user-security>
         <app-user-activity *ngIf="activeTab() === 'user-activity'"></app-user-activity>
         <app-user-devices *ngIf="activeTab() === 'user-devices'"></app-user-devices>
       </div>
     </main>
   </div>
+
+  <!-- SCRUM-184: Account-Isolated Billing & PayMongo Sandbox Modal -->
+  <app-billing-modal></app-billing-modal>
+
+  <!-- SCRUM-191: Global Emergency Killswitch & Organization Creation Modals (root-mounted for all tabs) -->
+  <app-killswitch-modal></app-killswitch-modal>
+  <app-create-org-modal></app-create-org-modal>
 </div>

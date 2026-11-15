@@ -6,6 +6,7 @@ import { Component } from '@angular/core';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
+import { DashboardService } from './services/dashboard.service';
 import { AuthService } from '../../services/auth.service';
 import { NewUserGuideService } from '../../shared/new-user-guide/new-user-guide.service';
 
@@ -50,13 +51,14 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should initialize with protocol gateway status items', () => {
+  it('should initialize with active production protocol gateway status items (SCRUM-191)', () => {
     expect(component.protocols.length).toBe(4);
     const names = component.protocols.map((p) => p.name);
-    expect(names).toContain('SAML 2.0 Web SSO');
     expect(names).toContain('OpenID Connect (OIDC)');
-    expect(names).toContain('Cloud LDAP Directory');
-    expect(names).toContain('Cloud RADIUS Gateway');
+    expect(names).toContain('MFA, TOTP & Push Approval');
+    expect(names).toContain('Zero-Knowledge Vault & Extension');
+    expect(names).toContain('Enterprise Audit & Session Guard');
+    expect(component.protocols.every((p) => p.status === 'healthy')).toBe(true);
   });
 
   it('should restrict company account to admin console only (SCRUM-150)', () => {
@@ -589,6 +591,20 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   it('should trigger audit log CSV export with enhanced columns without error (SCRUM-26)', () => {
+    authService.currentUser.set({
+      id: 'adm-1',
+      email: 'admin@vanguard.io',
+      firstName: 'Super',
+      lastName: 'Admin',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Vanguard',
+    });
+    const dashboardService = TestBed.inject(DashboardService);
+    dashboardService.startPaymongoCheckout('business_pro');
+    const sid = new URLSearchParams((dashboardService.lastPaymongoCheckoutUrl() || '').split('?')[1]).get('session')!;
+    dashboardService.finalizePaymongoReturn(sid, 'success');
+
     expect(() => component.exportAuditLogs()).not.toThrow();
     expect(component.adminActionNotice()).toContain('exported successfully');
   });
@@ -1599,9 +1615,70 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
       component.ngOnInit();
       expect(setTabSpy).toHaveBeenCalledWith('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
       expect(noticeSpy).toHaveBeenCalledWith(
         expect.stringContaining('revoke untrusted access')
       );
+    });
+
+    it('renders <app-user-security> on ?tab=security&action=revoke even when Company Admin is in admin viewMode (SCRUM-190)', () => {
+      authService.currentUser.set({
+        id: 'adm-190',
+        email: 'admin@acme.com',
+        role: 'admin',
+        accountType: 'company',
+      });
+      component.dashboardService.viewMode.set('admin');
+      (component as any).route = {
+        queryParams: of({ tab: 'security', action: 'revoke' }),
+      };
+
+      component.ngOnInit();
+      fixture.detectChanges();
+
+      expect(component.dashboardService.activeTab()).toBe('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
+      const secEl = fixture.nativeElement.querySelector('app-user-security');
+      expect(secEl).toBeTruthy();
+    });
+  });
+
+  describe('SCRUM-185: Bidirectional Web-Mobile Billing Sync', () => {
+    it('reloads subscription when /sync/state reports a new billingUpdatedAt timestamp (e.g. paid on Mobile)', async () => {
+      const ds = component.dashboardService as any;
+      const httpMock = TestBed.inject(HttpTestingController);
+      const loadBillingSpy = vi.spyOn(ds, 'loadBillingSubscription').mockImplementation(() => {});
+
+      authService.token.set('live-jwt-sync-test');
+      ds.user.set({
+        id: 'usr-sync-1',
+        name: 'Sync User',
+        email: 'sync@vanguard.io',
+        role: 'user',
+        accountType: 'individual',
+      });
+      ds.lastSyncState = {
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:00:00.000Z',
+      };
+
+      const checkPromise = ds.checkSyncState(false);
+      const req = httpMock.match((r) => r.url.endsWith('/sync/state')).at(-1)!;
+      req.flush({
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:05:00.000Z',
+      });
+
+      await checkPromise;
+      expect(loadBillingSpy).toHaveBeenCalled();
     });
   });
 

@@ -728,8 +728,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.showPaywallModal()).toBe(true);
       expect(component.addAppError()).toContain('Free tier is limited to 1 integrated application');
 
-      // Upgrade to Personal Pro ($5/mo Sandbox) unlocks unlimited apps
+      // Triggering upgrade initiates PayMongo Sandbox redirect and keeps Free tier locked until payment succeeds
       component.upgradePlan('personal_pro');
+      expect(dashboardService.subscriptionPlanId()).toBe('free');
+      const checkoutUrl = dashboardService.lastPaymongoCheckoutUrl() || '';
+      expect(checkoutUrl).toContain('/paymongo-sandbox');
+      const sid = new URLSearchParams(checkoutUrl.split('?')[1]).get('session')!;
+
+      // Simulating PayMongo checkout return with status=success unlocks Personal Pro & unlimited apps
+      dashboardService.finalizePaymongoReturn(sid, 'success');
       expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
       expect(component.showPaywallModal()).toBe(false);
 
@@ -941,6 +948,115 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.myExtensionAccessRequests().some((r) => r.appName === 'Figma Autofill')).toBe(true);
       expect(elTextContains(fixture.nativeElement, 'Active SSO Integrations')).toBe(false);
     });
+  });
+
+  describe('Migrated Password Generator & Vault Unlock (SCRUM-183)', () => {
+    it('generates high-entropy passwords and populates newAppPassword when applying from the generator modal', () => {
+      component.openAddPersonalAppModal();
+      component.openGeneratorModal();
+      expect(component.showGeneratorModal()).toBe(true);
+      expect(component.generatedPassword().length).toBe(20);
+
+      component.genLength = 28;
+      component.regeneratePassword();
+      const generated = component.generatedPassword();
+      expect(generated.length).toBe(28);
+      expect(component.getGeneratedPasswordStrength().score).toBeGreaterThanOrEqual(70);
+
+      component.useGeneratedPasswordInAppForm();
+      expect(component.showGeneratorModal()).toBe(false);
+      expect(component.newAppPassword).toBe(generated);
+      expect(component.getNewAppPasswordStrength().score).toBeGreaterThanOrEqual(70);
+    });
+
+    it('validates empty password on inline vault unlock without calling backend', async () => {
+      component.vaultUnlockPassword = '';
+      await component.unlockVaultSession();
+      expect(component.vaultUnlockError()).toContain('Enter your Vanguard password');
+    });
+
+    it('renders synced browser extension /vault credentials once unlocked, supports reveal/delete, and pins to apps without duplicating vault entries', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      const unlockPromise = dashboardService.unlockVault('MasterPass#123');
+      // syncFromBackend issues GET /vault; flush null envelope then initial persist PUT /vault if emitted
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ envelope: null, revision: 0 }));
+      await unlockPromise;
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 1 }));
+
+      dashboardService.addVaultItem({
+        title: 'github.com',
+        category: 'Login',
+        username: 'dev@vanguard.io',
+        password: 'S3cureExtPassword!',
+        url: 'https://github.com/login',
+        totpSecret: 'JBSWY3DPEHPK3PXP',
+      });
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 2 }));
+      fixture.detectChanges();
+
+      const text = fixture.nativeElement.textContent || '';
+      expect(text).toContain('Synced Extension');
+      expect(text).toContain('github.com');
+      expect(text).toContain('dev@vanguard.io');
+      expect(text).toContain('2FA Linked');
+
+      const item = dashboardService.vaultItems()[0];
+      expect(component.isVaultPasswordRevealed(item.id)).toBe(false);
+      component.toggleRevealVaultPassword(item.id);
+      expect(component.isVaultPasswordRevealed(item.id)).toBe(true);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('S3cureExtPassword!');
+
+      expect(component.isAlreadyPinnedToApps(item)).toBe(false);
+      component.pinVaultItemToApps(item);
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match(() => true).forEach((r) => r.flush({ success: true }));
+      fixture.detectChanges();
+      expect(component.isAlreadyPinnedToApps(item)).toBe(true);
+      expect(dashboardService.vaultItems().length).toBe(1);
+
+      component.deleteVaultCredential(item.id);
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true }));
+      expect(dashboardService.vaultItems().length).toBe(0);
+    }, 25_000);
+
+    it('detects remote extension writes during refreshVaultFromBackend and prompts re-unlock', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      authService.token.set('test-jwt-token');
+      const unlockPromise = dashboardService.unlockVault('MasterPass#123');
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ envelope: null, revision: 0 }));
+      await unlockPromise;
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 1 }));
+      expect(dashboardService.isVaultUnlocked()).toBe(true);
+
+      const refreshPromise = dashboardService.refreshVaultFromBackend();
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) =>
+        r.flush({
+          envelope: {
+            version: 'v1',
+            cipher: 'AES-GCM-256',
+            kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 600_000 },
+            salt: 'NEW_EXT_SALT',
+            iv: 'NEW_IV',
+            ciphertext: 'NEW_CIPHERTEXT_FROM_EXTENSION',
+            updatedAt: '2026-11-15T13:05:00Z',
+          },
+          revision: 2,
+        }),
+      );
+      await refreshPromise;
+      fixture.detectChanges();
+
+      expect(dashboardService.isVaultUnlocked()).toBe(false);
+      expect(dashboardService.remoteVaultUpdateAvailable()).toBe(true);
+      expect(fixture.nativeElement.textContent).toContain('New Extension Credentials Detected');
+    }, 25_000);
   });
 });
 

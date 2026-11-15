@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
@@ -188,5 +188,36 @@ describe('DashboardService Cross-Device Sync (SCRUM-178)', () => {
     );
     connReq.flush({ success: true, connectedApps: [] });
     await second;
+  });
+
+  it('refreshes /vault when checkSyncState detects updated vaultUpdatedAt or vaultRevision (SCRUM-193)', async () => {
+    const first = dashboardService.checkSyncState();
+    httpMock.expectOne(`${apiBase}/sync/state`).flush({
+      totpUpdatedAt: '2026-11-15T00:00:00Z',
+      vaultUpdatedAt: '2026-11-15T00:00:00Z',
+      vaultRevision: 1,
+      personalAppsUpdatedAt: '2026-11-15T00:00:00Z',
+      enterpriseAppsUpdatedAt: null,
+      connectedAppsUpdatedAt: '2026-11-15T00:00:00Z',
+      accessRequestsUpdatedAt: null,
+    });
+    await first;
+
+    const refreshSpy = vi.spyOn(dashboardService, 'refreshVaultFromBackend').mockResolvedValue();
+
+    const second = dashboardService.checkSyncState();
+    httpMock.expectOne(`${apiBase}/sync/state`).flush({
+      totpUpdatedAt: '2026-11-15T00:00:00Z',
+      vaultUpdatedAt: '2026-11-15T00:05:00Z',
+      vaultRevision: 2,
+      personalAppsUpdatedAt: '2026-11-15T00:00:00Z',
+      enterpriseAppsUpdatedAt: null,
+      connectedAppsUpdatedAt: '2026-11-15T00:00:00Z',
+      accessRequestsUpdatedAt: null,
+    });
+    await second;
+
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+    refreshSpy.mockRestore();
   });
 });

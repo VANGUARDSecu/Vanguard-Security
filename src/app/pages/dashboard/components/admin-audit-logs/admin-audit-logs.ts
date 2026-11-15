@@ -35,6 +35,8 @@ export class AdminAuditLogs implements OnInit {
   readonly auditSearchQuery = this.dashboardService.auditSearchQuery;
   readonly auditActorFilter = this.dashboardService.auditActorFilter;
   readonly directoryUsers = this.dashboardService.directoryUsers;
+  readonly canExportAuditCsv = this.dashboardService.canExportAuditCsv;
+  readonly auditRetentionDays = this.dashboardService.auditRetentionDays;
 
   ngOnInit(): void {
     this.dashboardService.loadServerAuditLogs();

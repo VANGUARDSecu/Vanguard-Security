@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit, HostListener } from '@angular/core';
+import { Component, computed, inject, signal, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -14,8 +14,8 @@ import { TenantOrganization, TenantBranding } from '../../models/dashboard.model
 export class AdminSettings implements OnInit {
   readonly dashboardService = inject(DashboardService);
 
-  // Settings subtab navigation
-  readonly settingsSubTab = signal<'governance' | 'branding' | 'tenants'>('governance');
+  // Settings subtab navigation (shared with DashboardService so header shortcuts work)
+  readonly settingsSubTab = this.dashboardService.settingsSubTab;
 
   // Current authenticated user
   readonly user = this.dashboardService.user;
@@ -24,6 +24,7 @@ export class AdminSettings implements OnInit {
   readonly organizations = this.dashboardService.organizations;
   readonly activeOrganization = this.dashboardService.activeOrganization;
   readonly activeOrganizationId = this.dashboardService.activeOrganizationId;
+  readonly directoryUsers = this.dashboardService.directoryUsers;
   readonly showCreateOrgModal = this.dashboardService.showCreateOrgModal;
   readonly newOrgName = this.dashboardService.newOrgName;
   readonly newOrgTier = this.dashboardService.newOrgTier;
@@ -33,6 +34,7 @@ export class AdminSettings implements OnInit {
   // Branding State
   readonly tenantBranding = this.dashboardService.tenantBranding;
   readonly domainVerificationStatus = this.dashboardService.domainVerificationStatus;
+  readonly dnsVerificationMessage = this.dashboardService.dnsVerificationMessage;
   readonly brandingSavedNotice = this.dashboardService.brandingSavedNotice;
 
   // Zero-Trust Governance State
@@ -40,6 +42,7 @@ export class AdminSettings implements OnInit {
   readonly organizationName = this.dashboardService.organizationName;
   readonly enforceMfaAll = this.dashboardService.enforceMfaAll;
   readonly blockHighRiskIps = this.dashboardService.blockHighRiskIps;
+  readonly isSavingPolicy = this.dashboardService.isSavingPolicy;
   readonly showGlobalKillswitchModal = this.dashboardService.showGlobalKillswitchModal;
 
   // Local Branding Form Signals
@@ -62,8 +65,26 @@ export class AdminSettings implements OnInit {
     { name: 'Crimson Red', hex: '#ef4444' },
   ];
 
+  readonly cnameHostLabel = computed<string>(() => {
+    const raw = (this.brandCustomDomain() || '').trim();
+    if (!raw) return 'sso';
+    const hostOnly = raw.replace(/^https?:\/\//i, '').split('/')[0];
+    const parts = hostOnly.split('.').filter(Boolean);
+    if (parts.length > 2) return parts[0];
+    if (parts.length === 2) return '@';
+    return hostOnly || 'sso';
+  });
+
   ngOnInit(): void {
     this.syncBrandingForm();
+    this.dashboardService.loadTenantSettingsFromBackend();
+  }
+
+  getOrgMemberCount(org: TenantOrganization): number {
+    if (org.id === this.activeOrganization().id) {
+      return Math.max(this.directoryUsers().length, org.memberCount || 1, 1);
+    }
+    return org.memberCount || 1;
   }
 
   @HostListener('document:keydown.escape')
@@ -151,7 +172,7 @@ export class AdminSettings implements OnInit {
   }
 
   verifyDns(): void {
-    this.dashboardService.verifyCustomDomainDns();
+    void this.dashboardService.verifyCustomDomainDns(this.brandCustomDomain().trim());
   }
 
   switchOrg(id: string): void {

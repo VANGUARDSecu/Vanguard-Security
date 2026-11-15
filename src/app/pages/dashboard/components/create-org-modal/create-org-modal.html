@@ -1,0 +1,74 @@
+<div class="modal-backdrop" *ngIf="showCreateOrgModal()" (click)="close()">
+  <div class="cyber-modal modal-md" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-header-icon icon-cyan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+      </div>
+      <div class="modal-header-info">
+        <h3 class="modal-title">Register New Tenant Organization</h3>
+        <p class="modal-desc">
+          Partition your directory into a new isolated organizational workspace with custom branding and policies.
+        </p>
+      </div>
+      <button type="button" class="btn-close-modal" (click)="close()" aria-label="Close modal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <div class="alert-banner alert-danger" *ngIf="newOrgError()">
+        <span>{{ newOrgError() }}</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Organization Legal Name <span class="required">*</span></label>
+        <input
+          type="text"
+          class="form-control"
+          placeholder="e.g. Initech Corporation, Cyber Defense Labs"
+          [ngModel]="newOrgName()"
+          (ngModelChange)="newOrgName.set($event)"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Subscription Tier</label>
+        <select
+          class="form-control"
+          [ngModel]="newOrgTier()"
+          (ngModelChange)="newOrgTier.set($event)"
+        >
+          <option value="Enterprise">Enterprise (Full Governance &amp; Audit)</option>
+          <option value="Business">Business (OIDC SSO &amp; MFA Suite)</option>
+          <option value="Starter">Starter (Basic Web SSO)</option>
+          <option value="Trial">Trial (14-Day Evaluation)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Primary Organization Domain (Optional)</label>
+        <input
+          type="text"
+          class="form-control"
+          placeholder="e.g. initech.com"
+          [ngModel]="newOrgDomain()"
+          (ngModelChange)="newOrgDomain.set($event)"
+        />
+        <span class="field-hint">Used for CNAME vanity domain mapping and directory email claim matching.</span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary-action" (click)="close()">Cancel</button>
+      <button type="button" class="btn-primary-action" (click)="submit()">
+        <span>Create &amp; Switch to Organization</span>
+      </button>
+    </div>
+  </div>
+</div>

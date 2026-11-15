@@ -107,7 +107,7 @@ export class DashboardService {
   searchQuery = '';
 
   // Active navigation tab
-  readonly activeTab = signal<string>(this.isIndividual() ? 'personal-vault' : (this.isAdmin() ? 'overview' : 'my-apps'));
+  readonly activeTab = signal<string>(this.isAdmin() && !this.isIndividual() ? 'overview' : 'my-apps');
 
   // ==========================================
   // Responsive Mobile Navigation Drawer State (SCRUM-179)
@@ -129,6 +129,15 @@ export class DashboardService {
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
   readonly sessionRevoked = signal<boolean>(false);
+  readonly isRevokingSessions = signal<boolean>(false);
+  readonly securityRevokePrompt = signal<boolean>(false);
+  readonly sessionRevocationResult = signal<{
+    success: boolean;
+    refreshRevoked: boolean;
+    oidcGrantsRevoked: number;
+    maxResidualAccessSeconds: number;
+    message: string;
+  } | null>(null);
   readonly adminActionNotice = signal<string | null>(null);
 
   // ==========================================
@@ -743,6 +752,138 @@ export class DashboardService {
     notCovered: string[];
   } | null>(null);
   readonly globalKillswitchError = signal<string | null>(null);
+  readonly isSavingPolicy = signal<boolean>(false);
+  readonly dnsVerificationMessage = signal<string | null>(null);
+  readonly oidcClientsCount = signal<number | null>(null);
+  readonly settingsSubTab = signal<'governance' | 'branding' | 'tenants'>('governance');
+  readonly pendingDirectoryAction = signal<'invite' | 'groups' | null>(null);
+
+  /** Deduplicated count across authoritative server audit logs and local tenant audit events. */
+  readonly mergedAuditEventsCount = computed<number>(() => {
+    const seen = new Set<string>();
+    for (const evt of [...this.serverAuditEvents(), ...this.tenantAuditEvents()]) {
+      if (evt.id) seen.add(evt.id);
+    }
+    return seen.size;
+  });
+
+  readonly activeDirectoryUsersCount = computed<number>(
+    () => this.directoryUsers().filter((u) => u.accountStatus === 'Active').length,
+  );
+
+  /** Dynamic 0-100 posture score calculated from real governance, MFA, and domain verification state. */
+  readonly securityPostureScore = computed<number>(() => {
+    let score = 35; // Baseline: Supabase JWT + OWASP Throttler Guard active
+    if (this.enforceMfaAll()) score += 25;
+    if (this.blockHighRiskIps()) score += 15;
+
+    const activeUsers = this.directoryUsers().filter((u) => u.accountStatus === 'Active');
+    if (activeUsers.length > 0) {
+      const totpCount = activeUsers.filter((u) => u.mfaStatus === 'Enrolled (TOTP)').length;
+      score += Math.round((totpCount / activeUsers.length) * 15);
+    } else if (this.enforceMfaAll()) {
+      score += 10;
+    }
+
+    if (this.tenantBranding().ssoDomainVerified || this.activeOrganization().isCustomDomainVerified) {
+      score += 10;
+    }
+    return Math.min(100, Math.max(0, score));
+  });
+
+  readonly securityPostureTags = computed<{ label: string; tone: 'emerald' | 'blue' | 'amber' | 'rose' }[]>(() => [
+    this.enforceMfaAll()
+      ? { label: 'Mandatory MFA Enforced', tone: 'emerald' }
+      : { label: 'MFA Optional', tone: 'amber' },
+    this.blockHighRiskIps()
+      ? { label: 'High-Risk IP Blocking On', tone: 'blue' }
+      : { label: 'IP Blocking Disabled', tone: 'amber' },
+    this.tenantBranding().ssoDomainVerified || this.activeOrganization().isCustomDomainVerified
+      ? { label: 'Verified Custom Domain', tone: 'emerald' }
+      : { label: 'DNS Verification Pending', tone: 'blue' },
+  ]);
+
+  setSettingsSubTab(tab: 'governance' | 'branding' | 'tenants'): void {
+    this.settingsSubTab.set(tab);
+  }
+
+  requestDirectoryQuickAction(action: 'invite' | 'groups'): void {
+    this.closeMobileSidebar();
+    this.pendingDirectoryAction.set(action);
+    this.viewMode.set('admin');
+    this.activeTab.set('directory');
+  }
+
+  loadOidcClientsSummary(): void {
+    if (!this.isBrowser) return;
+    this.http
+      .get<{ success?: boolean; clients?: Array<{ clientId?: string }> }>(`${this.apiBase}/oauth/clients`)
+      .subscribe({
+        next: (res) => {
+          this.oidcClientsCount.set(Array.isArray(res?.clients) ? res.clients.length : 0);
+        },
+        error: () => {
+          // Retain current signal value if OIDC registry endpoint is temporarily unavailable.
+        },
+      });
+  }
+
+  loadTenantSettingsFromBackend(): void {
+    if (!this.isBrowser || !this.authService.token()) return;
+    this.http
+      .get<{
+        success?: boolean;
+        tenantId?: string;
+        settings?: { mfaEnforced?: boolean; blockHighRiskIps?: boolean; sessionDurationMinutes?: number };
+        branding?: Record<string, any>;
+        domain?: string | null;
+        name?: string | null;
+      }>(`${this.apiBase}/auth/tenant-settings`)
+      .subscribe({
+        next: (res) => {
+          const settings = res?.settings;
+          if (settings) {
+            if (typeof settings.mfaEnforced === 'boolean') {
+              this.enforceMfaAll.set(settings.mfaEnforced);
+              this.saveStored('vanguard_policy_enforce_mfa', settings.mfaEnforced);
+            }
+            if (typeof settings.blockHighRiskIps === 'boolean') {
+              this.blockHighRiskIps.set(settings.blockHighRiskIps);
+              this.saveStored('vanguard_policy_block_high_risk', settings.blockHighRiskIps);
+            }
+            if (typeof settings.sessionDurationMinutes === 'number') {
+              this.sessionTimeoutMinutes.set(settings.sessionDurationMinutes);
+            }
+          }
+          if (res?.branding) {
+            const b = res.branding;
+            const current = this.tenantBranding();
+            const mergedBranding: TenantBranding = {
+              ...current,
+              organizationId: res.tenantId || current.organizationId,
+              companyName: res.name || b['companyName'] || current.companyName,
+              primaryAccentColor: b['primaryAccentColor'] || b['primaryColor'] || current.primaryAccentColor,
+              ssoCustomDomain: b['ssoCustomDomain'] || res.domain || current.ssoCustomDomain,
+              ssoDomainVerified: typeof b['ssoDomainVerified'] === 'boolean' ? b['ssoDomainVerified'] : current.ssoDomainVerified,
+              logoUrl: b['logoUrl'] ?? current.logoUrl,
+              faviconUrl: b['faviconUrl'] ?? current.faviconUrl,
+              supportEmail: b['supportEmail'] ?? current.supportEmail,
+              emailCustomGreeting: b['emailCustomGreeting'] ?? current.emailCustomGreeting,
+              emailButtonText: b['emailButtonText'] ?? current.emailButtonText,
+            };
+            this.tenantBranding.set(mergedBranding);
+            this.saveStored('vanguard_tenant_branding', mergedBranding);
+            this.applyBrandAccent(mergedBranding.primaryAccentColor);
+            if (mergedBranding.ssoDomainVerified) {
+              this.domainVerificationStatus.set('verified');
+            }
+          }
+        },
+        error: () => {
+          // Keep locally cached / Supabase synced state if backend is unreachable.
+        },
+      });
+  }
 
   // ==========================================
   // SCRUM-42: Application Access Requests & Admin Approval Queue State
@@ -1192,10 +1333,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   private crossDeviceSyncInFlight = false;
   private lastSyncState: {
     totpUpdatedAt: string | null;
+    vaultUpdatedAt?: string | null;
+    vaultRevision?: number;
     personalAppsUpdatedAt: string | null;
     enterpriseAppsUpdatedAt: string | null;
     connectedAppsUpdatedAt: string | null;
     accessRequestsUpdatedAt: string | null;
+    billingUpdatedAt?: string | null;
   } | null = null;
   private readonly pendingTotpCreateIds = new Set<string>();
   private readonly pendingTotpDeleteIds = new Set<string>();
@@ -1876,39 +2020,39 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   readonly signInHistory = signal<SignInEvent[]>(this.initSignInHistory());
 
-  // Protocol Gateway status items
+  // Protocol Gateway status items (Active Production Gateways)
   readonly protocols: ProtocolStatus[] = [
     {
       name: 'OpenID Connect (OIDC)',
-      type: 'OAuth 2.0 / JWT Issuer',
+      type: 'OAuth 2.0 / PKCE JWT Issuer',
       port: 'HTTPS (443)',
       status: 'healthy',
-      description: 'Discovery & JWKS token authentication for cloud services and mobile clients.',
+      description: 'Discovery, PKCE authorization, and JWKS token issuance for web and mobile SSO clients.',
       badge: 'Active (Production)',
     },
     {
-      name: 'SAML 2.0 Web SSO',
-      type: 'Identity Provider (IdP)',
+      name: 'MFA, TOTP & Push Approval',
+      type: 'RFC 6238 & Mobile Approval',
       port: 'HTTPS (443)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Production endpoint returns 404.',
-      badge: 'Deferred (PRD §3)',
+      status: 'healthy',
+      description: '8-digit email OTP, authenticator app TOTP, recovery codes, and encrypted mobile push challenges.',
+      badge: 'Active (Production)',
     },
     {
-      name: 'Cloud LDAP Directory',
-      type: 'Directory Bind Endpoint',
-      port: 'LDAPS (636)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
-      badge: 'Deferred (PRD §3)',
+      name: 'Zero-Knowledge Vault & Extension',
+      type: 'AES-GCM Encrypted Sync API',
+      port: 'HTTPS (443)',
+      status: 'healthy',
+      description: 'Cross-device TOTP/credential vault sync, real-time watermark checks, and browser extension bridge.',
+      badge: 'Active (Production)',
     },
     {
-      name: 'Cloud RADIUS Gateway',
-      type: 'Network Access (802.1X)',
-      port: 'UDP (1812 / 1813)',
-      status: 'offline',
-      description: 'Deferred from pilot scope (PRD §3 / SCRUM-122). Listener unbonded in production.',
-      badge: 'Deferred (PRD §3)',
+      name: 'Enterprise Audit & Session Guard',
+      type: 'Tenant RBAC & Killswitch Engine',
+      port: 'HTTPS (443)',
+      status: 'healthy',
+      description: 'Immutable security audit trail, alert revocation links, and tenant-wide emergency killswitch.',
+      badge: 'Active (Production)',
     },
   ];
 
@@ -2083,11 +2227,21 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS Mobile';
     }
 
+    const latestServer = this.serverAuditEvents().find(
+      (evt) => evt.clientIp && evt.clientIp !== '—' && evt.clientIp !== 'Unknown',
+    );
+    const latestHistory = this.signInHistory().find(
+      (evt) => evt.ip && evt.ip !== '—' && !evt.ip.startsWith('127.0.0.1'),
+    );
+
     return {
       browser,
       os,
-      ip: '127.0.0.1 (Loopback / Secure TLS)',
-      location: 'Local Workstation',
+      ip: latestServer?.clientIp || latestHistory?.ip || 'Current Authenticated Session',
+      location:
+        (latestServer?.location && latestServer.location !== '—' ? latestServer.location : '') ||
+        latestHistory?.location ||
+        'Verified via TLS',
       verifiedMethod: 'Supabase JWT + OWASP Throttler Guard',
     };
   });
@@ -2155,8 +2309,23 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.saveStored('vanguard_tenant_branding', mergedBranding);
             this.applyBrandAccent(mergedBranding.primaryAccentColor);
           }
+          if (activeCloud.settings) {
+            const s = activeCloud.settings;
+            if (typeof s.mfaEnforced === 'boolean') {
+              this.enforceMfaAll.set(s.mfaEnforced);
+              this.saveStored('vanguard_policy_enforce_mfa', s.mfaEnforced);
+            }
+            if (typeof s.blockHighRiskIps === 'boolean') {
+              this.blockHighRiskIps.set(s.blockHighRiskIps);
+              this.saveStored('vanguard_policy_block_high_risk', s.blockHighRiskIps);
+            }
+            if (typeof s.sessionDurationMinutes === 'number') {
+              this.sessionTimeoutMinutes.set(s.sessionDurationMinutes);
+            }
+          }
         }
         this.loadDirectoryUsers();
+        this.loadTenantSettingsFromBackend();
         }
       }
 
@@ -2305,7 +2474,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     // Default view mode to the user's role and account type (SCRUM-150)
     if (this.isIndividual()) {
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
     } else if (this.isAdmin()) {
       this.viewMode.set('admin');
       this.activeTab.set('overview');
@@ -2314,6 +2483,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.activeTab.set('my-apps');
     }
     this.syncGroupInheritedApps();
+    this.hydrateScopedBillingFromLocal();
     this.initSupabaseSync();
     this.loadCompanyApps();
     this.startTotpTimer();
@@ -2500,7 +2670,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (this.isIndividual()) {
       this.activeWorkspaceId.set('personal');
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
     } else if (this.isAdmin()) {
       if (this.activeWorkspaceId() === 'personal') {
         this.activeWorkspaceId.set(this.activeOrganizationId() || 'org_root');
@@ -2542,9 +2712,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.loadSecurityPreferences();
     this.loadRecoveryCodesStatus();
     this.loadTotpEnrollmentStatus();
+    this.loadBillingSubscription();
     this.setupCrossDeviceSyncRealtime();
     this.startCrossDeviceSyncPolling();
     this.startLiveSsoChallengePolling();
+    if (this.isAdmin()) {
+      this.loadTenantSettingsFromBackend();
+      this.loadOidcClientsSummary();
+      this.loadServerAuditLogs();
+    }
 
     const storedGroups = this.loadStored<DirectoryGroup[]>('vanguard_directory_groups', []);
     if (storedGroups && storedGroups.length > 0) {
@@ -2652,7 +2828,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   toggleViewMode(mode: 'admin' | 'user'): void {
     if (this.isIndividual()) {
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
       return;
     }
     if (this.isAdmin()) {
@@ -2828,6 +3004,15 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         )
         .on(
           'postgres_changes',
+          { event: '*', schema: 'public', table: 'vault_items' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            if (uid && row?.user_id && row.user_id !== uid) return;
+            void this.refreshVaultFromBackend();
+          },
+        )
+        .on(
+          'postgres_changes',
           { event: '*', schema: 'public', table: 'user_personal_apps' },
           (payload: any) => {
             const row = payload?.new || payload?.old;
@@ -2842,6 +3027,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             const row = payload?.new || payload?.old;
             if (uid && row?.user_id && row.user_id !== uid) return;
             this.loadCompanyApps();
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'billing_subscriptions' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            const tenantId = this.resolveRealTenantId();
+            const matchesUser = uid && row?.user_id && row.user_id === uid;
+            const matchesTenant = tenantId && row?.tenant_id && row.tenant_id === tenantId;
+            if ((uid || tenantId) && row && !matchesUser && !matchesTenant) return;
+            this.loadBillingSubscription();
           },
         )
         .subscribe();
@@ -2906,10 +3103,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const state = await firstValueFrom(
         this.http.get<{
           totpUpdatedAt: string | null;
+          vaultUpdatedAt?: string | null;
+          vaultRevision?: number;
           personalAppsUpdatedAt: string | null;
           enterpriseAppsUpdatedAt: string | null;
           connectedAppsUpdatedAt: string | null;
           accessRequestsUpdatedAt: string | null;
+          billingUpdatedAt?: string | null;
         }>(`${this.apiBase}/sync/state`),
       );
       if (!state) return;
@@ -2923,6 +3123,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       if (!prev || state.totpUpdatedAt !== prev.totpUpdatedAt) {
         await this.loadTotpAccounts();
       }
+      if (
+        !prev ||
+        state.vaultUpdatedAt !== prev.vaultUpdatedAt ||
+        state.vaultRevision !== prev.vaultRevision
+      ) {
+        await this.refreshVaultFromBackend();
+      }
       if (!prev || state.personalAppsUpdatedAt !== prev.personalAppsUpdatedAt) {
         await this.loadPersonalApps();
       }
@@ -2934,6 +3141,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       }
       if (!prev || state.accessRequestsUpdatedAt !== prev.accessRequestsUpdatedAt) {
         await this.loadAccessRequests();
+      }
+      if (!prev || state.billingUpdatedAt !== prev.billingUpdatedAt) {
+        this.loadBillingSubscription();
       }
     } catch {
       // Ignore transient offline errors during background sync check
@@ -3043,7 +3253,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   setActiveTab(tab: string): void {
     this.closeMobileSidebar();
     const userTabs = [
-      'personal-vault', 'my-apps', 'authenticator', 'user-security',
+      'my-apps', 'sso-apps', 'authenticator', 'user-security',
       'user-activity', 'user-devices'
     ];
     if (userTabs.includes(tab) && this.viewMode() === 'admin' && !this.isAdmin()) {
@@ -3099,6 +3309,30 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Suspend account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Medium');
+
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ membershipSuspended?: boolean; revocation?: { oidcGrantsRevoked?: number } }>(
+          `${this.apiBase}/apps/revoke-sessions?targetUserId=${encodeURIComponent(user.id)}&suspend=true`,
+          {},
+        )
+        .subscribe({
+          next: (res) => {
+            const grants = res?.revocation?.oidcGrantsRevoked ?? 0;
+            this.showAdminNotice(
+              `Account for ${user.name} suspended and active tokens revoked (${grants} OIDC grant(s)).`,
+            );
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Account suspended locally; backend revocation warning: ${err?.error?.message || 'request failed'}.`,
+            );
+          },
+        });
+      return;
+    }
+
     this.showAdminNotice(`Account for ${user.name} has been suspended.`);
   }
 
@@ -3108,6 +3342,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     );
     this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Reactivate account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Low');
+
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ success?: boolean }>(`${this.apiBase}/apps/reactivate-member?targetUserId=${encodeURIComponent(user.id)}`, {})
+        .subscribe({
+          next: () => {
+            this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Account reactivated locally; backend sync warning: ${err?.error?.message || 'request failed'}.`,
+            );
+          },
+        });
+      return;
+    }
+
     this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
   }
 
@@ -3122,11 +3374,44 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   forceUserPasswordReset(user: DirectoryUser): void {
     this.logAuditEvent(`Dispatched password reset for ${user.email}`, 'Auth Service', 'Password Recovery', 'success', 'Low');
+    if (this.isBrowser && this.authService.token() && user.email && typeof this.authService.forgotPassword === 'function') {
+      this.authService.forgotPassword(user.email).subscribe({
+        next: () => {
+          this.showAdminNotice(`Password reset recovery email dispatched to ${user.email}.`);
+        },
+        error: (err: Error) => {
+          this.showAdminNotice(`Password reset request failed for ${user.email}: ${err?.message || 'Unavailable'}.`);
+        },
+      });
+      return;
+    }
     this.showAdminNotice(`Password reset recovery email dispatched to ${user.email}.`);
   }
 
   adminRevokeUserSessions(user: DirectoryUser): void {
     this.logAuditEvent(`Revoked all active sessions for ${user.name}`, 'Session Vault', 'JWT Guard', 'success', 'High');
+    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+      this.http
+        .post<{ revocation?: { oidcGrantsRevoked?: number } }>(
+          `${this.apiBase}/apps/revoke-sessions?targetUserId=${encodeURIComponent(user.id)}&suspend=false`,
+          {},
+        )
+        .subscribe({
+          next: (res) => {
+            const grants = res?.revocation?.oidcGrantsRevoked ?? 0;
+            this.showAdminNotice(
+              `Active sessions and ${grants} OIDC refresh grant(s) revoked for ${user.name}.`,
+            );
+            this.loadServerAuditLogs();
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              `Session revocation failed for ${user.name}: ${err?.error?.message || 'Unavailable'}.`,
+            );
+          },
+        });
+      return;
+    }
     this.showAdminNotice(`All active sessions and tokens revoked for ${user.name}.`);
   }
 
@@ -3910,23 +4195,49 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showAuditInspector.set(false);
   }
 
-  exportAuditLogs(): void {
+  exportAuditLogs(scope: 'tenant' | 'personal' = 'tenant', personalEvents: SignInEvent[] = []): void {
+    if (!this.canExportAuditCsv()) {
+      const targetPlan = this.isIndividual()
+        ? 'Personal Pro ($5/mo via PayMongo Sandbox)'
+        : 'Business Pro ($29/mo) or Enterprise ($79/mo)';
+      const message = this.isTenantMember()
+        ? `Free tier restriction: CSV audit log export and extended retention (${this.auditRetentionDays()}d current window) are locked on ${this.organizationName()}'s Company Free Trial. Wait for or ask your Company Administrator to upgrade.`
+        : `Free tier restriction: CSV audit log export and extended retention require upgrading to ${targetPlan}.`;
+      this.openPaywallModal(message);
+      return;
+    }
+
     if (!this.isBrowser) return;
 
-    const headers = 'ID,Timestamp,Actor,Target,Protocol,Event_Type,Severity,Status,Risk_Score,Client_IP,Location,Device,TLS_Cipher,Request_ID,Threat_Anomaly\n';
-    const rows = this.filteredAuditEvents()
-      .map(
-        (e) =>
-          `"${e.id}","${e.timestamp}","${e.actor}","${e.target}","${e.protocol}","${e.eventType || ''}","${e.severity || ''}","${e.status}","${e.riskScore}","${e.clientIp}","${e.location}","${e.device}","${e.tlsCipher || ''}","${e.requestId || ''}","${e.threatIndicator ? e.threatIndicator.anomalyType : 'NONE'}"`
-      )
-      .join('\n');
+    let csvContent = '';
+    if (scope === 'personal') {
+      const headers = 'ID,Timestamp,Movement_Type,Action,Application,Protocol,Device,Client_IP,Location,Status\n';
+      const rows = personalEvents
+        .map(
+          (e) =>
+            `"${e.id}","${e.timestamp}","${e.movementType || 'LOGIN'}","${e.action || ''}","${e.application}","${e.protocol}","${e.device}","${e.ip}","${e.location}","${e.status}"`,
+        )
+        .join('\n');
+      csvContent = headers + rows;
+    } else {
+      const headers = 'ID,Timestamp,Actor,Target,Protocol,Event_Type,Severity,Status,Risk_Score,Client_IP,Location,Device,TLS_Cipher,Request_ID,Threat_Anomaly\n';
+      const rows = this.filteredAuditEvents()
+        .map(
+          (e) =>
+            `"${e.id}","${e.timestamp}","${e.actor}","${e.target}","${e.protocol}","${e.eventType || ''}","${e.severity || ''}","${e.status}","${e.riskScore}","${e.clientIp}","${e.location}","${e.device}","${e.tlsCipher || ''}","${e.requestId || ''}","${e.threatIndicator ? e.threatIndicator.anomalyType : 'NONE'}"`,
+        )
+        .join('\n');
+      csvContent = headers + rows;
+    }
 
-    const csvContent = headers + rows;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `vanguard-audit-log-${Date.now()}.csv`);
+    link.setAttribute(
+      'download',
+      `vanguard-${scope === 'personal' ? 'movement' : 'audit'}-log-${Date.now()}.csv`,
+    );
     link.click();
     URL.revokeObjectURL(url);
 
@@ -3936,23 +4247,77 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // ==========================================
   // PHASE 3: Vault Settings & Killswitch
   // ==========================================
+  private persistTenantPatch(
+    patch: Record<string, any>,
+    onRollback: () => void,
+    onSuccess: () => void,
+  ): void {
+    if (!this.isBrowser || !this.authService.token()) {
+      onSuccess();
+      return;
+    }
+    this.isSavingPolicy.set(true);
+    this.http.patch(`${this.apiBase}/auth/tenant-settings`, patch).subscribe({
+      next: () => {
+        this.isSavingPolicy.set(false);
+        onSuccess();
+        this.loadServerAuditLogs();
+      },
+      error: (err) => {
+        this.isSavingPolicy.set(false);
+        onRollback();
+        this.showAdminNotice(
+          `Failed to save tenant policy: ${err?.error?.message || 'Server unavailable'}. Reverted change.`,
+        );
+      },
+    });
+  }
+
   toggleEnforceMfa(): void {
-    this.enforceMfaAll.update((v) => !v);
-    this.saveStored('vanguard_policy_enforce_mfa', this.enforceMfaAll());
-    const status = this.enforceMfaAll() ? 'Enforced' : 'Optional';
-    this.logAuditEvent(`MFA Policy updated to ${status}`, 'Policy Engine', 'Auth Guard', 'success', 'Medium');
-    this.showAdminNotice(`Tenant Multi-Factor policy: ${status} for all members.`);
+    const previous = this.enforceMfaAll();
+    const next = !previous;
+    this.enforceMfaAll.set(next);
+    this.saveStored('vanguard_policy_enforce_mfa', next);
+    const status = next ? 'Enforced' : 'Optional';
+
+    this.persistTenantPatch(
+      { mfaEnforced: next },
+      () => {
+        this.enforceMfaAll.set(previous);
+        this.saveStored('vanguard_policy_enforce_mfa', previous);
+      },
+      () => {
+        this.logAuditEvent(`MFA Policy updated to ${status}`, 'Policy Engine', 'Auth Guard', 'success', 'Medium');
+        this.showAdminNotice(`Tenant Multi-Factor policy: ${status} for all members.`);
+      },
+    );
   }
 
   toggleBlockHighRiskIps(): void {
-    this.blockHighRiskIps.update((v) => !v);
-    this.saveStored('vanguard_policy_block_high_risk', this.blockHighRiskIps());
-    const status = this.blockHighRiskIps() ? 'Active' : 'Disabled';
-    this.logAuditEvent(`Tor / High-Risk IP Blocking updated to ${status}`, 'WAF / Rate Limiter', 'Network Guard', 'success', 'Medium');
-    this.showAdminNotice(`Automated Tor & proxy IP blocking: ${status}.`);
+    const previous = this.blockHighRiskIps();
+    const next = !previous;
+    this.blockHighRiskIps.set(next);
+    this.saveStored('vanguard_policy_block_high_risk', next);
+    const status = next ? 'Active' : 'Disabled';
+
+    this.persistTenantPatch(
+      { blockHighRiskIps: next },
+      () => {
+        this.blockHighRiskIps.set(previous);
+        this.saveStored('vanguard_policy_block_high_risk', previous);
+      },
+      () => {
+        this.logAuditEvent(`Tor / High-Risk IP Blocking updated to ${status}`, 'WAF / Rate Limiter', 'Network Guard', 'success', 'Medium');
+        this.showAdminNotice(`Automated Tor & proxy IP blocking: ${status}.`);
+      },
+    );
   }
 
   openGlobalKillswitchModal(): void {
+    this.globalKillswitchPending.set(false);
+    this.globalKillswitchSuccess.set(false);
+    this.globalKillswitchError.set(null);
+    this.globalKillswitchResult.set(null);
     this.showGlobalKillswitchModal.set(true);
   }
 
@@ -3960,10 +4325,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showGlobalKillswitchModal.set(false);
   }
 
-  executeGlobalKillswitch(): void {
-    // SCRUM-131: real tenant-wide revocation via the backend. Reports the
-    // CONFIRMED per-tenant outcome and residual-access bound — no fabricated
-    // "all tokens terminated everywhere" claim.
+  executeGlobalKillswitch(signOutAdmin = false): void {
+    // SCRUM-131 & SCRUM-191: real tenant-wide revocation via the backend. Reports the
+    // CONFIRMED per-tenant outcome and residual-access bound — and optionally revokes
+    // the acting administrator's own session when signOutAdmin is selected.
     this.globalKillswitchPending.set(true);
     this.globalKillswitchError.set(null);
     this.globalKillswitchResult.set(null);
@@ -3995,6 +4360,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               `. Existing access tokens expire within ~${residualMin} min. ` +
               `Not covered: ${res.notCovered.join('; ') || 'none reported'}.`,
           );
+          if (signOutAdmin) {
+            this.showGlobalKillswitchModal.set(false);
+            this.revokeAllSessions(true);
+          }
         },
         error: (err) => {
           this.globalKillswitchPending.set(false);
@@ -6538,6 +6907,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   /** SCRUM-114: true when the vault key is loaded in memory. */
   readonly isVaultUnlocked = this.vaultCrypto.isUnlocked;
+  /** True when backend /vault has newer encrypted writes (e.g. from browser extension). */
+  readonly remoteVaultUpdateAvailable = this.vaultCrypto.remoteUpdateAvailable;
+
+  /** SCRUM-192: Check /vault on backend for newer encrypted items written by extension. */
+  async refreshVaultFromBackend(): Promise<void> {
+    if (!this.hasLiveAuthToken()) return;
+    const userId = this.authService.currentUser()?.id;
+    if (!userId) return;
+    await this.vaultCrypto.syncFromBackend(userId);
+    if (!this.vaultCrypto.isUnlocked()) {
+      this.vaultItems.set([]);
+    }
+  }
 
   /** SCRUM-98: lock the vault and clear decrypted items from memory. */
   lockVault(): void {
@@ -6575,6 +6957,20 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   addVaultItem(item: Omit<PersonalVaultItem, 'id' | 'updatedAt'>): void {
+    const normTitle = (item.title || '').trim().toLowerCase();
+    const normUser = (item.username || '').trim().toLowerCase();
+    const normDom = this.extractDomain(item.url || '');
+    const existing = this.vaultItems().find(
+      (i) =>
+        (i.title || '').trim().toLowerCase() === normTitle &&
+        (i.username || '').trim().toLowerCase() === normUser &&
+        this.extractDomain(i.url || '') === normDom,
+    );
+    if (existing) {
+      this.updateVaultItem(existing.id, item);
+      return;
+    }
+
     const newItem: PersonalVaultItem = {
       ...item,
       id: 'vault-item-' + Date.now(),
@@ -6583,6 +6979,29 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.vaultItems.update((items) => [newItem, ...items]);
     this.persistVaultItems();
     this.logAuditEvent(`Added vault credential: ${newItem.title}`, 'Personal Vault', newItem.category, 'success', 'Low');
+  }
+
+  /**
+   * SCRUM-192: Pin a browser-extension / vault credential card onto the My Applications
+   * launcher grid, respecting plan entitlements.
+   */
+  pinVaultItemToApps(item: PersonalVaultItem): { ok: boolean; reason?: string } {
+    const entitlement = this.canIntegrateAnotherApp(this.activeAppsList().length);
+    if (!entitlement.allowed) {
+      this.openPaywallModal(entitlement.reason);
+      return { ok: false, reason: entitlement.reason };
+    }
+    const targetUrl = this.normalizeLoginUrl(item.url || item.title || '');
+    this.addApplication({
+      name: item.title || 'Application',
+      category: 'collaboration',
+      launchUrl: targetUrl || 'https://vanguard.security',
+      description: `Pinned from Zero-Knowledge Vault (${item.username})`,
+      icon: '🔑',
+      username: item.username,
+      password: item.password || '',
+    });
+    return { ok: true };
   }
 
   updateVaultItem(id: string, updates: Partial<PersonalVaultItem>): void {
@@ -7473,7 +7892,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.activeWorkspaceId.set('personal');
       this.saveStored('vanguard_active_workspace', 'personal');
       this.viewMode.set('user');
-      this.activeTab.set('personal-vault');
+      this.activeTab.set('my-apps');
       return;
     }
 
@@ -7486,6 +7905,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.switchOrganization(workspaceId);
       this.viewMode.set('admin');
       this.activeTab.set('overview');
+      this.loadBillingSubscription();
       return;
     }
 
@@ -7498,6 +7918,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.switchOrganization(workspaceId);
     this.viewMode.set('user');
     this.activeTab.set('my-apps');
+    this.loadBillingSubscription();
   }
 
   // ==========================================
@@ -8004,8 +8425,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       this.saveStored('vanguard_organizations', this.organizations());
     }
 
-    // Persist branding to Supabase
+    // Persist branding via authenticated backend API (service-role bypasses RLS safely) and Supabase cache
     if (this.isBrowser) {
+      if (this.authService.token()) {
+        this.http
+          .patch(`${this.apiBase}/auth/tenant-settings`, {
+            name: merged.companyName,
+            domain: merged.ssoCustomDomain || this.activeOrganization().domain || null,
+            branding: { ...merged },
+          })
+          .subscribe({
+            error: (err) => console.warn('Backend branding save notice:', err),
+          });
+      }
       const activeOrgId = this.activeOrganizationId();
       this.supabaseService
         .upsertTenant({
@@ -8049,6 +8481,17 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.tenantBranding.set(defaults);
     this.saveStored('vanguard_tenant_branding', defaults);
     this.applyBrandAccent('#3b82f6');
+    this.domainVerificationStatus.set('idle');
+    this.dnsVerificationMessage.set(null);
+
+    if (this.isBrowser && this.authService.token()) {
+      this.http
+        .patch(`${this.apiBase}/auth/tenant-settings`, {
+          domain: defaults.ssoCustomDomain,
+          branding: { ...defaults },
+        })
+        .subscribe({ error: () => {} });
+    }
 
     this.logAuditEvent(
       'Reset branding settings to Vanguard default theme',
@@ -8060,28 +8503,84 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showAdminNotice('Branding reset to default Vanguard cyber theme.');
   }
 
-  async verifyCustomDomainDns(): Promise<void> {
+  async verifyCustomDomainDns(domainOverride?: string): Promise<void> {
+    const targetDomain = (domainOverride ?? this.tenantBranding().ssoCustomDomain ?? '').trim().toLowerCase();
+    if (!targetDomain) {
+      this.domainVerificationStatus.set('failed');
+      this.dnsVerificationMessage.set('Enter a custom SSO hostname before running DNS verification.');
+      return;
+    }
+
     this.domainVerificationStatus.set('checking');
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    this.dnsVerificationMessage.set(null);
 
-    this.domainVerificationStatus.set('verified');
-    this.tenantBranding.update((b) => ({ ...b, ssoDomainVerified: true }));
-    this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+    if (!this.isBrowser) return;
 
-    // Mark verified on active org
-    this.organizations.update((list) =>
-      list.map((org) => (org.id === this.activeOrganizationId() ? { ...org, isCustomDomainVerified: true } : org))
-    );
-    this.saveStored('vanguard_organizations', this.organizations());
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{
+          verified: boolean;
+          domain: string;
+          expectedTarget: string;
+          foundRecords: string[];
+          message: string;
+        }>(`${this.apiBase}/auth/verify-dns?domain=${encodeURIComponent(targetDomain)}`),
+      );
 
-    this.logAuditEvent(
-      `DNS CNAME verification passed for custom SSO domain: ${this.tenantBranding().ssoCustomDomain}`,
-      'Branding Studio',
-      'DNS Verifier',
-      'success',
-      'Low'
-    );
-    this.showAdminNotice(`Custom SSO domain ${this.tenantBranding().ssoCustomDomain} verified successfully.`);
+      this.dnsVerificationMessage.set(res.message);
+
+      if (res.verified) {
+        this.domainVerificationStatus.set('verified');
+        this.tenantBranding.update((b) => ({
+          ...b,
+          ssoCustomDomain: res.domain || targetDomain,
+          ssoDomainVerified: true,
+        }));
+        this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+
+        this.organizations.update((list) =>
+          list.map((org) =>
+            org.id === this.activeOrganizationId()
+              ? { ...org, domain: res.domain || targetDomain, isCustomDomainVerified: true }
+              : org,
+          ),
+        );
+        this.saveStored('vanguard_organizations', this.organizations());
+
+        if (this.authService.token()) {
+          this.http
+            .patch(`${this.apiBase}/auth/tenant-settings`, {
+              domain: res.domain || targetDomain,
+              branding: { ...this.tenantBranding(), ssoCustomDomain: res.domain || targetDomain, ssoDomainVerified: true },
+            })
+            .subscribe({ error: () => {} });
+        }
+
+        this.logAuditEvent(
+          `DNS CNAME verification passed for custom SSO domain: ${res.domain || targetDomain}`,
+          'Branding Studio',
+          'DNS Verifier',
+          'success',
+          'Low',
+        );
+        this.showAdminNotice(`Custom SSO domain ${res.domain || targetDomain} verified successfully.`);
+      } else {
+        this.domainVerificationStatus.set('failed');
+        this.tenantBranding.update((b) => ({
+          ...b,
+          ssoCustomDomain: targetDomain,
+          ssoDomainVerified: false,
+        }));
+        this.saveStored('vanguard_tenant_branding', this.tenantBranding());
+        this.showAdminNotice(res.message || `DNS verification failed for ${targetDomain}.`);
+      }
+    } catch (err: any) {
+      const message =
+        err?.error?.message || err?.message || `DNS lookup failed for ${targetDomain}.`;
+      this.domainVerificationStatus.set('failed');
+      this.dnsVerificationMessage.set(message);
+      this.showAdminNotice(message);
+    }
   }
 
   // ==========================================
@@ -8116,10 +8615,52 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
-  revokeAllSessions(): void {
-    this.sessionRevoked.set(true);
-    this.logAuditEvent('Revoked all other active sessions', 'User Session Manager', 'Supabase JWT', 'success', 'Medium');
-    setTimeout(() => this.sessionRevoked.set(false), 4000);
+  revokeAllSessions(signOutCurrent = false): void {
+    const token = this.authService.token();
+    if (!token || typeof this.authService.revokeSelfSessions !== 'function') {
+      this.sessionRevoked.set(true);
+      this.securityRevokePrompt.set(false);
+      this.logAuditEvent(
+        'Revoked all other active sessions',
+        'User Session Manager',
+        'Supabase JWT',
+        'success',
+        'Medium'
+      );
+      setTimeout(() => this.sessionRevoked.set(false), 4000);
+      return;
+    }
+
+    this.isRevokingSessions.set(true);
+    this.authService.revokeSelfSessions().subscribe({
+      next: (res) => {
+        this.isRevokingSessions.set(false);
+        this.sessionRevoked.set(true);
+        this.sessionRevocationResult.set(res);
+        this.securityRevokePrompt.set(false);
+        this.logAuditEvent(
+          `Revoked all active sessions and ${res.oidcGrantsRevoked} OIDC refresh grant(s)`,
+          'User Session Manager',
+          'Session Revocation',
+          'success',
+          'High'
+        );
+        this.showAdminNotice(
+          res.message || 'All active Vanguard sessions and SSO refresh grants have been revoked.'
+        );
+        if (signOutCurrent) {
+          this.authService.logout();
+        } else {
+          setTimeout(() => this.sessionRevoked.set(false), 6000);
+        }
+      },
+      error: (err: Error) => {
+        this.isRevokingSessions.set(false);
+        this.showAdminNotice(
+          err?.message || 'Unable to revoke active sessions. Please try again or reset your password.'
+        );
+      },
+    });
   }
 
   onLogout(): void {
@@ -8128,34 +8669,77 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   // ==========================================
-  // SCRUM-173: Billing System / Monthly Subscription & Paywall Restrictions
+  // SCRUM-173 & SCRUM-184: Account-Isolated Billing, Tenant Inheritance & PayMongo Sandbox
   // ==========================================
-  readonly subscriptionPlanId = signal<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>(
-    this.loadStored<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>('vanguard_billing_plan', 'free')
-  );
-  readonly subscriptionStatus = signal<'active' | 'past_due' | 'canceled'>(
-    this.loadStored<'active' | 'past_due' | 'canceled'>('vanguard_billing_status', 'active')
-  );
+  private getBillingScopeSuffix(): string {
+    const uid = (this.user()?.id || this.user()?.email || 'guest').toLowerCase().trim();
+    if (this.isIndividual()) {
+      return `ind_${uid}`;
+    }
+    const tenantId = this.resolveRealTenantId() || this.activeOrganizationId() || uid;
+    return `company_${String(tenantId).toLowerCase().trim()}`;
+  }
+
+  private isPlanValidForCurrentAccount(
+    planId: string,
+  ): planId is 'free' | 'personal_pro' | 'business_pro' | 'enterprise' {
+    if (this.isIndividual()) {
+      return planId === 'free' || planId === 'personal_pro';
+    }
+    return planId === 'free' || planId === 'business_pro' || planId === 'enterprise';
+  }
+
+  readonly subscriptionPlanId = signal<'free' | 'personal_pro' | 'business_pro' | 'enterprise'>('free');
+  readonly subscriptionStatus = signal<'active' | 'past_due' | 'canceled'>('active');
+  readonly currentPeriodEnd = signal<string | null>(null);
+  readonly paidCredit = signal<{
+    planId: 'personal_pro' | 'business_pro' | 'enterprise';
+    planName: string;
+    paidUntil: string;
+    lastTransactionId: string;
+    downgradedAt?: string;
+  } | null>(null);
+  readonly isRestoringPaidPlan = signal<boolean>(false);
+  readonly resendingReceiptId = signal<string | null>(null);
   readonly showPaywallModal = signal<boolean>(false);
   readonly paywallFeatureMessage = signal<string>('');
+  readonly isRedirectingToPaymongo = signal<boolean>(false);
+  readonly isLoadingBillingState = signal<boolean>(false);
+  readonly billingCheckoutError = signal<string | null>(null);
+  readonly lastPaymongoCheckoutUrl = signal<string | null>(null);
+
+  readonly isCompanyAdmin = computed<boolean>(() => !this.isIndividual() && this.isAdmin());
+  readonly isTenantMember = computed<boolean>(() => !this.isIndividual() && !this.isAdmin());
+  readonly canManageBilling = computed<boolean>(() => this.isIndividual() || this.isCompanyAdmin());
 
   readonly sandboxGatewayProvider = signal<string>(
-    this.loadStored<string>('vanguard_sandbox_gateway_provider', 'Vanguard Sandbox Payment Gateway')
+    this.loadStored<string>('vanguard_sandbox_gateway_provider', 'PayMongo Sandbox Gateway')
   );
   readonly sandboxGatewayUrl = signal<string>(
-    this.loadStored<string>('vanguard_sandbox_gateway_url', 'https://sandbox-gateway.vanguard.local/v1')
+    this.loadStored<string>('vanguard_sandbox_gateway_url', 'https://api.paymongo.com/v1')
   );
   readonly sandboxGatewayApiKey = signal<string>(
     this.loadStored<string>('vanguard_sandbox_gateway_key', 'sk_sandbox_vanguard_default')
   );
   readonly billingInvoices = signal<Array<{
     id: string;
+    receiptNumber?: string;
     date: string;
     planName: string;
+    accountType?: 'individual' | 'company';
     amountUsd: number;
+    amountPhp?: number;
+    paymentMethod?: string;
     status: 'paid' | 'open' | 'void';
     transactionId: string;
-  }>>(this.loadStored('vanguard_billing_invoices', []));
+    buyerEmail?: string;
+    receiptSentTo?: string;
+    gatewayPayerEmail?: string;
+    receiptDeliveryStatus?: 'sent' | 'logged' | 'failed';
+    receiptSentAt?: string;
+    periodStart?: string;
+    periodEnd?: string;
+  }>>([]);
 
   readonly isFreeTier = computed<boolean>(() => {
     return this.subscriptionPlanId() === 'free' || this.subscriptionStatus() !== 'active';
@@ -8165,12 +8749,34 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return this.isFreeTier() ? 1 : -1;
   });
 
+  readonly maxTotpAccountsLimit = computed<number>(() => {
+    return this.isFreeTier() ? 3 : -1;
+  });
+
+  readonly canExportAuditCsv = computed<boolean>(() => {
+    return !this.isFreeTier();
+  });
+
+  readonly auditRetentionDays = computed<number>(() => {
+    const plan = this.subscriptionPlanId();
+    if (this.subscriptionStatus() !== 'active' || plan === 'free') {
+      return this.isIndividual() ? 7 : 1;
+    }
+    if (plan === 'personal_pro') return 90;
+    if (plan === 'business_pro') return 30;
+    if (plan === 'enterprise') return 365;
+    return 7;
+  });
+
   readonly currentPlanDisplayName = computed<string>(() => {
     const plan = this.subscriptionPlanId();
-    if (plan === 'personal_pro') return 'Personal Pro ($5/mo)';
+    if (this.isIndividual()) {
+      if (plan === 'personal_pro') return 'Personal Pro ($5/mo)';
+      return 'Free Starter ($0/mo)';
+    }
     if (plan === 'business_pro') return 'Business Pro ($29/mo)';
     if (plan === 'enterprise') return 'Enterprise Zero-Trust ($79/mo)';
-    return this.isIndividual() ? 'Free Starter ($0/mo)' : 'Company Free ($0/mo)';
+    return 'Company Free Trial ($0/mo)';
   });
 
   readonly individualBillingPlans = [
@@ -8178,13 +8784,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       id: 'free' as const,
       name: 'Free Starter',
       priceMonthlyUsd: 0,
+      priceMonthlyPhp: 0,
       badge: 'Current Default',
       limitLabel: 'Max 1 Integrated App',
       features: [
         'Up to 1 integrated SSO / Auto-Fill application',
         'Up to 3 3rd-party 2FA Authenticator accounts',
-        'Up to 5 Zero-Knowledge Personal Vault items',
-        '7-day account movement audit history',
+        'Up to 5 encrypted Personal Vault items',
+        '7-day account movement audit history (CSV export locked)',
         'Standard Email OTP & Browser SSO approval',
       ],
     },
@@ -8192,6 +8799,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       id: 'personal_pro' as const,
       name: 'Personal Pro',
       priceMonthlyUsd: 5,
+      priceMonthlyPhp: 290,
       badge: 'Recommended',
       limitLabel: 'Unlimited Integrated Apps',
       features: [
@@ -8199,7 +8807,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         'Unlimited 3rd-party 2FA Authenticator accounts (SHA1/256/512)',
         'Unlimited Zero-Knowledge Personal Vault items & password health check',
         'Pre-launch Verification + Instant Auto-Fill Credential Injection',
-        '90-day movement audit trail + CSV export',
+        '90-day movement audit trail + CSV export unlocked',
       ],
     },
   ];
@@ -8209,26 +8817,28 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       id: 'free' as const,
       name: 'Company Free Trial',
       priceMonthlyUsd: 0,
+      priceMonthlyPhp: 0,
       badge: 'Starter',
-      limitLabel: 'Max 1 Integrated App',
+      limitLabel: 'Max 1 App • 3 2FA',
       features: [
-        'Max 1 integrated company application',
+        'Max 1 integrated company application (applies to Admin & Tenant Members)',
+        'Up to 3 3rd-party 2FA Authenticator accounts per member',
         'Up to 3 directory employees',
-        '24-hour movement audit trail',
-        'Basic employee application assignment',
+        '24-hour movement audit trail (CSV export locked)',
       ],
     },
     {
       id: 'business_pro' as const,
       name: 'Business Pro',
       priceMonthlyUsd: 29,
+      priceMonthlyPhp: 1690,
       badge: 'Most Popular',
-      limitLabel: 'Unlimited Integrated Apps',
+      limitLabel: 'Unlimited Apps & 2FA',
       features: [
         'Unlimited integrated SSO, OIDC, SAML & Auto-Fill applications',
+        'Unlimited 2FA Authenticator accounts across all tenant members',
         'Up to 50 directory employees & User Group matrices',
-        'Admin Employee Application Provisioning & Dedicated Credential Vault',
-        '30-day Employee Movement Audit Trail (Login/Logout/App Launch) + CSV export',
+        '30-day Employee Movement Audit Trail + CSV export unlocked',
         'Emergency Session Revocation & Killswitch',
       ],
     },
@@ -8236,16 +8846,157 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       id: 'enterprise' as const,
       name: 'Enterprise Zero-Trust',
       priceMonthlyUsd: 79,
+      priceMonthlyPhp: 4590,
       badge: 'Full Suite',
-      limitLabel: 'Unlimited Apps & Employees',
+      limitLabel: 'Unlimited Everything',
       features: [
         'Everything in Business Pro + Unlimited directory employees',
-        'Cloud LDAPS (Port 636) & Cloud RADIUS 802.1X (Port 1812) Gateways',
-        '365-day cryptographic forensic audit retention & SIEM export',
+        'Unlimited 2FA Authenticator accounts across entire organization',
+        '365-day cryptographic forensic audit retention & CSV/SIEM export',
         'Hardware FIDO2 / Passkey enforcement & Tenant-wide Global Killswitch',
       ],
     },
   ];
+
+  readonly visibleBillingPlans = computed(() => {
+    if (this.isIndividual()) return this.individualBillingPlans;
+    if (this.isCompanyAdmin()) return this.companyBillingPlans;
+    return [];
+  });
+
+  private getBillingTierRank(planId: string): number {
+    if (planId === 'enterprise') return 3;
+    if (planId === 'business_pro') return 2;
+    if (planId === 'personal_pro') return 1;
+    return 0;
+  }
+
+  private normalizePaidCredit(
+    credit: {
+      planId: 'personal_pro' | 'business_pro' | 'enterprise';
+      planName: string;
+      paidUntil: string;
+      lastTransactionId: string;
+      downgradedAt?: string;
+    } | null | undefined,
+  ) {
+    if (!credit || !credit.planId || !credit.paidUntil) return null;
+    if (!this.isPlanValidForCurrentAccount(credit.planId)) return null;
+    const exp = new Date(credit.paidUntil).getTime();
+    if (!Number.isFinite(exp) || exp <= Date.now()) return null;
+    return credit;
+  }
+
+  canRestorePlanWithoutCharge(planId: 'personal_pro' | 'business_pro' | 'enterprise'): boolean {
+    if (this.subscriptionPlanId() === planId && this.subscriptionStatus() === 'active') {
+      return false;
+    }
+    const credit = this.normalizePaidCredit(this.paidCredit());
+    if (!credit || !this.isPlanValidForCurrentAccount(planId)) return false;
+    return this.getBillingTierRank(planId) <= this.getBillingTierRank(credit.planId);
+  }
+
+  private persistScopedBillingState(): void {
+    const suffix = this.getBillingScopeSuffix();
+    this.saveStored(`vanguard_billing_plan_${suffix}`, this.subscriptionPlanId());
+    this.saveStored(`vanguard_billing_status_${suffix}`, this.subscriptionStatus());
+    this.saveStored(`vanguard_billing_period_end_${suffix}`, this.currentPeriodEnd());
+    this.saveStored(`vanguard_billing_paid_credit_${suffix}`, this.paidCredit());
+    this.saveStored(`vanguard_billing_invoices_${suffix}`, this.billingInvoices());
+  }
+
+  private hydrateScopedBillingFromLocal(): void {
+    const suffix = this.getBillingScopeSuffix();
+    const storedPlan = this.loadStored<string>(`vanguard_billing_plan_${suffix}`, 'free');
+    const safePlan = this.isPlanValidForCurrentAccount(storedPlan) ? storedPlan : 'free';
+    const storedStatus = this.loadStored<'active' | 'past_due' | 'canceled'>(
+      `vanguard_billing_status_${suffix}`,
+      'active',
+    );
+    const storedPeriodEnd = this.loadStored<string | null>(
+      `vanguard_billing_period_end_${suffix}`,
+      null,
+    );
+    const storedCredit = this.loadStored<any>(`vanguard_billing_paid_credit_${suffix}`, null);
+    const storedInvoices = this.loadStored<any[]>(`vanguard_billing_invoices_${suffix}`, []);
+
+    this.subscriptionPlanId.set(safePlan);
+    this.subscriptionStatus.set(storedStatus);
+    this.currentPeriodEnd.set(storedPeriodEnd);
+    this.paidCredit.set(this.normalizePaidCredit(storedCredit));
+    this.billingInvoices.set(Array.isArray(storedInvoices) ? storedInvoices : []);
+  }
+
+  private applyServerSubscription(sub: any): void {
+    if (!sub || typeof sub !== 'object') return;
+    const rawPlan = String(sub.planId || 'free');
+    const safePlan = this.isPlanValidForCurrentAccount(rawPlan) ? rawPlan : 'free';
+    const rawStatus = String(sub.status || 'active');
+    const safeStatus: 'active' | 'past_due' | 'canceled' =
+      rawStatus === 'past_due' || rawStatus === 'canceled' ? rawStatus : 'active';
+
+    this.subscriptionPlanId.set(safePlan);
+    this.subscriptionStatus.set(safeStatus);
+    this.currentPeriodEnd.set(sub.currentPeriodEnd || null);
+    this.paidCredit.set(
+      this.normalizePaidCredit(sub.paidCredit ?? sub.paymentGateway?.paidCredit ?? null),
+    );
+
+    if (Array.isArray(sub.invoices)) {
+      this.billingInvoices.set(
+        sub.invoices.map((inv: any) => ({
+          id: String(inv.id || `inv_${Date.now()}`),
+          receiptNumber: inv.receiptNumber,
+          date: String(inv.date || inv.createdAt || new Date().toISOString()).split('T')[0],
+          planName: String(inv.planName || safePlan),
+          accountType: inv.accountType,
+          amountUsd: Number(inv.amountUsd ?? 0),
+          amountPhp: inv.amountPhp !== undefined ? Number(inv.amountPhp) : undefined,
+          paymentMethod: inv.paymentMethod,
+          status: (inv.status as 'paid' | 'open' | 'void') || 'paid',
+          transactionId: String(
+            inv.transactionId || sub?.paymentGateway?.lastTransactionId || inv.id || 'paymongo_sbx',
+          ),
+          buyerEmail: inv.buyerEmail,
+          receiptSentTo: inv.receiptSentTo || inv.buyerEmail,
+          gatewayPayerEmail: inv.gatewayPayerEmail,
+          receiptDeliveryStatus: inv.receiptDeliveryStatus,
+          receiptSentAt: inv.receiptSentAt,
+          periodStart: inv.periodStart,
+          periodEnd: inv.periodEnd,
+        })),
+      );
+    }
+
+    this.persistScopedBillingState();
+  }
+
+  loadBillingSubscription(): void {
+    this.hydrateScopedBillingFromLocal();
+    if (!this.hasLiveAuthToken()) return;
+
+    this.isLoadingBillingState.set(true);
+    this.http
+      .get<any>(`${this.apiBase}/billing/subscription`, {
+        params: { accountType: this.accountType() },
+      })
+      .subscribe({
+        next: (sub) => {
+          this.isLoadingBillingState.set(false);
+          this.applyServerSubscription(sub);
+        },
+        error: () => {
+          this.isLoadingBillingState.set(false);
+        },
+      });
+  }
+
+  private buildRestrictionReason(baseDetail: string, paidTargetLabel: string): string {
+    if (this.isTenantMember()) {
+      return `${baseDetail} Your organization (${this.organizationName()}) is currently on the Company Free Trial plan. Please wait for or contact your Company Administrator to upgrade via PayMongo.`;
+    }
+    return `${baseDetail} Upgrade to ${paidTargetLabel} via PayMongo Sandbox to unlock this feature.`;
+  }
 
   canIntegrateAnotherApp(currentAppCount?: number): {
     allowed: boolean;
@@ -8259,13 +9010,45 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         : this.activeAppsList().length;
     const limit = this.maxIntegratedAppsLimit();
     if (limit !== -1 && count >= limit) {
+      const target = this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)';
       return {
         allowed: false,
         limit,
         currentCount: count,
-        reason: `Free tier is limited to ${limit} integrated application (${count}/${limit} used). Upgrade to ${
-          this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
-        } to integrate unlimited applications.`,
+        reason: this.buildRestrictionReason(
+          `Free tier is limited to ${limit} integrated application (${count}/${limit} used).`,
+          target,
+        ),
+      };
+    }
+    return {
+      allowed: true,
+      limit,
+      currentCount: count,
+    };
+  }
+
+  canAddAnotherTotpAccount(currentTotpCount?: number): {
+    allowed: boolean;
+    limit: number;
+    currentCount: number;
+    reason?: string;
+  } {
+    const count =
+      typeof currentTotpCount === 'number'
+        ? currentTotpCount
+        : this.activeTotpAccounts().length;
+    const limit = this.maxTotpAccountsLimit();
+    if (limit !== -1 && count >= limit) {
+      const target = this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)';
+      return {
+        allowed: false,
+        limit,
+        currentCount: count,
+        reason: this.buildRestrictionReason(
+          `Free tier is limited to ${limit} 3rd-party 2FA Authenticator accounts (${count}/${limit} used).`,
+          target,
+        ),
       };
     }
     return {
@@ -8276,22 +9059,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   openPaywallModal(reason?: string): void {
-    this.paywallFeatureMessage.set(
-      reason ||
-        `Your Free tier plan is limited to 1 integrated application. Upgrade to ${
+    this.billingCheckoutError.set(null);
+    const defaultMsg = this.isTenantMember()
+      ? `Your organization (${this.organizationName()}) is on the Company Free Trial plan. Wait for your Company Administrator to upgrade via PayMongo to unlock unlimited apps, unlimited 2FA accounts, and CSV audit exports.`
+      : `Your Free tier plan has usage limits active. Subscribe to ${
           this.isIndividual() ? 'Personal Pro ($5/mo)' : 'Business Pro ($29/mo)'
-        } for unlimited application integrations and advanced zero-trust features.`
-    );
+        } via PayMongo Sandbox to unlock unlimited applications, unlimited 2FA accounts, and CSV audit exports.`;
+    this.paywallFeatureMessage.set(reason || defaultMsg);
     this.showPaywallModal.set(true);
   }
 
   closePaywallModal(): void {
     this.showPaywallModal.set(false);
+    this.billingCheckoutError.set(null);
   }
 
   saveSandboxGatewayConfig(provider: string, apiUrl: string, apiKey: string): void {
-    const cleanProvider = provider.trim() || 'Vanguard Sandbox Payment Gateway';
-    const cleanUrl = apiUrl.trim() || 'https://sandbox-gateway.vanguard.local/v1';
+    const cleanProvider = provider.trim() || 'PayMongo Sandbox Gateway';
+    const cleanUrl = apiUrl.trim() || 'https://api.paymongo.com/v1';
     const cleanKey = apiKey.trim() || 'sk_sandbox_vanguard_default';
 
     this.sandboxGatewayProvider.set(cleanProvider);
@@ -8313,69 +9098,469 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.showAdminNotice(`Sandbox Payment Gateway configured (${cleanUrl}).`);
   }
 
+  /**
+   * SCRUM-184: Initiates PayMongo Sandbox checkout and redirects to either
+   * live PayMongo Test Checkout (https://checkout.paymongo.com/...) or Vanguard's
+   * /paymongo-sandbox website route. Plan remains locked until payment completes!
+   */
+  startPaymongoCheckout(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.billingCheckoutError.set(null);
+
+    if (!this.canManageBilling()) {
+      this.billingCheckoutError.set(
+        'Only your Company Administrator can upgrade the organization subscription.',
+      );
+      return;
+    }
+    if (!this.isPlanValidForCurrentAccount(planId)) {
+      this.billingCheckoutError.set(
+        `Plan '${planId}' is isolated and not available for ${this.accountType()} accounts.`,
+      );
+      return;
+    }
+
+    const plan = [...this.individualBillingPlans, ...this.companyBillingPlans].find(
+      (p) => p.id === planId,
+    );
+    if (!plan) return;
+
+    const origin =
+      this.isBrowser && typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost:4200';
+
+    const navigateToCheckout = (checkoutUrl: string) => {
+      this.lastPaymongoCheckoutUrl.set(checkoutUrl);
+      this.isRedirectingToPaymongo.set(false);
+      this.showPaywallModal.set(false);
+      if (!this.isBrowser) return;
+
+      if (checkoutUrl.startsWith(origin)) {
+        const relative = checkoutUrl.slice(origin.length) || '/paymongo-sandbox';
+        void this.router.navigateByUrl(relative).catch(() => {});
+      } else if (/^https?:\/\//i.test(checkoutUrl)) {
+        window.location.href = checkoutUrl;
+      } else {
+        void this.router.navigateByUrl(checkoutUrl).catch(() => {});
+      }
+    };
+
+    if (this.hasLiveAuthToken()) {
+      this.isRedirectingToPaymongo.set(true);
+      this.http
+        .post<{
+          checkoutUrl: string;
+          sessionId: string;
+          mode: 'paymongo_api' | 'local_sandbox';
+          amountPhp: number;
+          amountUsd: number;
+        }>(`${this.apiBase}/billing/checkout`, {
+          accountType: this.accountType(),
+          planId,
+          returnOrigin: origin,
+          gatewayApiUrl: this.sandboxGatewayUrl(),
+          gatewayApiKey: this.sandboxGatewayApiKey(),
+        })
+        .subscribe({
+          next: (res) => {
+            if (res?.sessionId) {
+              this.saveStored('vanguard_pending_paymongo_session', {
+                sessionId: res.sessionId,
+                planId,
+                planName: plan.name,
+                accountType: this.accountType(),
+                amountUsd: res.amountUsd ?? plan.priceMonthlyUsd,
+                amountPhp: res.amountPhp ?? plan.priceMonthlyPhp,
+                email: this.user()?.email || 'user@vanguard.local',
+                mode: res.mode,
+              });
+            }
+            if (res?.checkoutUrl) {
+              navigateToCheckout(res.checkoutUrl);
+            } else {
+              this.isRedirectingToPaymongo.set(false);
+              this.billingCheckoutError.set('PayMongo checkout URL was not returned by the server.');
+            }
+          },
+          error: (err) => {
+            this.isRedirectingToPaymongo.set(false);
+            this.billingCheckoutError.set(
+              err?.error?.message || 'Unable to start PayMongo Sandbox checkout session.',
+            );
+          },
+        });
+      return;
+    }
+
+    // Offline / mock dev mode fallback: create pending session locally & redirect to /paymongo-sandbox
+    const sessionId = `pm_local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    this.saveStored('vanguard_pending_paymongo_session', {
+      sessionId,
+      planId,
+      planName: plan.name,
+      accountType: this.accountType(),
+      amountUsd: plan.priceMonthlyUsd,
+      amountPhp: plan.priceMonthlyPhp,
+      email: this.user()?.email || 'user@vanguard.local',
+      mode: 'local_sandbox',
+    });
+    const localCheckoutUrl = `/paymongo-sandbox?session=${encodeURIComponent(sessionId)}&plan=${encodeURIComponent(planId)}&accountType=${encodeURIComponent(this.accountType())}&amountPhp=${plan.priceMonthlyPhp}&amountUsd=${plan.priceMonthlyUsd}`;
+    navigateToCheckout(localCheckoutUrl);
+  }
+
   upgradeSubscriptionPlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
-    const allPlans = [...this.individualBillingPlans, ...this.companyBillingPlans];
-    const targetPlan = allPlans.find((p) => p.id === planId);
-    const price = targetPlan?.priceMonthlyUsd ?? (planId === 'personal_pro' ? 5 : planId === 'business_pro' ? 29 : 79);
-    const name = targetPlan?.name ?? planId;
+    this.startPaymongoCheckout(planId);
+  }
+
+  completeLocalSandboxSession(
+    sessionId: string,
+    action: 'pay' | 'fail' | 'cancel',
+    paymentMethod = 'PayMongo Test Card',
+  ): Observable<{ unlocked: boolean; status: string; message: string }> {
+    if (this.hasLiveAuthToken()) {
+      return this.http
+        .post<any>(`${this.apiBase}/billing/checkout/complete`, {
+          sessionId,
+          action,
+          paymentMethod,
+        })
+        .pipe(
+          tap((res) => {
+            if (res?.unlocked && res?.subscription) {
+              this.applyServerSubscription(res.subscription);
+            }
+          }),
+          catchError((err) => throwError(() => err)),
+        );
+    }
+
+    if (action === 'fail') {
+      return of({
+        unlocked: false,
+        status: 'failed',
+        message: 'Simulated PayMongo test payment declined. Free tier restrictions remain active.',
+      });
+    }
+    if (action === 'cancel') {
+      return of({
+        unlocked: false,
+        status: 'cancelled',
+        message: 'PayMongo sandbox checkout cancelled.',
+      });
+    }
+
+    const pending = this.loadStored<any>('vanguard_pending_paymongo_session', null);
+    if (pending && pending.sessionId === sessionId && this.isPlanValidForCurrentAccount(pending.planId)) {
+      this.activateOfflinePaidPlan(pending.planId, pending.planName, pending.amountUsd, pending.amountPhp, paymentMethod);
+    }
+    return of({
+      unlocked: true,
+      status: 'paid',
+      message: 'Payment authorized in PayMongo Sandbox! Features unlocked.',
+    });
+  }
+
+  finalizePaymongoReturn(sessionId: string, status: string): void {
+    if (status === 'cancelled' || status === 'canceled') {
+      this.showAdminNotice('PayMongo sandbox checkout was cancelled. No charges were made.');
+      return;
+    }
+    if (status === 'failed') {
+      this.showAdminNotice('PayMongo sandbox payment failed. Please retry checkout to unlock features.');
+      return;
+    }
+    if (status !== 'success' || !sessionId) return;
+
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .post<any>(`${this.apiBase}/billing/checkout/complete`, {
+          sessionId,
+          action: 'pay',
+        })
+        .subscribe({
+          next: (res) => {
+            if (res?.unlocked && res?.subscription) {
+              this.applyServerSubscription(res.subscription);
+              const latestInv = res.subscription?.invoices?.[0];
+              this.logAuditEvent(
+                `Upgraded subscription to ${res.subscription.planName} via PayMongo Sandbox`,
+                'PayMongo Sandbox',
+                'Checkout Verified',
+                'success',
+                'Low',
+              );
+              this.showPaywallModal.set(false);
+              const receiptNote = latestInv?.receiptSentTo
+                ? ` Official receipt ${latestInv.receiptNumber || ''} sent to registered email ${latestInv.receiptSentTo}.`
+                : '';
+              this.showAdminNotice(
+                (res?.message ||
+                  `Subscribed to ${res.subscription.planName} via PayMongo Sandbox!`) + receiptNote,
+              );
+            } else {
+              this.showAdminNotice(
+                res?.message || 'PayMongo payment has not cleared yet.',
+              );
+            }
+          },
+          error: (err) => {
+            this.showAdminNotice(
+              err?.error?.message || 'Failed to verify PayMongo sandbox payment session.',
+            );
+          },
+        });
+      return;
+    }
+
+    const pending = this.loadStored<any>('vanguard_pending_paymongo_session', null);
+    if (pending && pending.sessionId === sessionId && this.isPlanValidForCurrentAccount(pending.planId)) {
+      this.activateOfflinePaidPlan(
+        pending.planId,
+        pending.planName,
+        pending.amountUsd,
+        pending.amountPhp,
+        pending.paymentMethod || 'PayMongo Sandbox',
+      );
+      this.saveStored('vanguard_pending_paymongo_session', null);
+    }
+  }
+
+  private activateOfflinePaidPlan(
+    planId: 'personal_pro' | 'business_pro' | 'enterprise',
+    name: string,
+    priceUsd: number,
+    pricePhp: number,
+    paymentMethod: string,
+  ): void {
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString();
+    const registeredEmail = this.user()?.email || 'user@vanguard.local';
+    const stamp = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = Math.floor(1000 + Math.random() * 9000);
+    const txnId = `paymongo_sbx_${Math.random().toString(36).slice(2, 10)}`;
 
     this.subscriptionPlanId.set(planId);
     this.subscriptionStatus.set('active');
-    this.saveStored('vanguard_billing_plan', planId);
-    this.saveStored('vanguard_billing_status', 'active');
+    this.currentPeriodEnd.set(periodEnd);
+    this.paidCredit.set(null);
 
     const invoice = {
-      id: `inv_sbx_${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
+      id: `inv_pm_${now.getTime()}`,
+      receiptNumber: `VG-RCPT-${stamp}-${suffix}`,
+      date: now.toISOString().split('T')[0],
       planName: name,
-      amountUsd: price,
+      accountType: this.accountType(),
+      amountUsd: priceUsd,
+      amountPhp: pricePhp,
+      paymentMethod,
       status: 'paid' as const,
-      transactionId: `txn_sbx_${Math.random().toString(36).slice(2, 10)}`,
+      transactionId: txnId,
+      buyerEmail: registeredEmail,
+      receiptSentTo: registeredEmail,
+      receiptDeliveryStatus: 'logged' as const,
+      receiptSentAt: now.toISOString(),
+      periodStart: now.toISOString(),
+      periodEnd,
     };
     const nextInvoices = [invoice, ...this.billingInvoices()];
     this.billingInvoices.set(nextInvoices);
-    this.saveStored('vanguard_billing_invoices', nextInvoices);
-
-    this.http
-      .post(`${this.apiBase}/billing/checkout`, {
-        accountType: this.accountType(),
-        planId,
-        gatewayApiUrl: this.sandboxGatewayUrl(),
-        gatewayApiKey: this.sandboxGatewayApiKey(),
-      })
-      .subscribe({ error: () => {} });
+    this.persistScopedBillingState();
 
     this.logAuditEvent(
-      `Upgraded monthly subscription to ${name} ($${price}/mo via Sandbox Payment Gateway)`,
-      'Vanguard Billing Gateway',
+      `Upgraded monthly subscription to ${name} ($${priceUsd}/mo / PHP ${pricePhp} via PayMongo Sandbox)`,
+      'PayMongo Sandbox',
       'Sandbox Checkout',
       'success',
       'Low',
     );
     this.showPaywallModal.set(false);
-    this.showAdminNotice(`Subscribed to ${name} ($${price}/mo). Unlimited application integrations unlocked!`);
+    this.showAdminNotice(
+      `Subscribed to ${name}! Official receipt ${invoice.receiptNumber} recorded for registered email ${registeredEmail}.`,
+    );
   }
 
   cancelSubscriptionPlan(): void {
+    if (!this.canManageBilling()) {
+      this.showAdminNotice('Only your Company Administrator can downgrade the organization subscription.');
+      return;
+    }
+
+    const prevPlanId = this.subscriptionPlanId();
+    const prevPlanDef = [...this.individualBillingPlans, ...this.companyBillingPlans].find(
+      (p) => p.id === prevPlanId,
+    );
+    const cycleEnd =
+      this.currentPeriodEnd() ||
+      new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+
+    if (prevPlanId !== 'free' && prevPlanDef) {
+      const existingCredit = this.normalizePaidCredit(this.paidCredit());
+      if (
+        !existingCredit ||
+        this.getBillingTierRank(prevPlanId) >= this.getBillingTierRank(existingCredit.planId)
+      ) {
+        const latestPaid = this.billingInvoices().find((inv) => inv.status === 'paid');
+        this.paidCredit.set({
+          planId: prevPlanId,
+          planName: prevPlanDef.name,
+          paidUntil: cycleEnd,
+          lastTransactionId: latestPaid?.transactionId || 'paymongo_cycle_credit',
+          downgradedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     this.subscriptionPlanId.set('free');
     this.subscriptionStatus.set('active');
-    this.saveStored('vanguard_billing_plan', 'free');
-    this.saveStored('vanguard_billing_status', 'active');
+    this.persistScopedBillingState();
 
-    this.http
-      .post(`${this.apiBase}/billing/cancel`, {
-        accountType: this.accountType(),
-      })
-      .subscribe({ error: () => {} });
+    if (this.hasLiveAuthToken()) {
+      this.http
+        .post<any>(`${this.apiBase}/billing/cancel`, {
+          accountType: this.accountType(),
+        })
+        .subscribe({
+          next: (sub) => {
+            if (sub) this.applyServerSubscription(sub);
+          },
+          error: () => {},
+        });
+    }
 
     this.logAuditEvent(
-      'Downgraded monthly subscription to Free tier (1-application limit active)',
-      'Vanguard Billing Gateway',
+      'Downgraded monthly subscription to Free tier (paid cycle credit preserved until period end)',
+      'PayMongo Billing',
       'Subscription Manager',
       'success',
       'Low',
     );
-    this.showAdminNotice('Subscription downgraded to Free tier (max 1 integrated application).');
+    const creditUntil = this.paidCredit()?.paidUntil?.split('T')[0];
+    this.showAdminNotice(
+      creditUntil
+        ? `Subscription downgraded to Free tier. You can restore your paid plan for $0 anytime before ${creditUntil}.`
+        : 'Subscription downgraded to Free tier (max 1 app & 3 2FA accounts).',
+    );
+  }
+
+  resumePaidSubscription(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.billingCheckoutError.set(null);
+    if (!this.canManageBilling()) {
+      this.billingCheckoutError.set(
+        'Only your Company Administrator can restore the organization subscription.',
+      );
+      return;
+    }
+    if (!this.canRestorePlanWithoutCharge(planId)) {
+      this.startPaymongoCheckout(planId);
+      return;
+    }
+
+    const planDef = [...this.individualBillingPlans, ...this.companyBillingPlans].find(
+      (p) => p.id === planId,
+    );
+    if (!planDef) return;
+
+    if (this.hasLiveAuthToken()) {
+      this.isRestoringPaidPlan.set(true);
+      this.http
+        .post<any>(`${this.apiBase}/billing/resume`, {
+          planId,
+          accountType: this.accountType(),
+        })
+        .subscribe({
+          next: (res) => {
+            this.isRestoringPaidPlan.set(false);
+            if (res?.subscription) {
+              this.applyServerSubscription(res.subscription);
+            }
+            this.logAuditEvent(
+              `Restored ${planDef.name} at $0 within already-paid billing cycle`,
+              'PayMongo Billing',
+              'Subscription Restore',
+              'success',
+              'Low',
+            );
+            this.showPaywallModal.set(false);
+            this.showAdminNotice(
+              res?.message || `${planDef.name} restored with $0 due within your paid cycle.`,
+            );
+          },
+          error: (err) => {
+            this.isRestoringPaidPlan.set(false);
+            this.billingCheckoutError.set(
+              err?.error?.message || 'Unable to restore paid subscription within current cycle.',
+            );
+          },
+        });
+      return;
+    }
+
+    // Offline restore
+    const credit = this.normalizePaidCredit(this.paidCredit());
+    if (!credit) return;
+    const remainingCredit =
+      this.getBillingTierRank(planId) < this.getBillingTierRank(credit.planId) ? credit : null;
+
+    this.subscriptionPlanId.set(planId);
+    this.subscriptionStatus.set('active');
+    this.currentPeriodEnd.set(credit.paidUntil);
+    this.paidCredit.set(remainingCredit);
+    this.persistScopedBillingState();
+
+    this.logAuditEvent(
+      `Restored ${planDef.name} at $0 (already paid through ${credit.paidUntil.split('T')[0]})`,
+      'PayMongo Billing',
+      'Subscription Restore',
+      'success',
+      'Low',
+    );
+    this.showPaywallModal.set(false);
+    this.showAdminNotice(
+      `${planDef.name} restored with $0 due (paid through ${credit.paidUntil.split('T')[0]}).`,
+    );
+  }
+
+  resendBillingReceipt(invoiceId?: string): void {
+    this.billingCheckoutError.set(null);
+    if (!this.canManageBilling()) {
+      this.billingCheckoutError.set(
+        'Only your Company Administrator can dispatch organization billing receipts.',
+      );
+      return;
+    }
+
+    const registeredEmail = this.user()?.email || 'registered account email';
+    if (!this.hasLiveAuthToken()) {
+      this.showAdminNotice(
+        `Offline mode: Vanguard receipts are addressed to your registered email (${registeredEmail}).`,
+      );
+      return;
+    }
+
+    this.resendingReceiptId.set(invoiceId || 'latest');
+    this.http
+      .post<any>(`${this.apiBase}/billing/receipts/resend`, {
+        invoiceId,
+        accountType: this.accountType(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.resendingReceiptId.set(null);
+          if (res?.subscription) {
+            this.applyServerSubscription(res.subscription);
+          }
+          this.showAdminNotice(
+            res?.message ||
+              `Vanguard receipt sent directly to registered email ${res?.sentTo || registeredEmail}.`,
+          );
+        },
+        error: (err) => {
+          this.resendingReceiptId.set(null);
+          this.billingCheckoutError.set(
+            err?.error?.message || 'Unable to send Vanguard receipt email.',
+          );
+        },
+      });
   }
 
 }

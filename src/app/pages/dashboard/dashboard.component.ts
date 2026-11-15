@@ -1,7 +1,7 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { DashboardService } from './services/dashboard.service';
 import { DashboardHeader } from './components/header/header';
@@ -20,8 +20,10 @@ import { UserSsoApps } from './components/user-sso-apps/user-sso-apps';
 import { UserSecurity } from './components/user-security/user-security';
 import { UserActivity } from './components/user-activity/user-activity';
 import { UserDevices } from './components/user-devices/user-devices';
-import { UserPersonalVault } from './components/user-personal-vault/user-personal-vault';
 import { UserAuthenticator } from './components/user-authenticator/user-authenticator';
+import { BillingModal } from './components/billing-modal/billing-modal';
+import { KillswitchModal } from './components/killswitch-modal/killswitch-modal';
+import { CreateOrgModal } from './components/create-org-modal/create-org-modal';
 import {
   ProtocolStatus,
   SaaSApp,
@@ -82,8 +84,10 @@ export type {
     UserSecurity,
     UserActivity,
     UserDevices,
-    UserPersonalVault,
     UserAuthenticator,
+    BillingModal,
+    KillswitchModal,
+    CreateOrgModal,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.css'
@@ -92,6 +96,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
   private readonly guideService = inject(NewUserGuideService);
   private readonly route = inject(ActivatedRoute, { optional: true });
+  private readonly router = inject(Router, { optional: true });
   private queryParamsSub: Subscription | null = null;
 
   ngOnInit(): void {
@@ -119,9 +124,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
         if (params['action'] === 'revoke') {
           this.dashboardService.setActiveTab('user-security');
+          this.dashboardService.securityRevokePrompt.set(true);
           this.dashboardService.showAdminNotice(
             'Review connected external apps, active devices, or change your password below to revoke untrusted access.'
           );
+        }
+        const billingStatus = params['billing_status'];
+        const billingSession = params['billing_session'];
+        if (billingStatus) {
+          this.dashboardService.finalizePaymongoReturn(billingSession || '', billingStatus);
+          if (this.router && this.route) {
+            void this.router.navigate([], {
+              relativeTo: this.route,
+              queryParams: { billing_status: null, billing_session: null },
+              queryParamsHandling: 'merge',
+              replaceUrl: true,
+            });
+          }
         }
       });
     }

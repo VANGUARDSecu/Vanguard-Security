@@ -1,0 +1,151 @@
+<div class="revoke-wrapper">
+  <div class="cyber-grid-overlay" aria-hidden="true"></div>
+
+  <div class="revoke-page-content">
+    <header class="brand-header">
+      <div class="brand-logo-badge">
+        <img
+          src="vanguardlogotransparent.png"
+          alt="Vanguard Logo"
+          class="brand-logo"
+        />
+      </div>
+      <h1 class="brand-title">
+        VANGUARD <span class="brand-sub">Security</span>
+      </h1>
+    </header>
+
+    <main class="revoke-card">
+      @if (state() === 'loading') {
+        <div class="status-block">
+          <div class="loading-spinner-lg" aria-hidden="true"></div>
+          <h2 class="card-title">Verifying Security Alert Link</h2>
+          <p class="card-subtitle">
+            Checking alert signature and token validity before taking action...
+          </p>
+        </div>
+      } @else if (state() === 'ready' || state() === 'revoking') {
+        @if (preview(); as info) {
+          <div class="card-header">
+            <span class="badge-danger">SECURITY ALERT ACTION</span>
+            <h2 class="card-title">Confirm Session Revocation</h2>
+            <p class="card-subtitle">
+              We verified your alert link. Review the flagged sign-in below before terminating all active Vanguard sessions.
+            </p>
+          </div>
+
+          <div class="event-details-card">
+            <div class="detail-row">
+              <span class="detail-label">Account</span>
+              <span class="detail-value">{{ info.emailMasked }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Application</span>
+              <span class="detail-value">{{ info.applicationName }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">IP Address</span>
+              <span class="detail-value mono">{{ info.ipAddress }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Device</span>
+              <span class="detail-value">{{ info.device }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Detected At</span>
+              <span class="detail-value">{{ info.timestamp | date: 'medium' }}</span>
+            </div>
+          </div>
+
+          <div class="warning-callout">
+            Revoking sessions invalidates all active Vanguard Identity refresh sessions and connected SSO app refresh grants. After revoking, reset your password immediately if you suspect credential compromise.
+          </div>
+
+          <button
+            type="button"
+            class="revoke-btn"
+            [disabled]="state() === 'revoking'"
+            (click)="confirmRevoke()"
+          >
+            @if (state() === 'revoking') {
+              <span class="spinner"></span>
+              <span>Revoking All Sessions...</span>
+            } @else {
+              <span>Confirm &amp; Revoke All Active Sessions</span>
+            }
+          </button>
+
+          <div class="secondary-actions">
+            <a routerLink="/login" class="secondary-link">
+              This Was Me — Go to Sign In
+            </a>
+          </div>
+        }
+      } @else if (state() === 'revoked') {
+        <div class="card-header">
+          <span class="badge-success">SESSIONS REVOKED</span>
+          <h2 class="card-title">Account Sessions Terminated</h2>
+          <p class="card-subtitle">
+            {{ result()?.message || 'All active Vanguard sessions have been revoked.' }}
+          </p>
+        </div>
+
+        @if (result(); as res) {
+          <div class="result-summary">
+            <div class="detail-row">
+              <span class="detail-label">Portal Refresh Sessions</span>
+              <span class="detail-value">{{ res.refreshRevoked ? 'Revoked' : 'Termination Requested' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">SSO Refresh Grants Revoked</span>
+              <span class="detail-value">{{ res.oidcGrantsRevoked }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Residual Access Window</span>
+              <span class="detail-value">Up to {{ res.maxResidualAccessSeconds }}s</span>
+            </div>
+          </div>
+
+          @if (res.notCovered?.length) {
+            <div class="info-note">
+              @for (note of res.notCovered; track note) {
+                <p>{{ note }}</p>
+              }
+            </div>
+          }
+        }
+
+        <div class="action-stack">
+          <a routerLink="/forgot-password" class="primary-action-link">
+            Reset Password Now
+          </a>
+          <a routerLink="/login" class="secondary-link">
+            Sign In Again
+          </a>
+        </div>
+      } @else {
+        <div class="card-header">
+          <span class="badge-warning">LINK UNAVAILABLE</span>
+          <h2 class="card-title">Unable to Verify Revocation Link</h2>
+          <p class="card-subtitle">{{ errorMessage() }}</p>
+        </div>
+
+        <div class="action-stack">
+          <a
+            routerLink="/dashboard"
+            [queryParams]="{ tab: 'security', action: 'revoke' }"
+            class="primary-action-link"
+          >
+            Open Account Security in Dashboard
+          </a>
+          <a routerLink="/forgot-password" class="secondary-action-btn">
+            Reset Password
+          </a>
+          <a routerLink="/login" class="secondary-link">
+            Back to Sign In
+          </a>
+        </div>
+      }
+    </main>
+  </div>
+</div>

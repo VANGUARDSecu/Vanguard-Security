@@ -28,6 +28,14 @@ export class DashboardHeader {
   readonly userRoleLabel = this.dashboardService.userRoleLabel;
   readonly isIndividual = this.dashboardService.isIndividual;
   readonly isMobileSidebarOpen = this.dashboardService.isMobileSidebarOpen;
+  readonly currentPlanDisplayName = this.dashboardService.currentPlanDisplayName;
+  readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly canManageBilling = this.dashboardService.canManageBilling;
+  readonly isTenantMember = this.dashboardService.isTenantMember;
+
+  openBillingModal(): void {
+    this.dashboardService.openPaywallModal();
+  }
 
   toggleMobileSidebar(): void {
     this.dashboardService.toggleMobileSidebar();
@@ -95,6 +103,7 @@ export class DashboardHeader {
 
   goToBrandingStudio(): void {
     this.showOrgDropdown.set(false);
+    this.dashboardService.setSettingsSubTab('branding');
     this.dashboardService.setActiveTab('settings');
   }
 

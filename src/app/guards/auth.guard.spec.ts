@@ -43,6 +43,19 @@ describe('authGuard (SCRUM-155 & SCRUM-163)', () => {
     expect(mockRouter.navigate).toHaveBeenCalledWith(['/login']);
   });
 
+  it('preserves deep-linked dashboard queryParams via returnUrl when redirecting unauthenticated users (SCRUM-190)', () => {
+    mockAuthService.isLoggedIn.mockReturnValue(false);
+
+    const result = TestBed.runInInjectionContext(() =>
+      authGuard({} as any, { url: '/dashboard?tab=security&action=revoke' } as any)
+    );
+
+    expect(result).toBe(false);
+    expect(mockRouter.navigate).toHaveBeenCalledWith(['/login'], {
+      queryParams: { returnUrl: '/dashboard?tab=security&action=revoke' },
+    });
+  });
+
   it('does NOT redirect to /login when isChallengingOAuth is true (SCRUM-163)', () => {
     mockAuthService.isLoggedIn.mockReturnValue(false);
     mockAuthService.isChallengingOAuth = true;

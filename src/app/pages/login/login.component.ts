@@ -2,8 +2,12 @@ import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
-import { AuthService, ApproveSsoPayload, UserProfile } from '../../services/auth.service';
+import { AuthService, ApproveSsoPayload, UserProfile, sanitizeReturnUrl, consumeSavedReturnUrl } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
+import {
+  buildMobileOAuthDeepLink,
+  isAllowedMobileRedirectUri,
+} from '../../utils/mobile-oauth-relay.util';
 
 @Component({
   selector: 'app-login',
@@ -34,6 +38,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   // SSO state signals
   readonly ssoParams = signal<Record<string, string> | null>(null);
   readonly ssoApprovalMethod = signal<'frontend' | 'email_otp' | 'push'>('frontend');
+  readonly returnUrl = signal<string>('');
   readonly currentUser = this.authService.currentUser;
 
   readonly clientDisplayName = computed<string>(() => {
@@ -162,8 +167,35 @@ export class LoginComponent implements OnInit, OnDestroy {
   private notificationTimer: any = null;
 
   ngOnInit(): void {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search || '');
+      const mobileRedirect = searchParams.get('mobile_redirect');
+      const hasOAuthPayload =
+        (window.location.hash || '').includes('access_token=') ||
+        (window.location.hash || '').includes('error=') ||
+        searchParams.has('code') ||
+        searchParams.has('error');
+      if (isAllowedMobileRedirectUri(mobileRedirect) && hasOAuthPayload) {
+        const deepLink = buildMobileOAuthDeepLink({
+          search: window.location.search,
+          hash: window.location.hash,
+        });
+        window.location.replace(deepLink);
+        return;
+      }
+    }
+
     // Check if URL contains query params like error, message, or SSO/OIDC parameters
     this.route.queryParams.subscribe((params) => {
+      const safeReturnUrl = sanitizeReturnUrl(params['returnUrl']);
+      if (safeReturnUrl) {
+        this.returnUrl.set(safeReturnUrl);
+        if (typeof sessionStorage !== 'undefined') {
+          try {
+            sessionStorage.setItem('vanguard_return_url', safeReturnUrl);
+          } catch {}
+        }
+      }
       if (params['error']) {
         this.showNotification('error', params['error'], 8000);
       } else if (this.authService.oAuthErrorMessage()) {
@@ -219,7 +251,12 @@ export class LoginComponent implements OnInit, OnDestroy {
           this.router.navigate(['/reset-password']);
           return;
         }
-        this.router.navigate(['/dashboard']);
+        const target = this.returnUrl() || consumeSavedReturnUrl();
+        if (target && target !== '/dashboard' && typeof this.router.navigateByUrl === 'function') {
+          this.router.navigateByUrl(target);
+        } else {
+          this.router.navigate(['/dashboard']);
+        }
         return;
       }
     });
@@ -315,12 +352,16 @@ export class LoginComponent implements OnInit, OnDestroy {
         } else if (response.requireMfa) {
           this.showNotification('success', 'Credentials verified! Redirecting to 2-Step Verification...', 3000);
           setTimeout(() => {
+            const qp: Record<string, any> = {
+              email: email.trim(),
+              mode: 'signin',
+              hasTotp: response.hasTotp ? 'true' : 'false',
+            };
+            if (this.returnUrl()) {
+              qp['returnUrl'] = this.returnUrl();
+            }
             this.router.navigate(['/verify-otp'], {
-              queryParams: {
-                email: email.trim(),
-                mode: 'signin',
-                hasTotp: response.hasTotp ? 'true' : 'false',
-              },
+              queryParams: qp,
             });
           }, 600);
         } else {
@@ -335,9 +376,14 @@ export class LoginComponent implements OnInit, OnDestroy {
           if (typeof sessionStorage !== 'undefined') {
             sessionStorage.removeItem('vg_vault_pwd');
           }
+          const target = this.returnUrl() || consumeSavedReturnUrl();
           this.showNotification('success', 'Login successful! Redirecting...', 3000);
           setTimeout(() => {
-            this.router.navigate(['/dashboard']);
+            if (target && target !== '/dashboard' && typeof this.router.navigateByUrl === 'function') {
+              this.router.navigateByUrl(target);
+            } else {
+              this.router.navigate(['/dashboard']);
+            }
           }, 600);
         }
       },

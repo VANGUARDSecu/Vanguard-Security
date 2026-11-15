@@ -220,4 +220,66 @@ describe('DashboardService Cross-Device Sync (SCRUM-178)', () => {
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     refreshSpy.mockRestore();
   });
+
+  it('SCRUM-201: generates RFC 4122 UUID ids for addTotpAccount and hydrates canonical server id', () => {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    dashboardService.addTotpAccount({
+      issuer: 'GitHub',
+      accountName: 'sync@vanguard.dev',
+      secret: 'JBSWY3DPEHPK3PXP',
+    });
+
+    const req = httpMock.expectOne(`${apiBase}/totp-accounts`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body.id).toMatch(uuidRegex);
+    expect(String(req.request.body.id)).not.toMatch(/^totp-acc-/);
+
+    const canonicalId = '11111111-2222-4333-8444-555555555555';
+    req.flush({
+      account: {
+        id: canonicalId,
+        issuer: 'GitHub',
+        accountName: 'sync@vanguard.dev',
+        secret: 'JBSWY3DPEHPK3PXP',
+        digits: 6,
+        period: 30,
+        algorithm: 'SHA1',
+      },
+    });
+
+    expect(dashboardService.totpAccounts().some((a) => a.id === canonicalId)).toBe(true);
+  });
+
+  it('SCRUM-201: addTotpAccountAsync recovers missing token from Supabase session and rolls back on DB failure', async () => {
+    authService.token.set(null);
+    const getSessionSpy = vi
+      .spyOn(dashboardService.supabaseService.client.auth, 'getSession')
+      .mockResolvedValue({
+        data: { session: { access_token: 'recovered-jwt-token' } },
+      } as any);
+
+    const savePromise = dashboardService.addTotpAccountAsync({
+      issuer: 'Cloudflare',
+      accountName: 'sync@vanguard.dev',
+      secret: 'JBSWY3DPEHPK3PXP',
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const req = httpMock.expectOne(`${apiBase}/totp-accounts`);
+    expect(authService.token()).toBe('recovered-jwt-token');
+    req.flush(
+      { message: 'Failed to persist 2FA authenticator account to database.' },
+      { status: 500, statusText: 'Internal Server Error' },
+    );
+
+    const result = await savePromise;
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Failed to persist 2FA authenticator account to database.');
+    expect(dashboardService.totpAccounts().length).toBe(0);
+    getSessionSpy.mockRestore();
+  });
 });

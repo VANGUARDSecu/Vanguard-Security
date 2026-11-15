@@ -87,6 +87,7 @@ export class UserAuthenticator {
 
   readonly formErrorMessage = signal<string | null>(null);
   readonly formSuccessMessage = signal<string | null>(null);
+  readonly isSavingAccount = signal<boolean>(false);
 
   // Drag & Drop / Clipboard Paste QR Uploader state
   readonly isDraggingOver = signal<boolean>(false);
@@ -535,7 +536,10 @@ export class UserAuthenticator {
     }
   }
 
-  saveAccount(): void {
+  async saveAccount(): Promise<void> {
+    if (this.isSavingAccount()) return;
+    this.formErrorMessage.set(null);
+
     // If on URI mode, ensure parsed
     if (this.enrollMode() === 'uri' && this.formOtpAuthUri.trim() && !this.formSecret.trim()) {
       if (!this.applyOtpAuthUri(this.formOtpAuthUri)) {
@@ -562,6 +566,10 @@ export class UserAuthenticator {
       this.formErrorMessage.set('Secret key is required. Paste the setup key from your application.');
       return;
     }
+    if (secret.length < 8) {
+      this.formErrorMessage.set('Secret key must be at least 8 valid Base32 characters.');
+      return;
+    }
 
     try {
       base32Decode(secret);
@@ -582,23 +590,44 @@ export class UserAuthenticator {
         period: this.formPeriod,
         algorithm: this.formAlgorithm,
       });
-    } else {
-      const quotaCheck = this.dashboardService.canAddAnotherTotpAccount(this.activeTotpAccounts().length);
-      if (!quotaCheck.allowed) {
-        this.formErrorMessage.set(quotaCheck.reason || 'Free plan TOTP limit reached.');
-        this.dashboardService.openPaywallModal(quotaCheck.reason);
-        return;
-      }
-      this.dashboardService.addTotpAccount({
-        issuer,
-        accountName,
-        secret,
-        digits: this.formDigits,
-        period: this.formPeriod,
-        algorithm: this.formAlgorithm,
-      });
+      this.closeAddModal();
+      return;
     }
 
-    this.closeAddModal();
+    const quotaCheck = this.dashboardService.canAddAnotherTotpAccount(this.activeTotpAccounts().length);
+    if (!quotaCheck.allowed) {
+      this.formErrorMessage.set(quotaCheck.reason || 'Free plan TOTP limit reached.');
+      this.dashboardService.openPaywallModal(quotaCheck.reason);
+      return;
+    }
+
+    const payload = {
+      issuer,
+      accountName,
+      secret,
+      digits: this.formDigits,
+      period: this.formPeriod,
+      algorithm: this.formAlgorithm,
+    };
+
+    if (!this.dashboardService.hasLiveAuthSession() && !this.dashboardService.hasRecoverableBrowserSession()) {
+      this.dashboardService.addTotpAccount(payload);
+      this.closeAddModal();
+      return;
+    }
+
+    this.isSavingAccount.set(true);
+    try {
+      const result = await this.dashboardService.addTotpAccountAsync(payload);
+      if (!result.ok) {
+        this.formErrorMessage.set(
+          result.error || 'Failed to save 2FA authenticator account to database.'
+        );
+        return;
+      }
+      this.closeAddModal();
+    } finally {
+      this.isSavingAccount.set(false);
+    }
   }
 }

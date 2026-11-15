@@ -48,6 +48,9 @@ import {
   UserSecurityAlertPreferences,
 } from '../models/dashboard.models';
 
+const TOTP_UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 @Injectable({
   providedIn: 'root'
 })
@@ -1356,6 +1359,72 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   private hasLiveAuthToken(): boolean {
     return Boolean(this.isBrowser && this.user()?.id && this.authService.token());
+  }
+
+  hasLiveAuthSession(): boolean {
+    return this.hasLiveAuthToken();
+  }
+
+  hasRecoverableBrowserSession(): boolean {
+    if (!this.isBrowser) return false;
+    if (this.hasLiveAuthToken() || Boolean(this.authService.token())) return true;
+    try {
+      if (localStorage.getItem('vanguard_token')) return true;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('sb-') && k.endsWith('-auth-token') && localStorage.getItem(k)) {
+          return true;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  }
+
+  private async ensureLiveAuthTokenAsync(): Promise<boolean> {
+    if (this.hasLiveAuthToken()) return true;
+    if (!this.isBrowser) return false;
+    try {
+      const auth = this.supabaseService?.client?.auth;
+      if (auth && typeof auth.getSession === 'function') {
+        const { data } = await auth.getSession();
+        const session = data?.session;
+        if (session?.access_token) {
+          this.authService.token.set(session.access_token);
+          try {
+            localStorage.setItem('vanguard_token', session.access_token);
+          } catch {}
+          if (!this.user()?.id && session.user) {
+            this.authService.currentUser.set({
+              id: session.user.id,
+              email: session.user.email || '',
+              user_metadata: session.user.user_metadata || {},
+            });
+          }
+        }
+      }
+    } catch {
+      // Fall back to current signal check below.
+    }
+    return this.hasLiveAuthToken();
+  }
+
+  private generateTotpId(): string {
+    const c = (globalThis as { crypto?: Crypto }).crypto;
+    if (c && typeof c.randomUUID === 'function') {
+      return c.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+      const r = Math.floor(Math.random() * 16);
+      const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  private ensureUuidTotpId(id?: string | null): string {
+    const trimmed = typeof id === 'string' ? id.trim() : '';
+    return TOTP_UUID_REGEX.test(trimmed) ? trimmed : this.generateTotpId();
   }
 
   // Remote Wipe Modal State
@@ -7245,24 +7314,24 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       ) {
         if (migrationKey) localStorage.setItem(migrationKey, '1');
         for (const acc of currentLocal) {
-          this.pendingTotpCreateIds.add(acc.id);
-          try {
-            await firstValueFrom(
-              this.http.post(`${this.apiBase}/totp-accounts`, {
-                id: acc.id,
-                issuer: acc.issuer,
-                accountName: acc.accountName,
-                secret: acc.secret,
-                digits: acc.digits || 6,
-                period: acc.period || 30,
-                algorithm: acc.algorithm || 'SHA1',
-                icon: acc.icon || '🛡️',
-              }),
+          const validId = this.ensureUuidTotpId(acc.id);
+          if (validId !== acc.id) {
+            this.totpAccounts.update((accounts) =>
+              accounts.map((item) => (item.id === acc.id ? { ...item, id: validId } : item)),
             );
+            this.persistTotpAccounts();
+          }
+          const payload = this.buildTotpPayload({ ...acc, id: validId });
+          this.pendingTotpCreateIds.add(validId);
+          try {
+            const created = await firstValueFrom(
+              this.http.post<{ account?: TotpAccount }>(`${this.apiBase}/totp-accounts`, payload),
+            );
+            this.applyCanonicalServerTotpAccount(validId, created?.account);
           } catch {
             // Best-effort legacy migration
           } finally {
-            this.pendingTotpCreateIds.delete(acc.id);
+            this.pendingTotpCreateIds.delete(validId);
           }
         }
         return;
@@ -7291,14 +7360,62 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
-  addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
-    const newAcc: TotpAccount = {
+  private buildTotpPayload(acc: TotpAccount) {
+    return {
+      id: acc.id,
+      issuer: acc.issuer,
+      accountName: acc.accountName,
+      secret: acc.secret,
+      digits: acc.digits || 6,
+      period: acc.period || 30,
+      algorithm: acc.algorithm || 'SHA1',
+      icon: acc.icon || '🛡️',
+    };
+  }
+
+  private extractHttpErrorMessage(err: any, fallback: string): string {
+    const raw = err?.error?.message;
+    if (Array.isArray(raw) && raw.length > 0) return String(raw[0]);
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+    if (typeof err?.message === 'string' && err.message.trim()) return err.message.trim();
+    return fallback;
+  }
+
+  private applyCanonicalServerTotpAccount(localId: string, serverAccount?: TotpAccount): void {
+    if (!serverAccount) return;
+    this.totpAccounts.update((accounts) => {
+      const withoutDuplicate = accounts.filter(
+        (a) => a.id === localId || a.id !== serverAccount.id,
+      );
+      return withoutDuplicate.map((a) =>
+        a.id === localId ? { ...a, ...serverAccount, id: serverAccount.id } : a,
+      );
+    });
+    this.persistTotpAccounts();
+    if (serverAccount.updatedAt && this.lastSyncState) {
+      this.lastSyncState.totpUpdatedAt = serverAccount.updatedAt;
+    }
+    void this.refreshTotpCodes();
+  }
+
+  private rollbackFailedTotpCreate(localId: string): void {
+    this.totpAccounts.update((accounts) => accounts.filter((a) => a.id !== localId));
+    this.persistTotpAccounts();
+    void this.refreshTotpCodes();
+  }
+
+  private createLocalTotpEntry(account: Omit<TotpAccount, 'id'>): TotpAccount {
+    return {
       digits: 6,
       period: 30,
       algorithm: 'SHA1',
       ...account,
-      id: 'totp-acc-' + Date.now()
+      id: this.generateTotpId(),
     };
+  }
+
+  addTotpAccount(account: Omit<TotpAccount, 'id'>): void {
+    const newAcc = this.createLocalTotpEntry(account);
     this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
     this.persistTotpAccounts();
     void this.refreshTotpCodes();
@@ -7306,27 +7423,81 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (this.hasLiveAuthToken()) {
       this.pendingTotpCreateIds.add(newAcc.id);
       this.http
-        .post(`${this.apiBase}/totp-accounts`, {
-          id: newAcc.id,
-          issuer: newAcc.issuer,
-          accountName: newAcc.accountName,
-          secret: newAcc.secret,
-          digits: newAcc.digits || 6,
-          period: newAcc.period || 30,
-          algorithm: newAcc.algorithm || 'SHA1',
-          icon: newAcc.icon || '🛡️',
-        })
+        .post<{ account?: TotpAccount }>(
+          `${this.apiBase}/totp-accounts`,
+          this.buildTotpPayload(newAcc),
+        )
         .subscribe({
-          next: () => {
+          next: (res) => {
             this.pendingTotpCreateIds.delete(newAcc.id);
+            this.applyCanonicalServerTotpAccount(newAcc.id, res?.account);
           },
-          error: () => {
+          error: (err) => {
             this.pendingTotpCreateIds.delete(newAcc.id);
+            this.rollbackFailedTotpCreate(newAcc.id);
+            const msg = this.extractHttpErrorMessage(
+              err,
+              'Failed to save 2FA authenticator account to database.',
+            );
+            if (err?.status === 403) {
+              this.openPaywallModal(msg);
+            }
+            this.showAdminNotice(msg);
           },
         });
     }
 
     this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
+  }
+
+  async addTotpAccountAsync(
+    account: Omit<TotpAccount, 'id'>,
+  ): Promise<{ ok: boolean; account?: TotpAccount; error?: string }> {
+    const hasAuth = await this.ensureLiveAuthTokenAsync();
+    const newAcc = this.createLocalTotpEntry(account);
+
+    if (!hasAuth) {
+      if (this.isBrowser && !this.isTestRuntime() && (this.user()?.id || this.hasRecoverableBrowserSession())) {
+        return {
+          ok: false,
+          error: 'Your session has expired. Please sign in again to save 2FA accounts to the database.',
+        };
+      }
+      this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
+      this.persistTotpAccounts();
+      void this.refreshTotpCodes();
+      this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
+      return { ok: true, account: newAcc };
+    }
+
+    this.totpAccounts.update((accounts) => [newAcc, ...accounts]);
+    this.persistTotpAccounts();
+    void this.refreshTotpCodes();
+    this.pendingTotpCreateIds.add(newAcc.id);
+
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ account?: TotpAccount }>(
+          `${this.apiBase}/totp-accounts`,
+          this.buildTotpPayload(newAcc),
+        ),
+      );
+      this.applyCanonicalServerTotpAccount(newAcc.id, res?.account);
+      this.logAuditEvent(`Added 2FA Authenticator token: ${newAcc.issuer}`, 'TOTP Authenticator', 'Enroll', 'success', 'Low');
+      return { ok: true, account: res?.account || newAcc };
+    } catch (err: any) {
+      this.rollbackFailedTotpCreate(newAcc.id);
+      const msg = this.extractHttpErrorMessage(
+        err,
+        'Failed to save 2FA authenticator account to database.',
+      );
+      if (err?.status === 403) {
+        this.openPaywallModal(msg);
+      }
+      return { ok: false, error: msg };
+    } finally {
+      this.pendingTotpCreateIds.delete(newAcc.id);
+    }
   }
 
   updateTotpAccount(id: string, updates: Partial<Omit<TotpAccount, 'id'>>): void {
@@ -7347,7 +7518,13 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           ...(updates.algorithm !== undefined ? { algorithm: updates.algorithm } : {}),
           ...(updates.icon !== undefined ? { icon: updates.icon } : {}),
         })
-        .subscribe({ error: () => {} });
+        .subscribe({
+          error: (err) => {
+            this.showAdminNotice(
+              this.extractHttpErrorMessage(err, 'Failed to update 2FA authenticator account in database.'),
+            );
+          },
+        });
     }
 
     this.logAuditEvent(`Updated 2FA Authenticator token: ${updates.issuer || id}`, 'TOTP Authenticator', 'Update', 'success', 'Low');
@@ -7366,8 +7543,11 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           next: () => {
             this.pendingTotpDeleteIds.delete(id);
           },
-          error: () => {
+          error: (err) => {
             this.pendingTotpDeleteIds.delete(id);
+            this.showAdminNotice(
+              this.extractHttpErrorMessage(err, 'Failed to remove 2FA authenticator account from database.'),
+            );
           },
         });
     }

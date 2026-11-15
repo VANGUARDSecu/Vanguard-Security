@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { UserAuthenticator } from './user-authenticator';
 import { DashboardService } from '../../services/dashboard.service';
 import { AuthService } from '../../../../services/auth.service';
+import { environment } from '../../../../../environments/environment';
 
 describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)', () => {
   let component: UserAuthenticator;
@@ -335,5 +336,72 @@ describe('UserAuthenticator Component (SCRUM-50 2FA Rolling Code Authenticator)'
 
     component.openAddModal('manual');
     expect(component.showAddModal()).toBe(true);
+  });
+
+  it('SCRUM-201: rejects Base32 secrets shorter than 8 characters before API submission', async () => {
+    component.openAddModal('manual');
+    component.formIssuer = 'GitHub';
+    component.formAccountName = 'alex@personal.me';
+    component.formSecret = 'JBSWY3D';
+
+    await component.saveAccount();
+
+    expect(component.showAddModal()).toBe(true);
+    expect(component.formErrorMessage()).toContain('at least 8');
+    expect(component.activeTotpAccounts().length).toBe(0);
+  });
+
+  it('SCRUM-201: awaits backend confirmation for live sessions and keeps modal open on DB error', async () => {
+    const httpMock = TestBed.inject(HttpTestingController);
+    httpMock.match(() => true).forEach((r) => r.flush({ success: true, connectedApps: [] }));
+    authService.token.set('live-session-jwt');
+
+    component.openAddModal('manual');
+    component.formIssuer = 'Vercel';
+    component.formAccountName = 'alex@personal.me';
+    component.formSecret = 'JBSWY3DPEHPK3PXP';
+
+    const savePromise = component.saveAccount();
+    expect(component.isSavingAccount()).toBe(true);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const failReq = httpMock.expectOne(`${environment.apiUrl}/totp-accounts`);
+    failReq.flush(
+      { message: 'Database write rejected' },
+      { status: 500, statusText: 'Internal Server Error' },
+    );
+
+    await savePromise;
+
+    expect(component.isSavingAccount()).toBe(false);
+    expect(component.showAddModal()).toBe(true);
+    expect(component.formErrorMessage()).toContain('Database write rejected');
+    expect(component.activeTotpAccounts().length).toBe(0);
+
+    // Retry and succeed -> modal closes and canonical server ID is kept
+    const retryPromise = component.saveAccount();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const okReq = httpMock.expectOne(`${environment.apiUrl}/totp-accounts`);
+    const canonicalId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    okReq.flush({
+      account: {
+        id: canonicalId,
+        issuer: 'Vercel',
+        accountName: 'alex@personal.me',
+        secret: 'JBSWY3DPEHPK3PXP',
+        digits: 6,
+        period: 30,
+        algorithm: 'SHA1',
+      },
+    });
+
+    await retryPromise;
+    expect(component.showAddModal()).toBe(false);
+    expect(component.activeTotpAccounts().some((a) => a.id === canonicalId)).toBe(true);
+    dashboardService.cleanupCrossDeviceSync();
   });
 });

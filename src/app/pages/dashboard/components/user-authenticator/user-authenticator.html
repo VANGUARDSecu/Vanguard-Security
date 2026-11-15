@@ -400,9 +400,9 @@
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn-cyber-secondary" (click)="closeAddModal()">Cancel</button>
-        <button type="button" class="btn-cyber-primary" (click)="saveAccount()">
-          {{ editingAccountId() ? 'Save Changes' : 'Enroll Authenticator' }}
+        <button type="button" class="btn-cyber-secondary" [disabled]="isSavingAccount()" (click)="closeAddModal()">Cancel</button>
+        <button type="button" class="btn-cyber-primary" [disabled]="isSavingAccount()" (click)="saveAccount()">
+          {{ isSavingAccount() ? 'Saving...' : (editingAccountId() ? 'Save Changes' : 'Enroll Authenticator') }}
         </button>
       </div>
     </div>

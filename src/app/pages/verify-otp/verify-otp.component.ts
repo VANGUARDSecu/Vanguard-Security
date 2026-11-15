@@ -1,9 +1,11 @@
 import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChildren, QueryList, ElementRef, PLATFORM_ID } from '@angular/core';
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse, sanitizeReturnUrl, consumeSavedReturnUrl } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
+import { buildSsoCallbackUrl, isCustomMobileSchemeUrl } from '../../utils/sso-redirect.util';
 
 export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval' | 'recovery_code';
 
@@ -21,6 +23,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
   private readonly dashboardService = inject(DashboardService);
+  private readonly sanitizer = inject(DomSanitizer);
 
   @ViewChildren('otpInput') otpInputs!: QueryList<ElementRef<HTMLInputElement>>;
 
@@ -37,8 +40,14 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly ssoApprovalMessage = signal<string>('');
   readonly isCheckingApproval = signal<boolean>(false);
   readonly pendingApprovalChallengeMethod = signal<'push_approval' | 'email_otp'>('push_approval');
+  readonly pendingSsoRedirectUrl = signal<string | null>(null);
+  readonly safeSsoRedirectHref = computed<SafeUrl | null>(() => {
+    const url = this.pendingSsoRedirectUrl();
+    return url ? this.sanitizer.bypassSecurityTrustUrl(url) : null;
+  });
   private approvalPollTimer: any = null;
   private isRetryingPostApproval = false;
+  private ssoVisibilityListener: (() => void) | null = null;
 
   private isApprovalRequiredError(err: any): boolean {
     const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
@@ -528,6 +537,14 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     if (this.pushPollInterval) clearInterval(this.pushPollInterval);
     if (this.pushCountdownInterval) clearInterval(this.pushCountdownInterval);
     this.stopApprovalPolling();
+    this.clearSsoVisibilityListener();
+  }
+
+  private clearSsoVisibilityListener(): void {
+    if (this.ssoVisibilityListener && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.ssoVisibilityListener);
+    }
+    this.ssoVisibilityListener = null;
   }
 
   startPushPolling(challengeId: string): void {
@@ -1073,13 +1090,36 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
   }
 
+  private attemptSsoBrowserRedirect(targetUrl: string): void {
+    if (typeof window !== 'undefined') {
+      window.location.href = targetUrl;
+    }
+  }
+
+  private scheduleVisibilityRetry(targetUrl: string): void {
+    this.clearSsoVisibilityListener();
+    if (!this.isBrowser || typeof document === 'undefined' || !isCustomMobileSchemeUrl(targetUrl)) {
+      return;
+    }
+
+    const listener = () => {
+      if (document.visibilityState === 'visible' && this.pendingSsoRedirectUrl() === targetUrl) {
+        this.clearSsoVisibilityListener();
+        this.attemptSsoBrowserRedirect(targetUrl);
+      }
+    };
+    this.ssoVisibilityListener = listener;
+    document.addEventListener('visibilitychange', listener);
+  }
+
   private handleSsoRedirect(res: { code?: string; redirectUrl?: string; message?: string }): void {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem('vanguard_sso_pending');
     }
     const sso = this.ssoParams();
-    this.isLoading.set(true);
-    this.showNotification('success', 'Identity and 2FA verified! Authorizing access to client application...', 4000);
+    this.isLoading.set(false);
+    this.ssoApprovalRequired.set(false);
+    this.showNotification('success', 'Identity and 2FA verified! Returning you to ' + this.clientDisplayName() + '...', 6000);
 
     try {
       if (sso) {
@@ -1093,11 +1133,21 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       }
     } catch {}
 
-    if (res.redirectUrl) {
-      window.location.href = res.redirectUrl;
-    } else if (sso) {
-      window.location.href = `${sso['redirect_uri']}?code=${res.code}${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
+    const targetUrl = buildSsoCallbackUrl({
+      redirectUrl: res.redirectUrl,
+      redirectUri: sso?.['redirect_uri'],
+      code: res.code,
+      state: sso?.['state'],
+    });
+    if (!targetUrl) {
+      return;
     }
+
+    this.pendingSsoRedirectUrl.set(targetUrl);
+    if (this.isBrowser && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      this.scheduleVisibilityRetry(targetUrl);
+    }
+    this.attemptSsoBrowserRedirect(targetUrl);
   }
 
   private resolveUserFullName(user?: UserProfile | null, fallbackEmail?: string): string {

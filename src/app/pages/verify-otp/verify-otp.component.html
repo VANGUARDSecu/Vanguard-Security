@@ -114,8 +114,30 @@
         </div>
       }
 
-      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160 / SCRUM-198) -->
-      @if (ssoApprovalRequired()) {
+      <!-- Post-Verification Mobile/Web App Handoff Fallback CTA (SCRUM-205) -->
+      @if (safeSsoRedirectHref(); as ssoHref) {
+        <div class="sso-consent-notice" data-testid="sso-handoff-card">
+          <div class="sso-consent-badge">
+            <span class="pulse-dot-emerald"></span>
+            <span>Authentication Verified</span>
+          </div>
+          <h3 class="sso-consent-title">Ready to Return to {{ clientDisplayName() }}</h3>
+          <p class="sso-consent-text">
+            Your identity challenge passed. If {{ clientDisplayName() }} did not open automatically, tap below to complete sign-in.
+          </p>
+          <div class="sso-consent-actions">
+            <a
+              [href]="ssoHref"
+              class="verify-btn sso-approve-btn"
+              style="display: flex; align-items: center; justify-content: center; text-decoration: none;"
+              data-testid="sso-return-app-link"
+            >
+              Return to {{ clientDisplayName() }}
+            </a>
+          </div>
+        </div>
+      } @else if (ssoApprovalRequired()) {
+        <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160 / SCRUM-198) -->
         <div class="sso-approval-notice">
           <div class="sso-approval-badge">
             <span class="pulse-dot-amber"></span>

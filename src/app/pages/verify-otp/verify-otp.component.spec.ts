@@ -169,6 +169,7 @@ describe('VerifyOtpComponent', () => {
         })
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -242,6 +243,7 @@ describe('VerifyOtpComponent', () => {
         })
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -267,6 +269,7 @@ describe('VerifyOtpComponent', () => {
         )
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'figma-enterprise',
         redirect_uri: 'https://figma.com/callback',
@@ -281,6 +284,7 @@ describe('VerifyOtpComponent', () => {
     });
 
     it('SCRUM-184: displays Administrative Approval Required even for Acme Dummy Portal (no self-approval bypass)', () => {
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -310,6 +314,7 @@ describe('VerifyOtpComponent', () => {
         }),
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -334,6 +339,7 @@ describe('VerifyOtpComponent', () => {
       delete (window as any).location;
       (window as any).location = { href: '' };
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -426,6 +432,7 @@ describe('VerifyOtpComponent', () => {
       );
       const pushSpy = vi.spyOn(authService, 'initiatePushMfa');
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -457,6 +464,7 @@ describe('VerifyOtpComponent', () => {
         }),
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -480,6 +488,7 @@ describe('VerifyOtpComponent', () => {
         throwError(() => new Error('A valid Vanguard Bearer token is required.')),
       );
 
+      component.serverClientName.set('Dummy Mobile App');
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
@@ -489,6 +498,53 @@ describe('VerifyOtpComponent', () => {
 
       expect(component.ssoApprovalRequired()).toBe(false);
       expect(component.notification()?.type).toBe('error');
+    });
+  });
+
+  describe('SCRUM-205 Mobile Custom-Scheme SSO Handoff CTA', () => {
+    it('renders interactive Return to client link and resets isLoading when redirecting to exp:// or vanguard-dummy://', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      vi.spyOn(authService, 'completeSsoMfa').mockReturnValue(
+        of({
+          success: true,
+          approved: true,
+          awaitingAdminApproval: false,
+          code: 'vg_expo_205',
+          redirectUrl: 'exp://192.168.1.25:8081/--/oauth/callback?code=vg_expo_205&state=st-205',
+        }),
+      );
+
+      component.serverClientName.set('Dummy Mobile App');
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-mobile',
+        client_name: 'Dummy Mobile App',
+        redirect_uri: 'exp://192.168.1.25:8081/--/oauth/callback',
+        state: 'st-205',
+      });
+      component.challengeId.set('push_mfa_mobile_205');
+      component.isLoading.set(true);
+
+      component.checkApprovalAndProceed(false);
+      fixture.detectChanges();
+
+      expect(component.isLoading()).toBe(false);
+      expect(component.pendingSsoRedirectUrl()).toBe(
+        'exp://192.168.1.25:8081/--/oauth/callback?code=vg_expo_205&state=st-205',
+      );
+      expect(window.location.href).toBe(
+        'exp://192.168.1.25:8081/--/oauth/callback?code=vg_expo_205&state=st-205',
+      );
+
+      const el: HTMLElement = fixture.nativeElement;
+      const returnLink = el.querySelector('[data-testid="sso-return-app-link"]') as HTMLAnchorElement | null;
+      expect(returnLink).toBeTruthy();
+      expect(returnLink?.textContent).toContain('Return to Dummy Mobile App');
+      expect(returnLink?.getAttribute('href')).toContain('exp://192.168.1.25:8081/--/oauth/callback?code=vg_expo_205');
+
+      (window as any).location = originalLocation;
     });
   });
 });

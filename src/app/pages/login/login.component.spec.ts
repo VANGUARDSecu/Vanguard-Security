@@ -285,5 +285,52 @@ describe('LoginComponent', () => {
       });
       expect((navSpy.mock.calls[0][1] as any).queryParams.consent).toBeUndefined();
     });
+
+    it('SCRUM-205: exposes interactive Return CTA when approveSsoForUser completes for custom mobile scheme', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      vi.spyOn(component.authService, 'approveSsoAuthorization').mockReturnValue({
+        subscribe: ({ next }: any) =>
+          next({
+            code: 'vg_apk_205',
+            redirectUrl: 'vanguard-dummy://oauth/callback?code=vg_apk_205&state=st-apk',
+          }),
+      } as any);
+
+      (component.authService as any).currentUser.set({
+        id: 'usr_apk_205',
+        email: 'mobile@example.com',
+        firstName: 'Mobile',
+        lastName: 'User',
+      });
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-mobile',
+        client_name: 'Dummy Mobile App',
+        redirect_uri: 'vanguard-dummy://oauth/callback',
+        state: 'st-apk',
+      });
+      component.isLoading.set(true);
+
+      component.approveSsoForUser(undefined, false);
+      fixture.detectChanges();
+
+      expect(component.isLoading()).toBe(false);
+      expect(component.pendingSsoRedirectUrl()).toBe(
+        'vanguard-dummy://oauth/callback?code=vg_apk_205&state=st-apk',
+      );
+      expect(window.location.href).toBe(
+        'vanguard-dummy://oauth/callback?code=vg_apk_205&state=st-apk',
+      );
+
+      const el: HTMLElement = fixture.nativeElement;
+      const returnLink = el.querySelector('[data-testid="sso-return-app-link"]') as HTMLAnchorElement | null;
+      expect(returnLink).toBeTruthy();
+      expect(returnLink?.textContent).toContain('Return to Dummy Mobile App');
+      expect(returnLink?.getAttribute('href')).toContain('vanguard-dummy://oauth/callback?code=vg_apk_205');
+
+      (window as any).location = originalLocation;
+    });
   });
 });

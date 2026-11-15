@@ -84,6 +84,30 @@
           <p class="oauth-processing-status">{{ authService.oAuthProcessingMessage() }}</p>
           <p class="oauth-processing-sub">Please wait while Vanguard verifies your account and prepares 2-Step Verification...</p>
         </div>
+      } @else if (safeSsoRedirectHref(); as ssoHref) {
+        <div class="sso-approval-notice" style="border-color: rgba(16, 185, 129, 0.45); background: rgba(6, 78, 59, 0.22);" data-testid="sso-handoff-card">
+          <div class="sso-approval-badge" style="background: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.4); color: #34d399;">
+            <span class="pulse-dot-amber" style="background: #34d399; box-shadow: 0 0 8px #34d399;"></span>
+            <span>Authentication Verified</span>
+          </div>
+
+          <h3 class="sso-approval-title">Ready to Return to {{ clientDisplayName() }}</h3>
+
+          <p class="sso-approval-text">
+            Your SSO authorization succeeded. If {{ clientDisplayName() }} did not open automatically, tap below to complete sign-in.
+          </p>
+
+          <div class="sso-approval-actions" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+            <a
+              [href]="ssoHref"
+              class="signin-btn"
+              style="background: #10b981; color: #042f2e; font-weight: 700; width: 100%; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; text-decoration: none;"
+              data-testid="sso-return-app-link"
+            >
+              Return to {{ clientDisplayName() }}
+            </a>
+          </div>
+        </div>
       } @else if (ssoApprovalRequired()) {
         <div class="sso-approval-notice">
           <div class="sso-approval-badge">

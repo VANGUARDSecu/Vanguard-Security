@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, sanitizeReturnUrl, consumeSavedReturnUrl } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
@@ -8,6 +9,7 @@ import {
   buildMobileOAuthDeepLink,
   isAllowedMobileRedirectUri,
 } from '../../utils/mobile-oauth-relay.util';
+import { buildSsoCallbackUrl, isCustomMobileSchemeUrl } from '../../utils/sso-redirect.util';
 
 @Component({
   selector: 'app-login',
@@ -22,6 +24,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly dashboardService = inject(DashboardService);
+  private readonly sanitizer = inject(DomSanitizer);
 
   // Form group definition
   readonly loginForm: FormGroup = this.fb.group({
@@ -59,7 +62,13 @@ export class LoginComponent implements OnInit, OnDestroy {
   readonly ssoApprovalRequired = signal<boolean>(false);
   readonly ssoApprovalMessage = signal<string>('');
   readonly isCheckingApproval = signal<boolean>(false);
+  readonly pendingSsoRedirectUrl = signal<string | null>(null);
+  readonly safeSsoRedirectHref = computed<SafeUrl | null>(() => {
+    const url = this.pendingSsoRedirectUrl();
+    return url ? this.sanitizer.bypassSecurityTrustUrl(url) : null;
+  });
   private approvalPollTimer: any = null;
+  private ssoVisibilityListener: (() => void) | null = null;
 
   private isApprovalRequiredError(err: any): boolean {
     const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
@@ -176,9 +185,35 @@ export class LoginComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopApprovalPolling();
+    this.clearSsoVisibilityListener();
     if (this.notificationTimer) {
       clearTimeout(this.notificationTimer);
     }
+  }
+
+  private clearSsoVisibilityListener(): void {
+    if (this.ssoVisibilityListener && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.ssoVisibilityListener);
+    }
+    this.ssoVisibilityListener = null;
+  }
+
+  private scheduleVisibilityRetry(targetUrl: string): void {
+    this.clearSsoVisibilityListener();
+    if (typeof document === 'undefined' || !isCustomMobileSchemeUrl(targetUrl)) {
+      return;
+    }
+
+    const listener = () => {
+      if (document.visibilityState === 'visible' && this.pendingSsoRedirectUrl() === targetUrl) {
+        this.clearSsoVisibilityListener();
+        if (typeof window !== 'undefined') {
+          window.location.href = targetUrl;
+        }
+      }
+    };
+    this.ssoVisibilityListener = listener;
+    document.addEventListener('visibilitychange', listener);
   }
 
   // Single timed notification state with auto-dismiss
@@ -641,6 +676,7 @@ export class LoginComponent implements OnInit, OnDestroy {
     this.authService.approveSsoAuthorization(payload).subscribe({
       next: (res) => {
         this.stopApprovalPolling();
+        this.isLoading.set(false);
         this.isCheckingApproval.set(false);
         this.ssoApprovalRequired.set(false);
         this.authService.recordLocalConnectedApp({
@@ -654,10 +690,23 @@ export class LoginComponent implements OnInit, OnDestroy {
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem('vanguard_sso_pending');
         }
-        if (res.redirectUrl) {
-          window.location.href = res.redirectUrl;
-        } else {
-          window.location.href = `${sso['redirect_uri']}?code=${res.code}${sso['state'] ? '&state=' + encodeURIComponent(sso['state']) : ''}`;
+        const targetUrl = buildSsoCallbackUrl({
+          redirectUrl: res.redirectUrl,
+          redirectUri: sso['redirect_uri'],
+          code: res.code,
+          state: sso['state'],
+        });
+        if (!targetUrl) {
+          return;
+        }
+
+        this.pendingSsoRedirectUrl.set(targetUrl);
+        this.showNotification('success', 'Identity verified! Returning you to ' + this.clientDisplayName() + '...', 6000);
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          this.scheduleVisibilityRetry(targetUrl);
+        }
+        if (typeof window !== 'undefined') {
+          window.location.href = targetUrl;
         }
       },
       error: (err: Error) => {

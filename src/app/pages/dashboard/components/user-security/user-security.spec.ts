@@ -170,7 +170,11 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       codes.forEach((code) => {
         expect(code).toMatch(/^VANG-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
       });
-      expect(JSON.parse(localStorage.getItem('vanguard_recovery_codes') || '[]').length).toBe(10);
+      expect(
+        JSON.parse(
+          localStorage.getItem('vanguard_recovery_codes_employee.mfa@vanguard.security') || '[]'
+        ).length
+      ).toBe(10);
     });
 
     it('should copy recovery codes to clipboard', () => {
@@ -482,6 +486,107 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
         window.location.origin,
       );
       postMsgSpy.mockRestore();
+    });
+  });
+
+  describe('SCRUM-182: Backend Recovery Codes, Push MFA Hydration & Connected Apps Sync', () => {
+    it('hydrates Push MFA preference on ngOnInit when live auth token exists', () => {
+      authService.token.set('live-jwt-token');
+      dashboardService.user.set({
+        id: 'u-1',
+        email: 'employee.mfa@vanguard.security',
+        firstName: 'Emp',
+        lastName: 'User',
+        companyName: 'Vanguard',
+        role: 'user',
+      });
+      const prefSpy = vi
+        .spyOn(authService, 'getPushMfaPreference')
+        .mockReturnValue(of({ success: true, email: 'employee.mfa@vanguard.security', enabled: false }));
+
+      component.ngOnInit();
+      expect(prefSpy).toHaveBeenCalledWith('employee.mfa@vanguard.security');
+      expect(component.pushMfaEnabled()).toBe(false);
+    });
+
+    it('rejects malformed secondary alert email addresses', () => {
+      component.secondaryEmailInput = 'not-an-email';
+      component.saveSecondaryEmail();
+      expect(component.secondaryEmailError()).toBe('Enter a valid secondary alert email address.');
+      expect(component.secondaryEmailSaved()).toBe(false);
+    });
+
+    it('sets connectedAppsError on HTTP failure and clears it on refreshConnectedApps success', () => {
+      dashboardService.user.set({
+        id: 'u-1',
+        email: 'employee.mfa@vanguard.security',
+        firstName: 'Emp',
+        lastName: 'User',
+        companyName: 'Vanguard',
+        role: 'user',
+      });
+
+      vi.spyOn(authService, 'getConnectedApps').mockReturnValueOnce(
+        throwError(() => ({ error: { message: 'Gateway timeout' } }))
+      );
+      component.refreshConnectedApps();
+      expect(component.connectedAppsError()).toBe('Gateway timeout');
+      expect(component.isLoadingConnectedApps()).toBe(false);
+
+      vi.spyOn(authService, 'getConnectedApps').mockReturnValueOnce(
+        of({
+          success: true,
+          connectedApps: [
+            {
+              id: 'conn-1',
+              userEmail: 'employee.mfa@vanguard.security',
+              clientId: 'dummy-client',
+              clientName: 'Acme Dummy Web',
+              clientType: 'web' as const,
+              protocol: 'OIDC 1.0 PKCE',
+              scopes: ['openid', 'profile', 'email'],
+              redirectUri: 'http://localhost:4201/auth/callback',
+              originUrl: 'http://localhost:4201',
+              connectedAt: new Date().toISOString(),
+              lastActiveAt: new Date().toISOString(),
+              status: 'Active' as const,
+            },
+          ],
+        })
+      );
+      component.refreshConnectedApps();
+      expect(component.connectedAppsError()).toBeNull();
+      expect(component.activeConnectedApps().length).toBe(1);
+    });
+
+    it('generates and redeems recovery codes via backend endpoints when live auth token is set', () => {
+      authService.token.set('live-jwt-token');
+      const genSpy = vi.spyOn(authService, 'generateRecoveryCodes').mockReturnValue(
+        of({
+          success: true,
+          codes: ['VANG-1111-AAAA', 'VANG-2222-BBBB'],
+          remainingCount: 2,
+          generatedAt: '2026-11-15T00:00:00.000Z',
+        })
+      );
+
+      component.generateRecoveryCodes();
+      expect(genSpy).toHaveBeenCalled();
+      expect(component.recoveryCodes()).toEqual(['VANG-1111-AAAA', 'VANG-2222-BBBB']);
+      expect(component.effectiveRecoveryCodesCount()).toBe(2);
+
+      const redeemSpy = vi.spyOn(authService, 'redeemRecoveryCode').mockReturnValue(
+        of({
+          success: true,
+          verified: true,
+          remainingCount: 1,
+          message: 'Code redeemed',
+        })
+      );
+      component.testRecoveryCodeInput = 'VANG-1111-AAAA';
+      component.redeemRecoveryCode();
+      expect(redeemSpy).toHaveBeenCalledWith('VANG-1111-AAAA');
+      expect(component.recoveryCodesRemaining()).toBe(1);
     });
   });
 });

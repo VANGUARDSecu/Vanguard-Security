@@ -1,6 +1,8 @@
 import { Component, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { DashboardService } from './services/dashboard.service';
 import { DashboardHeader } from './components/header/header';
 import { DashboardSidebar } from './components/sidebar/sidebar';
@@ -84,14 +86,32 @@ export type {
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
+  private readonly route = inject(ActivatedRoute, { optional: true });
+  private queryParamsSub: Subscription | null = null;
 
   ngOnInit(): void {
     this.dashboardService.initDashboardForCurrentUser();
     // SCRUM-94: source company apps from the backend for company accounts.
     this.dashboardService.loadCompanyApps();
+
+    if (this.route?.queryParams) {
+      this.queryParamsSub = this.route.queryParams.subscribe((params) => {
+        const tab = params['tab'];
+        if (tab === 'security' || tab === 'user-security') {
+          this.dashboardService.setActiveTab('user-security');
+        }
+        if (params['action'] === 'revoke') {
+          this.dashboardService.setActiveTab('user-security');
+          this.dashboardService.showAdminNotice(
+            'Review connected external apps, active devices, or change your password below to revoke untrusted access.'
+          );
+        }
+      });
+    }
   }
 
   ngOnDestroy(): void {
+    this.queryParamsSub?.unsubscribe();
     this.dashboardService.stopLiveSsoChallengePolling();
   }
 

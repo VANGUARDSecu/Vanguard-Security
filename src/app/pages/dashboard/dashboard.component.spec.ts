@@ -1581,6 +1581,28 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       );
     });
   });
+
+  describe('SCRUM-182: Connected Apps Refresh & Security Deep Link', () => {
+    it('fetches connected apps when switching to user-security tab', () => {
+      const fetchSpy = vi.spyOn(component.dashboardService, 'fetchConnectedApps');
+      component.dashboardService.setActiveTab('user-security');
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+
+    it('handles ?tab=security&action=revoke query params cleanly', () => {
+      const setTabSpy = vi.spyOn(component.dashboardService, 'setActiveTab');
+      const noticeSpy = vi.spyOn(component.dashboardService, 'showAdminNotice');
+      (component as any).route = {
+        queryParams: of({ tab: 'security', action: 'revoke' }),
+      };
+
+      component.ngOnInit();
+      expect(setTabSpy).toHaveBeenCalledWith('user-security');
+      expect(noticeSpy).toHaveBeenCalledWith(
+        expect.stringContaining('revoke untrusted access')
+      );
+    });
+  });
 });
 
 

@@ -71,7 +71,7 @@
       </p>
       <div class="sec-stat-box">
         <span class="sec-stat-label">Delivery Channel:</span>
-        <span class="sec-stat-val">Supabase GoTrue Mailer</span>
+        <span class="sec-stat-val">Vanguard Mailer (Resend / SMTP &amp; Supabase)</span>
       </div>
     </div>
 
@@ -100,8 +100,8 @@
         <div class="sec-icon-box">🛡️</div>
         <div class="sec-header-meta">
           <h3 class="sec-title">Emergency Single-Use Recovery Codes</h3>
-          <span class="badge" [class.badge-accent]="recoveryCodes().length > 0" [class.badge-orange]="recoveryCodes().length === 0">
-            {{ recoveryCodes().length }} Unused Codes
+          <span class="badge" [class.badge-accent]="effectiveRecoveryCodesCount() > 0" [class.badge-orange]="effectiveRecoveryCodesCount() === 0">
+            {{ effectiveRecoveryCodesCount() }} Unused Codes
           </span>
         </div>
         <div class="recovery-actions" *ngIf="recoveryCodes().length > 0">
@@ -127,7 +127,7 @@
       </div>
 
       <!-- Single-Use Code Redemption Tester -->
-      <div class="recovery-redeem-strip" *ngIf="recoveryCodes().length > 0">
+      <div class="recovery-redeem-strip" *ngIf="effectiveRecoveryCodesCount() > 0">
         <span class="redeem-strip-label">Test Single-Use Redemption:</span>
         <div class="redeem-input-group">
           <input
@@ -146,10 +146,16 @@
       </div>
 
       <div class="empty-codes-box" *ngIf="recoveryCodes().length === 0">
-        <h4 class="empty-title">No recovery codes generated</h4>
-        <p class="empty-desc">Generate 10 cryptographically secure single-use emergency backup codes to ensure you never lose access to your account.</p>
+        <h4 class="empty-title">
+          {{ recoveryCodesRemaining() > 0 ? (recoveryCodesRemaining() + ' recovery codes active in server vault') : 'No recovery codes generated' }}
+        </h4>
+        <p class="empty-desc">
+          {{ recoveryCodesRemaining() > 0
+            ? 'For security, Vanguard only reveals plaintext codes once at generation time. You can test a saved code above or regenerate 10 fresh codes below (this invalidates older codes).'
+            : 'Generate 10 cryptographically secure single-use emergency backup codes to ensure you never lose access to your account.' }}
+        </p>
         <button type="button" class="btn-primary-action btn-sm" (click)="generateRecoveryCodes()">
-          Generate Recovery Codes
+          {{ recoveryCodesRemaining() > 0 ? 'Regenerate Recovery Codes' : 'Generate Recovery Codes' }}
         </button>
       </div>
     </div>
@@ -164,6 +170,19 @@
             {{ activeConnectedApps().length }} Active Integration{{ activeConnectedApps().length === 1 ? '' : 's' }}
           </span>
         </div>
+        <div class="recovery-actions">
+          <button
+            type="button"
+            class="btn-ghost-sm"
+            (click)="refreshConnectedApps()"
+            [disabled]="isLoadingConnectedApps()"
+          >
+            {{ isLoadingConnectedApps() ? 'Refreshing...' : 'Refresh' }}
+          </button>
+        </div>
+      </div>
+      <div class="redeem-result-msg" *ngIf="connectedAppsError()">
+        {{ connectedAppsError() }}
       </div>
       <p class="sec-desc">
         External services and client applications currently authorized to access your Vanguard Security identity via OpenID Connect (OIDC) Single Sign-On and OAuth 2.0 PKCE.
@@ -209,7 +228,10 @@
 
       <div class="empty-codes-box" *ngIf="activeConnectedApps().length === 0">
         <h4 class="empty-title">No external applications connected</h4>
-        <p class="empty-desc">When you connect external web or mobile applications (like Acme Dummy Web) using Vanguard SSO, they will appear here with active session status.</p>
+        <p class="empty-desc">
+          When you connect external web or mobile applications (like Acme Dummy Web) using Vanguard SSO, they will appear here with active session status.
+          <span *ngIf="user()?.email"> Checked for <strong>{{ user()?.email }}</strong>.</span>
+        </p>
       </div>
     </div>
 
@@ -259,6 +281,9 @@
               {{ secondaryEmailSaved() ? 'Saved!' : 'Save Email' }}
             </button>
           </div>
+          <span class="pref-hint" style="color: #dc2626;" *ngIf="secondaryEmailError()">
+            {{ secondaryEmailError() }}
+          </span>
           <span class="pref-hint" *ngIf="securityAlertPreferences().secondaryEmail">
             Currently saved: <strong>{{ securityAlertPreferences().secondaryEmail }}</strong>
           </span>

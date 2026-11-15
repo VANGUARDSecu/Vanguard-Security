@@ -578,31 +578,13 @@ export class LoginComponent implements OnInit, OnDestroy {
         this.stopApprovalPolling();
         this.isCheckingApproval.set(false);
         this.ssoApprovalRequired.set(false);
-        try {
-          const originUrl = new URL(sso['redirect_uri']).origin;
-          const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
-          const appName = this.clientDisplayName();
-          const newConn = {
-            id: `conn_${sso['client_id']}`,
-            clientId: sso['client_id'],
-            clientName: appName,
-            protocol: 'OpenID Connect 1.0 (PKCE)',
-            scopes: (sso['scope'] || 'openid profile email roles').split(' '),
-            redirectUri: sso['redirect_uri'],
-            originUrl,
-            status: 'Connected',
-            connectedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-            lastActiveAt: 'Active Session',
-            icon: '🌐',
-            description: `${appName} integrated via Vanguard SSO with account ${payload.email}.`,
-          };
-          const normOrigin = originUrl.toLowerCase().trim().replace(/\/$/, '');
-          const filtered = stored.filter((c: any) => {
-            const cOrigin = (c.originUrl || '').toLowerCase().trim().replace(/\/$/, '');
-            return c.clientId !== sso['client_id'] && (!normOrigin || cOrigin !== normOrigin) && c.clientName !== appName;
-          });
-          localStorage.setItem('vanguard_connected_apps', JSON.stringify([newConn, ...filtered]));
-        } catch {}
+        this.authService.recordLocalConnectedApp({
+          clientId: sso['client_id'],
+          clientName: this.clientDisplayName(),
+          redirectUri: sso['redirect_uri'],
+          scope: sso['scope'],
+          userEmail: payload.email,
+        });
 
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem('vanguard_sso_pending');

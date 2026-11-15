@@ -349,4 +349,60 @@ describe('VerifyOtpComponent', () => {
       (window as any).location = originalLocation;
     });
   });
+
+  describe('SCRUM-182: Emergency Recovery Code Fallback on Verify OTP', () => {
+    it('submits VANG-XXXX-XXXX recovery code for Sign-in MFA via verifyOtp(signin_recovery)', () => {
+      component.mode.set('signin');
+      component.email.set('employee@acme.corp');
+      component.setMethod('recovery_code');
+      component.recoveryCodeInput.set('vang-a1b2-c3d4');
+
+      const verifySpy = vi.spyOn(authService, 'verifyOtp').mockReturnValue(
+        of({ success: true, message: 'Verified' } as any)
+      );
+
+      component.onSubmit();
+      expect(verifySpy).toHaveBeenCalledWith('employee@acme.corp', 'VANG-A1B2-C3D4', 'signin_recovery');
+    });
+
+    it('submits recovery_code via verifySsoMfa during SSO MFA challenge', () => {
+      component.challengeId.set('sso_mfa_rec_1');
+      component.email.set('employee@acme.corp');
+      component.setMethod('recovery_code');
+      component.recoveryCodeInput.set('VANG-DEAD-BEEF');
+
+      const ssoSpy = vi.spyOn(authService, 'verifySsoMfa').mockReturnValue(
+        of({ success: true, code: 'vg_code', redirectUrl: 'http://localhost:4201/auth/callback?code=vg_code&state=s' } as any)
+      );
+
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = { href: '' };
+
+      component.onSubmit();
+      expect(ssoSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          challengeId: 'sso_mfa_rec_1',
+          code: 'VANG-DEAD-BEEF',
+          method: 'recovery_code',
+        })
+      );
+
+      (window as any).location = originalLocation;
+    });
+
+    it('submits recovery_code for forgot-password recovery via verifyForgotPasswordRecoveryCode', () => {
+      component.mode.set('recovery');
+      component.email.set('employee@acme.corp');
+      component.setMethod('recovery_code');
+      component.recoveryCodeInput.set('VANG-9999-AAAA');
+
+      const recSpy = vi.spyOn(authService, 'verifyForgotPasswordRecoveryCode').mockReturnValue(
+        of({ success: true, message: 'Recovered', accessToken: 'tok_rec' } as any)
+      );
+
+      component.onSubmit();
+      expect(recSpy).toHaveBeenCalledWith('employee@acme.corp', 'VANG-9999-AAAA');
+    });
+  });
 });

@@ -1457,7 +1457,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: r.description || '',
             icon: r.icon || '🌐',
             protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
-            launchUrl: r.launch_url || r.launchUrl || '',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || r.launchUrl || ''),
             assigned: r.assigned !== false,
             inheritedViaGroup: r.inherited_via_group || undefined,
             assignedUsername: r.assigned_username || r.assignedUsername || undefined,
@@ -1634,7 +1634,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved SSO access)`,
             icon: r.icon || '🔐',
             protocol: (r.protocol as SaaSApp['protocol']) || 'OIDC',
-            launchUrl: r.launchUrl || 'http://localhost:4201',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launchUrl || 'http://localhost:4201'),
             assigned: true,
             status: 'Approved',
           }))
@@ -1649,7 +1649,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
-        ssoDeduped.push(app);
+        const cleanUrl = this.sanitizeSsoLaunchUrl(app.launchUrl);
+        ssoDeduped.push(cleanUrl !== app.launchUrl ? { ...app, launchUrl: cleanUrl } : app);
       }
     }
     return ssoDeduped;
@@ -1729,14 +1730,21 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return this.deduplicateConnectedAppsList(active);
   });
 
+  readonly connectedAppsError = signal<string | null>(null);
+  readonly isLoadingConnectedApps = signal<boolean>(false);
+
   fetchConnectedApps(): void {
     const email = this.user()?.email?.toLowerCase().trim();
     if (!email) {
       this.connectedApps.set([]);
+      this.connectedAppsError.set(null);
       return;
     }
+    this.isLoadingConnectedApps.set(true);
+    this.connectedAppsError.set(null);
     this.authService.getConnectedApps(email).subscribe({
       next: (res) => {
+        this.isLoadingConnectedApps.set(false);
         if (res.success && Array.isArray(res.connectedApps)) {
           const userSpecific = res.connectedApps.filter(
             (a) => a.userEmail?.toLowerCase().trim() === email && a.userEmail !== 'all'
@@ -1746,7 +1754,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           this.saveStored(`vanguard_connected_apps_${email}`, authoritative);
         }
       },
-      error: () => {},
+      error: (err) => {
+        this.isLoadingConnectedApps.set(false);
+        const msg = err?.error?.message || err?.message || 'Unable to sync connected applications.';
+        this.connectedAppsError.set(msg);
+        console.warn('[DashboardService] fetchConnectedApps failed:', msg);
+      },
     });
   }
 
@@ -1782,8 +1795,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   launchConnectedApp(app: UserConnectedApp): void {
-    if (this.isBrowser && app.originUrl) {
-      window.open(app.originUrl, '_blank');
+    const targetUrl = this.sanitizeSsoLaunchUrl(app.originUrl);
+    if (this.isBrowser && targetUrl) {
+      window.open(targetUrl, '_blank');
       this.logAuditEvent(
         `Launched connected app ${app.clientName} via SSO`,
         'SSO Integrations',
@@ -1815,9 +1829,20 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   readonly isConfirmingTotp = signal<boolean>(false);
   readonly isDeEnrollingTotp = signal<boolean>(false);
 
-  readonly recoveryCodes = signal<string[]>(
-    this.loadStored<string[]>('vanguard_recovery_codes', [])
-  );
+  private getRecoveryCodesStorageKey(): string {
+    const email = this.user()?.email?.toLowerCase().trim() || 'default';
+    return `vanguard_recovery_codes_${email}`;
+  }
+
+  private initRecoveryCodes(): string[] {
+    const scoped = this.loadStored<string[]>(this.getRecoveryCodesStorageKey(), []);
+    if (scoped.length > 0) return scoped;
+    return this.loadStored<string[]>('vanguard_recovery_codes', []);
+  }
+
+  readonly recoveryCodes = signal<string[]>(this.initRecoveryCodes());
+  readonly recoveryCodesRemaining = signal<number>(this.recoveryCodes().length);
+  readonly recoveryCodesGeneratedAt = signal<string | null>(null);
   readonly copiedCodes = signal<boolean>(false);
 
   // SCRUM-32: Self-Service Password Update Modal State
@@ -2497,6 +2522,11 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.userDevices.set(this.loadStored<EnrolledDevice[]>(this.getUserDevicesStorageKey(), []));
     this.totpAccounts.set(this.initTotpAccounts());
     this.personalApps.set(this.initPersonalApps());
+    this.connectedApps.set(this.initConnectedApps());
+    this.securityAlertPreferences.set(this.initSecurityAlertPreferences());
+    const initialCodes = this.initRecoveryCodes();
+    this.recoveryCodes.set(initialCodes);
+    this.recoveryCodesRemaining.set(initialCodes.length);
     void this.refreshTotpCodes();
 
     this.initSupabaseSync();
@@ -2509,6 +2539,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.loadAccessRequests();
     this.setupAccessRequestsRealtime();
     this.fetchConnectedApps();
+    this.loadSecurityPreferences();
+    this.loadRecoveryCodesStatus();
+    this.loadTotpEnrollmentStatus();
     this.setupCrossDeviceSyncRealtime();
     this.startCrossDeviceSyncPolling();
     this.startLiveSsoChallengePolling();
@@ -2671,7 +2704,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             protocol: r.protocol || 'SAML 2.0',
             category: r.category || 'cloud',
             icon: r.icon || '🚀',
-            launchUrl: r.launch_url || 'https://vanguard.security',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
             justification: r.justification || '',
             status: r.status || 'Pending Approval',
             submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
@@ -2932,7 +2965,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         protocol: r.protocol || 'SAML 2.0',
         category: r.category || 'cloud',
         icon: r.icon || '🚀',
-        launchUrl: r.launch_url || 'https://vanguard.security',
+        launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
         justification: r.justification || '',
         status: r.status || 'Pending Approval',
         submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
@@ -2986,7 +3019,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: `${r.app_name} (Approved access: ${r.justification || ''})`,
             icon: r.icon || '🚀',
             protocol: r.protocol || 'SAML 2.0',
-            launchUrl: r.launch_url || 'https://vanguard.security',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
             assigned: true,
             status: 'Approved',
           };
@@ -3032,6 +3065,12 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       void this.loadPersonalApps();
       this.fetchConnectedApps();
       void this.loadAccessRequests();
+    }
+    if (tab === 'user-security') {
+      this.fetchConnectedApps();
+      this.loadSecurityPreferences();
+      this.loadRecoveryCodesStatus();
+      this.loadTotpEnrollmentStatus();
     }
     if (tab === 'user-devices') {
       this.loadUserDevices();
@@ -5369,7 +5408,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }, 800);
   }
 
-  private showAdminNotice(msg: string): void {
+  showAdminNotice(msg: string): void {
     this.adminActionNotice.set(msg);
     setTimeout(() => this.adminActionNotice.set(null), 4000);
   }
@@ -5442,6 +5481,60 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return hostWithPort.split(':')[0];
   }
 
+  /**
+   * Strips OIDC/OAuth callback paths (`/auth/callback`, `/oauth/callback`) so SSO apps
+   * launch against their entry/login origin instead of directly hitting callback verification without `code`/`state` (SCRUM-181).
+   */
+  sanitizeSsoLaunchUrl(rawUrl: string): string {
+    if (!rawUrl) return '';
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return '';
+    try {
+      const hasScheme = /^https?:\/\//i.test(trimmed);
+      const parsed = new URL(hasScheme ? trimmed : 'https://' + trimmed);
+      const path = parsed.pathname.replace(/\/+$/, '').toLowerCase();
+      if (path === '/auth/callback' || path === '/oauth/callback') {
+        return parsed.origin;
+      }
+      return hasScheme ? trimmed : parsed.toString();
+    } catch {
+      if (/\/(auth|oauth)\/callback([/?#].*)?$/i.test(trimmed)) {
+        return trimmed.replace(/\/(auth|oauth)\/callback([/?#].*)?$/i, '');
+      }
+      return trimmed;
+    }
+  }
+
+  /**
+   * Builds the final launch target when initiating SSO from Vanguard (SCRUM-181).
+   * Strips callback paths and, for Acme Dummy Web, appends `?sso=vanguard` (+ optional `login_hint`)
+   * so Dummy Web automatically begins a valid PKCE flow instead of landing idly on login.
+   */
+  buildSsoInitiateLaunchUrl(app: SaaSApp, sanitizedUrl: string): string {
+    if (!sanitizedUrl) return '';
+    const normalized = sanitizedUrl.toLowerCase();
+    const isDummyWeb =
+      normalized.includes('localhost:4201') ||
+      normalized.includes('127.0.0.1:4201') ||
+      normalized.includes('vanguard-dummy-web.pages.dev') ||
+      (this.isSelfApprovableDummyApp(app.name) && !normalized.includes('localhost:8081')) ||
+      (this.isSelfApprovableDummyApp(app.id) && !normalized.includes('localhost:8081'));
+    if (!isDummyWeb) {
+      return sanitizedUrl;
+    }
+    try {
+      const parsed = new URL(sanitizedUrl);
+      parsed.searchParams.set('sso', 'vanguard');
+      const email = this.user()?.email?.trim();
+      if (email) {
+        parsed.searchParams.set('login_hint', email);
+      }
+      return parsed.toString();
+    } catch {
+      return sanitizedUrl;
+    }
+  }
+
   normalizeLoginUrl(rawUrl: string): string {
     if (!rawUrl) return '';
     let url = rawUrl.trim();
@@ -5452,6 +5545,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const parsed = new URL(url);
       const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
       const path = parsed.pathname.replace(/\/+$/, '');
+      const lowerPath = path.toLowerCase();
+      if (lowerPath === '/auth/callback' || lowerPath === '/oauth/callback') {
+        return parsed.origin;
+      }
       if (!path || path === '') {
         const map: Record<string, string> = {
           'roblox.com': '/login',
@@ -5519,6 +5616,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     app: SaaSApp,
     options?: {
       skipAutofill?: boolean;
+      initiateSso?: boolean;
       customUsername?: string;
       customPassword?: string;
       markAlreadyLoggedIn?: boolean;
@@ -5550,6 +5648,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         : this.resolveAppCredentials(app);
 
     let targetLaunchUrl = this.normalizeLoginUrl(this.buildAutofillLaunchUrl(app.launchUrl));
+    if (options?.initiateSso) {
+      targetLaunchUrl = this.buildSsoInitiateLaunchUrl(app, targetLaunchUrl);
+    }
 
     if (!alreadyLoggedIn && resolvedCreds && (resolvedCreds.username || resolvedCreds.password)) {
       this.ssoLaunchingNotice.set(
@@ -6096,7 +6197,91 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   // ==========================================
   // Recovery Codes Management (SCRUM-32 Cryptographically Secure)
   // ==========================================
+  loadRecoveryCodesStatus(): void {
+    if (!this.hasLiveAuthToken()) return;
+    this.authService.getRecoveryCodesStatus().subscribe({
+      next: (res) => {
+        const remaining = typeof res?.remainingCount === 'number' ? res.remainingCount : 0;
+        this.recoveryCodesRemaining.set(remaining);
+        this.recoveryCodesGeneratedAt.set(res?.generatedAt ?? null);
+        if (remaining === 0 && this.recoveryCodes().length > 0) {
+          this.recoveryCodes.set([]);
+          this.saveStored(this.getRecoveryCodesStorageKey(), []);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  loadTotpEnrollmentStatus(): void {
+    if (!this.hasLiveAuthToken()) return;
+    this.authService.listMfaFactors('totp').subscribe({
+      next: (res) => {
+        const factors = Array.isArray(res?.factors) ? res.factors : [];
+        const verifiedTotp = factors.find(
+          (f: any) =>
+            (f.type === 'totp' || f.factor_type === 'totp') &&
+            (!f.status || f.status === 'verified' || f.status === 'active')
+        );
+        if (verifiedTotp) {
+          this.hasTotpEnrolled.set(true);
+          this.saveTotpEnrolledState(true);
+          if (verifiedTotp.id) this.totpFactorId.set(verifiedTotp.id);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  loadSecurityPreferences(): void {
+    if (!this.hasLiveAuthToken()) return;
+    this.authService.getSecurityPreferences().subscribe({
+      next: (prefs) => {
+        if (!prefs) return;
+        const email = this.user()?.email || 'default';
+        const merged: UserSecurityAlertPreferences = {
+          secondaryEmail: prefs.secondaryEmail || '',
+          alertThreshold: prefs.alertThreshold === 'new_device' ? 'new_device' : 'all',
+          emailAlertsEnabled: prefs.emailAlertsEnabled !== false,
+          updatedAt: prefs.updatedAt || new Date().toISOString(),
+        };
+        this.securityAlertPreferences.set(merged);
+        this.saveStored(`vanguard_sec_prefs_${email}`, merged);
+      },
+      error: () => {},
+    });
+  }
+
+  private applyGeneratedRecoveryCodes(codes: string[], generatedAt?: string): void {
+    this.recoveryCodes.set(codes);
+    this.recoveryCodesRemaining.set(codes.length);
+    if (generatedAt) this.recoveryCodesGeneratedAt.set(generatedAt);
+    this.saveStored(this.getRecoveryCodesStorageKey(), codes);
+    this.logAuditEvent(
+      `Generated ${codes.length} emergency backup recovery codes`,
+      'Personal Security Vault',
+      'One-Time Secret Vault',
+      'success',
+      'Medium'
+    );
+    this.showAdminNotice(`${codes.length} fresh emergency backup recovery codes generated.`);
+  }
+
   generateRecoveryCodes(): void {
+    if (this.hasLiveAuthToken()) {
+      this.authService.generateRecoveryCodes().subscribe({
+        next: (res) => {
+          if (Array.isArray(res?.codes) && res.codes.length > 0) {
+            this.applyGeneratedRecoveryCodes(res.codes, res.generatedAt);
+          }
+        },
+        error: (err) => {
+          this.showAdminNotice(err?.error?.message || 'Failed to generate recovery codes.');
+        },
+      });
+      return;
+    }
+
     const codes: string[] = [];
     for (let i = 0; i < 10; i++) {
       let code = '';
@@ -6113,10 +6298,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       }
       codes.push(code);
     }
-    this.recoveryCodes.set(codes);
-    this.saveStored('vanguard_recovery_codes', codes);
-    this.logAuditEvent('Generated 10 emergency backup recovery codes', 'Personal Security Vault', 'One-Time Secret Vault', 'success', 'Medium');
-    this.showAdminNotice('10 fresh emergency backup recovery codes generated.');
+    this.applyGeneratedRecoveryCodes(codes, new Date().toISOString());
   }
 
   useRecoveryCode(code: string): boolean {
@@ -6126,11 +6308,50 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     if (idx !== -1) {
       const updated = current.filter((_, i) => i !== idx);
       this.recoveryCodes.set(updated);
-      this.saveStored('vanguard_recovery_codes', updated);
+      this.recoveryCodesRemaining.set(updated.length);
+      this.saveStored(this.getRecoveryCodesStorageKey(), updated);
       this.logAuditEvent(`Redeemed emergency recovery code: ${cleanCode.substring(0, 7)}***`, 'Personal Security Vault', 'Recovery Code Redeemed', 'success', 'High');
       return true;
     }
     return false;
+  }
+
+  redeemRecoveryCodeBackend(code: string, onComplete: (ok: boolean, message?: string) => void): void {
+    const cleanCode = code.trim().toUpperCase();
+    if (!cleanCode) {
+      onComplete(false, 'Enter a recovery code.');
+      return;
+    }
+    if (!this.hasLiveAuthToken()) {
+      const ok = this.useRecoveryCode(cleanCode);
+      onComplete(ok);
+      return;
+    }
+    this.authService.redeemRecoveryCode(cleanCode).subscribe({
+      next: (res) => {
+        if (res?.verified) {
+          const updated = this.recoveryCodes().filter(c => c.toUpperCase() !== cleanCode);
+          this.recoveryCodes.set(updated);
+          this.recoveryCodesRemaining.set(
+            typeof res.remainingCount === 'number' ? res.remainingCount : updated.length
+          );
+          this.saveStored(this.getRecoveryCodesStorageKey(), updated);
+          this.logAuditEvent(
+            `Redeemed emergency recovery code: ${cleanCode.substring(0, 7)}***`,
+            'Personal Security Vault',
+            'Recovery Code Redeemed',
+            'success',
+            'High'
+          );
+          onComplete(true, res.message);
+        } else {
+          onComplete(false, res?.message);
+        }
+      },
+      error: (err) => {
+        onComplete(false, err?.error?.message || 'Invalid or already consumed recovery code.');
+      },
+    });
   }
 
   copyRecoveryCodes(): void {

@@ -1457,7 +1457,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: r.description || '',
             icon: r.icon || '🌐',
             protocol: (r.protocol as SaaSApp['protocol']) || 'SAML 2.0',
-            launchUrl: r.launch_url || r.launchUrl || '',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || r.launchUrl || ''),
             assigned: r.assigned !== false,
             inheritedViaGroup: r.inherited_via_group || undefined,
             assignedUsername: r.assigned_username || r.assignedUsername || undefined,
@@ -1634,7 +1634,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: r.justification ? `${r.appName} (${r.justification})` : `${r.appName} (Approved SSO access)`,
             icon: r.icon || '🔐',
             protocol: (r.protocol as SaaSApp['protocol']) || 'OIDC',
-            launchUrl: r.launchUrl || 'http://localhost:4201',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launchUrl || 'http://localhost:4201'),
             assigned: true,
             status: 'Approved',
           }))
@@ -1649,7 +1649,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const key = (app.name || app.id || app.launchUrl).toLowerCase().trim();
       if (!seen.has(key)) {
         seen.add(key);
-        ssoDeduped.push(app);
+        const cleanUrl = this.sanitizeSsoLaunchUrl(app.launchUrl);
+        ssoDeduped.push(cleanUrl !== app.launchUrl ? { ...app, launchUrl: cleanUrl } : app);
       }
     }
     return ssoDeduped;
@@ -1782,8 +1783,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   launchConnectedApp(app: UserConnectedApp): void {
-    if (this.isBrowser && app.originUrl) {
-      window.open(app.originUrl, '_blank');
+    const targetUrl = this.sanitizeSsoLaunchUrl(app.originUrl);
+    if (this.isBrowser && targetUrl) {
+      window.open(targetUrl, '_blank');
       this.logAuditEvent(
         `Launched connected app ${app.clientName} via SSO`,
         'SSO Integrations',
@@ -2671,7 +2673,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             protocol: r.protocol || 'SAML 2.0',
             category: r.category || 'cloud',
             icon: r.icon || '🚀',
-            launchUrl: r.launch_url || 'https://vanguard.security',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
             justification: r.justification || '',
             status: r.status || 'Pending Approval',
             submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
@@ -2932,7 +2934,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         protocol: r.protocol || 'SAML 2.0',
         category: r.category || 'cloud',
         icon: r.icon || '🚀',
-        launchUrl: r.launch_url || 'https://vanguard.security',
+        launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
         justification: r.justification || '',
         status: r.status || 'Pending Approval',
         submittedAt: r.submitted_at || r.created_at || new Date().toISOString(),
@@ -2986,7 +2988,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             description: `${r.app_name} (Approved access: ${r.justification || ''})`,
             icon: r.icon || '🚀',
             protocol: r.protocol || 'SAML 2.0',
-            launchUrl: r.launch_url || 'https://vanguard.security',
+            launchUrl: this.sanitizeSsoLaunchUrl(r.launch_url || 'https://vanguard.security'),
             assigned: true,
             status: 'Approved',
           };
@@ -5442,6 +5444,60 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     return hostWithPort.split(':')[0];
   }
 
+  /**
+   * Strips OIDC/OAuth callback paths (`/auth/callback`, `/oauth/callback`) so SSO apps
+   * launch against their entry/login origin instead of directly hitting callback verification without `code`/`state` (SCRUM-181).
+   */
+  sanitizeSsoLaunchUrl(rawUrl: string): string {
+    if (!rawUrl) return '';
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return '';
+    try {
+      const hasScheme = /^https?:\/\//i.test(trimmed);
+      const parsed = new URL(hasScheme ? trimmed : 'https://' + trimmed);
+      const path = parsed.pathname.replace(/\/+$/, '').toLowerCase();
+      if (path === '/auth/callback' || path === '/oauth/callback') {
+        return parsed.origin;
+      }
+      return hasScheme ? trimmed : parsed.toString();
+    } catch {
+      if (/\/(auth|oauth)\/callback([/?#].*)?$/i.test(trimmed)) {
+        return trimmed.replace(/\/(auth|oauth)\/callback([/?#].*)?$/i, '');
+      }
+      return trimmed;
+    }
+  }
+
+  /**
+   * Builds the final launch target when initiating SSO from Vanguard (SCRUM-181).
+   * Strips callback paths and, for Acme Dummy Web, appends `?sso=vanguard` (+ optional `login_hint`)
+   * so Dummy Web automatically begins a valid PKCE flow instead of landing idly on login.
+   */
+  buildSsoInitiateLaunchUrl(app: SaaSApp, sanitizedUrl: string): string {
+    if (!sanitizedUrl) return '';
+    const normalized = sanitizedUrl.toLowerCase();
+    const isDummyWeb =
+      normalized.includes('localhost:4201') ||
+      normalized.includes('127.0.0.1:4201') ||
+      normalized.includes('vanguard-dummy-web.pages.dev') ||
+      (this.isSelfApprovableDummyApp(app.name) && !normalized.includes('localhost:8081')) ||
+      (this.isSelfApprovableDummyApp(app.id) && !normalized.includes('localhost:8081'));
+    if (!isDummyWeb) {
+      return sanitizedUrl;
+    }
+    try {
+      const parsed = new URL(sanitizedUrl);
+      parsed.searchParams.set('sso', 'vanguard');
+      const email = this.user()?.email?.trim();
+      if (email) {
+        parsed.searchParams.set('login_hint', email);
+      }
+      return parsed.toString();
+    } catch {
+      return sanitizedUrl;
+    }
+  }
+
   normalizeLoginUrl(rawUrl: string): string {
     if (!rawUrl) return '';
     let url = rawUrl.trim();
@@ -5452,6 +5508,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       const parsed = new URL(url);
       const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
       const path = parsed.pathname.replace(/\/+$/, '');
+      const lowerPath = path.toLowerCase();
+      if (lowerPath === '/auth/callback' || lowerPath === '/oauth/callback') {
+        return parsed.origin;
+      }
       if (!path || path === '') {
         const map: Record<string, string> = {
           'roblox.com': '/login',
@@ -5519,6 +5579,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     app: SaaSApp,
     options?: {
       skipAutofill?: boolean;
+      initiateSso?: boolean;
       customUsername?: string;
       customPassword?: string;
       markAlreadyLoggedIn?: boolean;
@@ -5550,6 +5611,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         : this.resolveAppCredentials(app);
 
     let targetLaunchUrl = this.normalizeLoginUrl(this.buildAutofillLaunchUrl(app.launchUrl));
+    if (options?.initiateSso) {
+      targetLaunchUrl = this.buildSsoInitiateLaunchUrl(app, targetLaunchUrl);
+    }
 
     if (!alreadyLoggedIn && resolvedCreds && (resolvedCreds.username || resolvedCreds.password)) {
       this.ssoLaunchingNotice.set(

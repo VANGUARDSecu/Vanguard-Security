@@ -108,7 +108,7 @@ export class UserSsoApps {
   }
 
   launchSsoApp(app: SaaSApp): void {
-    this.dashboardService.launchApp(app, { skipAutofill: true });
+    this.dashboardService.launchApp(app, { skipAutofill: true, initiateSso: true });
   }
 
   launchApprovedSsoRequest(req: AppAccessRequest): void {

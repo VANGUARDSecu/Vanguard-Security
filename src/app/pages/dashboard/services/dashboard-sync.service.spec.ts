@@ -282,4 +282,28 @@ describe('DashboardService Cross-Device Sync (SCRUM-178)', () => {
     expect(dashboardService.totpAccounts().length).toBe(0);
     getSessionSpy.mockRestore();
   });
+
+  it('SCRUM-203: immediately logs out when killswitch/suspension lifecycle signal targets the current user', () => {
+    const logoutSpy = vi.spyOn(authService, 'logout').mockImplementation(() => {});
+
+    // Unrelated user event must not sign out current session
+    const ignored = dashboardService.handleSessionLifecycleSignal({
+      userId: 'other-user-999',
+      email: 'other@vanguard.dev',
+      status: 'suspended',
+      type: 'SUSPENDED',
+    });
+    expect(ignored).toBe(false);
+    expect(logoutSpy).not.toHaveBeenCalled();
+
+    // Matching userId / suspended event must immediately log out
+    const terminated = dashboardService.handleSessionLifecycleSignal({
+      userId: 'usr-sync-1',
+      status: 'suspended',
+      type: 'SUSPENDED',
+    });
+    expect(terminated).toBe(true);
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    logoutSpy.mockRestore();
+  });
 });

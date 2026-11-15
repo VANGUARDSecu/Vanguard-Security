@@ -158,4 +158,33 @@ describe('authTokenInterceptor (SCRUM-131 & SCRUM-142)', () => {
 
     expect(result).toEqual({ totpUpdatedAt: null });
   });
+
+  it('SCRUM-203: logs out immediately if the retried request after refresh still fails with 401 (revoked/suspended)', () => {
+    const logoutSpy = vi.spyOn(auth, 'logout').mockImplementation(() => {});
+    vi.spyOn(auth, 'refreshSession').mockReturnValue(
+      of({
+        success: true,
+        session: {
+          access_token: 'still-revoked-jwt',
+          refresh_token: 'fresh-refresh-token',
+        },
+      } as any),
+    );
+
+    let errStatus: number | null = null;
+    http.get('http://localhost:3000/sync/state').subscribe({
+      error: (err) => {
+        errStatus = err.status;
+      },
+    });
+
+    const initialReq = httpMock.expectOne('http://localhost:3000/sync/state');
+    initialReq.flush({ message: 'Unauthorized' }, { status: 401, statusText: 'Unauthorized' });
+
+    const retriedReq = httpMock.expectOne('http://localhost:3000/sync/state');
+    retriedReq.flush({ message: 'Session suspended' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    expect(errStatus).toBe(401);
+  });
 });

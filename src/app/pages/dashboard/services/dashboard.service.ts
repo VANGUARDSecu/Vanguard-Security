@@ -2713,6 +2713,18 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             try {
               const data = JSON.parse(event.data || '{}');
               if (data?.type === 'connected') return;
+
+              if (
+                this.handleSessionLifecycleSignal({
+                  userId: data?.userId,
+                  email: data?.email,
+                  status: data?.status,
+                  type: data?.type,
+                })
+              ) {
+                return;
+              }
+
               const eventEmail = data?.email?.toLowerCase().trim();
               if (eventEmail && data?.status) {
                 this.directoryUsers.update((users) =>
@@ -2761,6 +2773,14 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
               if (tenantId && row?.tenant_id && row.tenant_id !== tenantId) {
                 return;
               }
+              if (
+                this.handleSessionLifecycleSignal({
+                  userId: payload?.new?.user_id,
+                  status: payload?.new?.status,
+                })
+              ) {
+                return;
+              }
               if (payload?.new?.user_id && payload?.new?.status) {
                 this.directoryUsers.update((users) =>
                   users.map((u) =>
@@ -2782,6 +2802,42 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       } catch {
         // Non-fatal in local/dev
       }
+    }
+  }
+
+  handleSessionLifecycleSignal(signal: {
+    userId?: string;
+    email?: string;
+    status?: string;
+    type?: string;
+  }): boolean {
+    const currentUser = this.authService.currentUser?.();
+    if (!currentUser) return false;
+
+    const signalEmail = signal.email?.toLowerCase().trim();
+    const currentEmail = currentUser.email?.toLowerCase().trim();
+    const targetsCurrentUser = Boolean(
+      (signal.userId && signal.userId === currentUser.id) ||
+        (signalEmail && currentEmail && signalEmail === currentEmail),
+    );
+    if (!targetsCurrentUser) return false;
+
+    const isTerminationEvent =
+      signal.type === 'SESSION_REVOKED' ||
+      signal.type === 'SUSPENDED' ||
+      String(signal.status || '').toLowerCase() === 'suspended';
+    if (!isTerminationEvent) return false;
+
+    this.handleForcedSessionTermination();
+    return true;
+  }
+
+  private handleForcedSessionTermination(): void {
+    this.cleanupDirectoryUsersRealtime();
+    this.cleanupAccessRequestsRealtime();
+    this.cleanupCrossDeviceSync();
+    if (typeof this.authService.logout === 'function') {
+      this.authService.logout();
     }
   }
 

@@ -71,6 +71,16 @@ export const authTokenInterceptor: HttpInterceptorFn = (req, next) => {
               req.clone({
                 setHeaders: { Authorization: `Bearer ${newToken}` },
               })
+            ).pipe(
+              catchError((retryErr: unknown) => {
+                if (
+                  retryErr instanceof HttpErrorResponse &&
+                  retryErr.status === 401
+                ) {
+                  authService.logout();
+                }
+                return throwError(() => retryErr);
+              }),
             );
           }),
         );

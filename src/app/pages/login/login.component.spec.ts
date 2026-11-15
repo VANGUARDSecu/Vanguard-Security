@@ -238,5 +238,52 @@ describe('LoginComponent', () => {
       component.returnUrl.set('/dashboard?tab=security&action=revoke');
       expect(component.returnUrl()).toBe('/dashboard?tab=security&action=revoke');
     });
+
+    it('SCRUM-196: checkApprovalAndProceed initiates Push MFA challenge cleanly without premature consent=required redirect', () => {
+      const router = TestBed.inject(Router);
+      const navSpy = vi.spyOn(router, 'navigate');
+      const approveSpy = vi.spyOn(component.authService, 'approveSsoAuthorization');
+      const pushSpy = vi.spyOn(component.authService, 'initiatePushMfa').mockReturnValue({
+        subscribe: ({ next }: any) =>
+          next({
+            success: true,
+            challengeId: 'push_mfa_login_196',
+            email: 'employee@acme.corp',
+            clientId: 'vanguard-dummy-portal',
+            clientName: 'Acme Dummy Portal (Angular SPA)',
+            clientType: 'web',
+            appIcon: '🛡️',
+            numberMatching: { enabled: true, code: 88 },
+            expiresInSeconds: 60,
+            message: 'Push dispatched',
+          }),
+      } as any);
+
+      (component.authService as any).currentUser.set({
+        id: 'usr_tenant_196',
+        email: 'employee@acme.corp',
+      });
+      component.ssoParams.set({
+        client_id: 'vanguard-dummy-portal',
+        redirect_uri: 'http://localhost:4201/auth/callback',
+        state: 'st-login-196',
+      });
+      component.ssoApprovalRequired.set(true);
+
+      component.checkApprovalAndProceed(false);
+
+      expect(approveSpy).not.toHaveBeenCalled();
+      expect(pushSpy).toHaveBeenCalled();
+      expect(component.ssoApprovalRequired()).toBe(false);
+      expect(navSpy).toHaveBeenCalledWith(['/verify-otp'], {
+        queryParams: expect.objectContaining({
+          challengeId: 'push_mfa_login_196',
+          method: 'push_approval',
+          numberCode: '88',
+          client_id: 'vanguard-dummy-portal',
+        }),
+      });
+      expect((navSpy.mock.calls[0][1] as any).queryParams.consent).toBeUndefined();
+    });
   });
 });

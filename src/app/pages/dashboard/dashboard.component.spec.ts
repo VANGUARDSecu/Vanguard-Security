@@ -1682,6 +1682,47 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
     });
   });
 
+  describe('SCRUM-199: Bidirectional Devices Watermark Sync', () => {
+    it('reloads userDevices when /sync/state reports a new devicesUpdatedAt timestamp', async () => {
+      const ds = component.dashboardService as any;
+      const httpMock = TestBed.inject(HttpTestingController);
+      const loadDevicesSpy = vi.spyOn(ds, 'loadUserDevices').mockResolvedValue(undefined);
+
+      authService.token.set('live-jwt-sync-test');
+      ds.user.set({
+        id: 'usr-sync-1',
+        name: 'Sync User',
+        email: 'sync@vanguard.io',
+        role: 'user',
+        accountType: 'individual',
+      });
+      ds.lastSyncState = {
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:00:00.000Z',
+        devicesUpdatedAt: '2026-11-15T06:00:00.000Z',
+      };
+
+      const checkPromise = ds.checkSyncState(false);
+      const req = httpMock.match((r) => r.url.endsWith('/sync/state')).at(-1)!;
+      req.flush({
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:00:00.000Z',
+        devicesUpdatedAt: '2026-11-15T06:10:00.000Z',
+      });
+
+      await checkPromise;
+      expect(loadDevicesSpy).toHaveBeenCalled();
+    });
+  });
+
   describe('SCRUM-194: First-Login New User Guide Modal Integration', () => {
     it('auto-opens role-tailored guide once on first dashboard login and navigates tabs from step CTA', () => {
       const guideService = TestBed.inject(NewUserGuideService);

@@ -1340,6 +1340,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     connectedAppsUpdatedAt: string | null;
     accessRequestsUpdatedAt: string | null;
     billingUpdatedAt?: string | null;
+    devicesUpdatedAt?: string | null;
   } | null = null;
   private readonly pendingTotpCreateIds = new Set<string>();
   private readonly pendingTotpDeleteIds = new Set<string>();
@@ -2433,7 +2434,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           type: dev.type || 'macOS Workstation',
           osVersion: dev.os_version || '',
           ownerName: dev.owner_name || this.displayName(),
-          ownerEmail: dev.owner_email || this.user()?.email || 'admin@vanguard.security',
+          ownerEmail: dev.owner_email || dev.email || this.user()?.email || 'admin@vanguard.security',
           department: dev.department || 'Engineering',
           biometricType: dev.biometric_type || 'Touch ID',
           diskEncrypted: dev.disk_encrypted ?? true,
@@ -3041,6 +3042,21 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
             this.loadBillingSubscription();
           },
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_devices' },
+          (payload: any) => {
+            const row = payload?.new || payload?.old;
+            const tenantId = this.resolveRealTenantId();
+            const normEmail = (this.user()?.email || '').trim().toLowerCase();
+            const matchesUser = uid && row?.user_id && row.user_id === uid;
+            const matchesEmail =
+              normEmail && typeof row?.email === 'string' && row.email.trim().toLowerCase() === normEmail;
+            const matchesTenant = this.isAdmin() && tenantId && row?.tenant_id && row.tenant_id === tenantId;
+            if ((uid || normEmail) && row && !matchesUser && !matchesEmail && !matchesTenant) return;
+            void this.loadUserDevices();
+          },
+        )
         .subscribe();
     } catch {
       // Non-fatal in offline/dev environments
@@ -3110,6 +3126,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           connectedAppsUpdatedAt: string | null;
           accessRequestsUpdatedAt: string | null;
           billingUpdatedAt?: string | null;
+          devicesUpdatedAt?: string | null;
         }>(`${this.apiBase}/sync/state`),
       );
       if (!state) return;
@@ -3144,6 +3161,9 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
       }
       if (!prev || state.billingUpdatedAt !== prev.billingUpdatedAt) {
         this.loadBillingSubscription();
+      }
+      if (!prev || state.devicesUpdatedAt !== prev.devicesUpdatedAt) {
+        await this.loadUserDevices();
       }
     } catch {
       // Ignore transient offline errors during background sync check
@@ -5365,8 +5385,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           jailbroken: d.jailbroken ?? false,
           edrActive: d.edrActive ?? d.edr_active ?? true,
           complianceStatus: d.complianceStatus || d.compliance_status || 'Compliant',
-          enrolledAt: d.enrolledAt || d.enrolled_at || 'Paired',
-          lastSync: d.lastSync || d.last_sync || 'Just now',
+          enrolledAt: d.enrolledAt || d.enrolled_at || d.pairedAt || 'Paired',
+          lastSync: d.lastSync || d.last_sync || d.lastSeen || 'Just now',
           ssoRevokedAt: d.ssoRevokedAt || d.sso_revoked_at || undefined,
           isCompromised: d.isCompromised ?? d.is_compromised ?? false,
         }));

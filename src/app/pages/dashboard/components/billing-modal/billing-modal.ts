@@ -27,20 +27,47 @@ export class BillingModal {
   readonly auditRetentionDays = this.dashboardService.auditRetentionDays;
   readonly canExportAuditCsv = this.dashboardService.canExportAuditCsv;
   readonly isRedirectingToPaymongo = this.dashboardService.isRedirectingToPaymongo;
+  readonly isRestoringPaidPlan = this.dashboardService.isRestoringPaidPlan;
+  readonly resendingReceiptId = this.dashboardService.resendingReceiptId;
+  readonly paidCredit = this.dashboardService.paidCredit;
   readonly billingCheckoutError = this.dashboardService.billingCheckoutError;
   readonly isLoadingBillingState = this.dashboardService.isLoadingBillingState;
 
   readonly showGatewayConfigForm = signal<boolean>(false);
+  readonly selectedReceiptId = signal<string | null>(null);
   gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
   gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
   gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
 
   closeModal(): void {
+    this.selectedReceiptId.set(null);
     this.dashboardService.closePaywallModal();
   }
 
   subscribeWithPaymongo(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
     this.dashboardService.startPaymongoCheckout(planId);
+  }
+
+  canRestorePlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): boolean {
+    return this.dashboardService.canRestorePlanWithoutCharge(planId);
+  }
+
+  restorePlan(planId: 'personal_pro' | 'business_pro' | 'enterprise'): void {
+    this.dashboardService.resumePaidSubscription(planId);
+  }
+
+  resendReceipt(invoiceId?: string): void {
+    this.dashboardService.resendBillingReceipt(invoiceId);
+  }
+
+  toggleReceiptView(invoiceId: string): void {
+    this.selectedReceiptId.update((curr) => (curr === invoiceId ? null : invoiceId));
+  }
+
+  printReceipt(): void {
+    if (typeof window !== 'undefined' && typeof window.print === 'function') {
+      window.print();
+    }
   }
 
   cancelPlan(): void {

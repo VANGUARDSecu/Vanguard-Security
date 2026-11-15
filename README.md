@@ -194,9 +194,11 @@ High-assurance client portal and administrative console for the **Vanguard Zero-
 - **Comprehensive Account Movement Audit Trail (SCRUM-172)**:
   - Company Admins can filter **Security Audit Logs** by **Employee** and **Movement Type** (`All Movements`, `Sign-In / SSO`, `Sign-Out / Revoke`, `App Launches`, `MFA & Verification`, `Vault & Security`).
   - Individual accounts have matching movement filter pills in **Personal Activity History**.
-- **Billing System / Monthly Subscription & Paywall Restrictions (SCRUM-173)**:
+- **Billing System / Monthly Subscription, No-Charge Restore & Vanguard Receipts (SCRUM-173, SCRUM-189)**:
   - Free tier accounts (Individual and Company) are restricted to **1 integrated application** (`1/1 Apps`). Attempting to integrate a 2nd application opens the **Subscription & Paywall Modal**.
-  - Includes **Personal Pro ($5/mo)**, **Business Pro ($29/mo)**, and **Enterprise Zero-Trust ($79/mo)** plans with 1-click **Sandbox Payment Gateway Checkout** and runtime **Sandbox Gateway API URL & Secret Key** configuration.
+  - Includes **Personal Pro ($5/mo)**, **Business Pro ($29/mo)**, and **Enterprise Zero-Trust ($79/mo)** plans with PayMongo Checkout and runtime **Sandbox Gateway API URL & Secret Key** configuration.
+  - **No-Charge Plan Restore Within Paid Cycle**: Downgrading to Free immediately enforces Free quotas while preserving active `paidCredit` until `paidUntil`; re-upgrading to an equal or lower paid tier renders **Restore `<Plan>` ($0 — Paid until `<date>`)** via `POST /billing/resume` with zero duplicate payment.
+  - **Official Vanguard Purchase Receipts**: Displays `VG-RCPT-*` receipt records showing the registered Vanguard email destination (`Sent to Registered Email`), distinct PayMongo checkout payer email when different, expandable printable receipt details (**View Receipt** / **Print / PDF**), and **Send to Registered Email** (`POST /billing/receipts/resend`).
 
 ### Functional Application Request Modal, Duplicate Prevention & Admin Governance (SCRUM-161)
 - **Interactive Multi-Protocol Request Modal**:

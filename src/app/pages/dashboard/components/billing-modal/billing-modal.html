@@ -71,7 +71,16 @@
             </div>
             <div>
               <button
-                *ngIf="plan.id === 'personal_pro' && subscriptionPlanId() !== 'personal_pro'"
+                *ngIf="plan.id === 'personal_pro' && canRestorePlan('personal_pro')"
+                type="button"
+                class="btn-restore-paid"
+                [disabled]="isRestoringPaidPlan()"
+                (click)="restorePlan('personal_pro')"
+              >
+                {{ isRestoringPaidPlan() ? 'Restoring Plan...' : 'Restore Personal Pro ($0 — Paid until ' + (paidCredit()?.paidUntil?.split('T')?.[0] || '') + ')' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'personal_pro' && subscriptionPlanId() !== 'personal_pro' && !canRestorePlan('personal_pro')"
                 type="button"
                 class="btn-paymongo-subscribe"
                 [disabled]="isRedirectingToPaymongo()"
@@ -123,7 +132,16 @@
             </div>
             <div>
               <button
-                *ngIf="plan.id === 'business_pro' && subscriptionPlanId() !== 'business_pro'"
+                *ngIf="plan.id === 'business_pro' && canRestorePlan('business_pro')"
+                type="button"
+                class="btn-restore-paid"
+                [disabled]="isRestoringPaidPlan()"
+                (click)="restorePlan('business_pro')"
+              >
+                {{ isRestoringPaidPlan() ? 'Restoring Plan...' : 'Restore Business Pro ($0 — Paid until ' + (paidCredit()?.paidUntil?.split('T')?.[0] || '') + ')' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'business_pro' && subscriptionPlanId() !== 'business_pro' && !canRestorePlan('business_pro')"
                 type="button"
                 class="btn-paymongo-subscribe"
                 [disabled]="isRedirectingToPaymongo()"
@@ -132,7 +150,16 @@
                 {{ isRedirectingToPaymongo() ? 'Redirecting to PayMongo Sandbox...' : '💳 Subscribe Business Pro (PayMongo)' }}
               </button>
               <button
-                *ngIf="plan.id === 'enterprise' && subscriptionPlanId() !== 'enterprise'"
+                *ngIf="plan.id === 'enterprise' && canRestorePlan('enterprise')"
+                type="button"
+                class="btn-restore-paid"
+                [disabled]="isRestoringPaidPlan()"
+                (click)="restorePlan('enterprise')"
+              >
+                {{ isRestoringPaidPlan() ? 'Restoring Plan...' : 'Restore Enterprise ($0 — Paid until ' + (paidCredit()?.paidUntil?.split('T')?.[0] || '') + ')' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'enterprise' && subscriptionPlanId() !== 'enterprise' && !canRestorePlan('enterprise')"
                 type="button"
                 class="btn-paymongo-enterprise"
                 [disabled]="isRedirectingToPaymongo()"
@@ -224,18 +251,59 @@
         </div>
       </div>
 
-      <!-- Recent PayMongo Sandbox Invoices -->
-      <div *ngIf="canManageBilling() && billingInvoices().length > 0" class="invoices-section">
-        <div class="invoices-heading">Recent PayMongo Sandbox Invoices</div>
-        <div *ngFor="let inv of billingInvoices()" class="invoice-row">
-          <span>
-            {{ inv.date }} • <strong>{{ inv.planName }}</strong>
-            <span *ngIf="inv.paymentMethod"> ({{ inv.paymentMethod }})</span>
-            (<code>{{ inv.transactionId }}</code>)
-          </span>
-          <span class="invoice-paid">
-            ${{ inv.amountUsd }}.00 <span *ngIf="inv.amountPhp">/ ₱{{ inv.amountPhp | number }}</span> PAID
-          </span>
+      <!-- Official Vanguard Purchase Receipts (Sent to Registered Account Email) -->
+      <div *ngIf="canManageBilling() && billingInvoices().length > 0" class="invoices-section" data-testid="vanguard-receipts-section">
+        <div class="invoices-heading">Official Vanguard Purchase Receipts</div>
+        <div *ngFor="let inv of billingInvoices()" class="invoice-item-card">
+          <div class="invoice-row">
+            <span>
+              <strong>{{ inv.receiptNumber || inv.id }}</strong> • {{ inv.date }} • <strong>{{ inv.planName }}</strong>
+              <span *ngIf="inv.paymentMethod"> ({{ inv.paymentMethod }})</span>
+            </span>
+            <span class="invoice-paid">
+              ${{ inv.amountUsd }}.00 <span *ngIf="inv.amountPhp">/ ₱{{ inv.amountPhp | number }}</span> PAID
+            </span>
+          </div>
+          <div class="invoice-meta-row">
+            <span class="receipt-delivery-badge">
+              Sent to Registered Email: <strong>{{ inv.receiptSentTo || inv.buyerEmail || 'Registered Account' }}</strong>
+            </span>
+            <span
+              *ngIf="inv.gatewayPayerEmail && inv.gatewayPayerEmail !== (inv.receiptSentTo || inv.buyerEmail)"
+              class="receipt-gateway-note"
+            >
+              PayMongo Checkout Email: {{ inv.gatewayPayerEmail }}
+            </span>
+            <div class="receipt-actions">
+              <button type="button" class="btn-receipt-action" (click)="toggleReceiptView(inv.id)">
+                {{ selectedReceiptId() === inv.id ? 'Hide Receipt' : 'View Receipt' }}
+              </button>
+              <button
+                type="button"
+                class="btn-receipt-action btn-receipt-resend"
+                [disabled]="resendingReceiptId() === inv.id"
+                (click)="resendReceipt(inv.id)"
+              >
+                {{ resendingReceiptId() === inv.id ? 'Sending...' : 'Send to Registered Email' }}
+              </button>
+            </div>
+          </div>
+
+          <div *ngIf="selectedReceiptId() === inv.id" class="receipt-detail-drawer" data-testid="receipt-detail-drawer">
+            <div class="receipt-detail-header">
+              <span>VANGUARD OFFICIAL TAX &amp; SUBSCRIPTION RECEIPT</span>
+              <button type="button" class="btn-receipt-action" (click)="printReceipt()">Print / PDF</button>
+            </div>
+            <div class="receipt-detail-grid">
+              <div><span class="rk">Receipt #:</span> {{ inv.receiptNumber || inv.id }}</div>
+              <div><span class="rk">PayMongo Ref:</span> <code>{{ inv.transactionId }}</code></div>
+              <div><span class="rk">Plan Tier:</span> {{ inv.planName }}</div>
+              <div><span class="rk">Amount Paid:</span> ${{ inv.amountUsd }}.00 USD <span *ngIf="inv.amountPhp">(₱{{ inv.amountPhp | number }} PHP)</span></div>
+              <div><span class="rk">Delivered To (Account):</span> {{ inv.receiptSentTo || inv.buyerEmail || 'Registered Account' }}</div>
+              <div *ngIf="inv.gatewayPayerEmail"><span class="rk">PayMongo Payer Email:</span> {{ inv.gatewayPayerEmail }}</div>
+              <div *ngIf="inv.periodStart"><span class="rk">Billing Period:</span> {{ inv.periodStart.split('T')[0] }} → {{ inv.periodEnd?.split('T')?.[0] || 'Monthly' }}</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { Component } from '@angular/core';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
+import { DashboardService } from './services/dashboard.service';
 import { AuthService } from '../../services/auth.service';
 
 @Component({ standalone: true, template: '' })
@@ -588,6 +589,20 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   it('should trigger audit log CSV export with enhanced columns without error (SCRUM-26)', () => {
+    authService.currentUser.set({
+      id: 'adm-1',
+      email: 'admin@vanguard.io',
+      firstName: 'Super',
+      lastName: 'Admin',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Vanguard',
+    });
+    const dashboardService = TestBed.inject(DashboardService);
+    dashboardService.startPaymongoCheckout('business_pro');
+    const sid = new URLSearchParams((dashboardService.lastPaymongoCheckoutUrl() || '').split('?')[1]).get('session')!;
+    dashboardService.finalizePaymongoReturn(sid, 'success');
+
     expect(() => component.exportAuditLogs()).not.toThrow();
     expect(component.adminActionNotice()).toContain('exported successfully');
   });

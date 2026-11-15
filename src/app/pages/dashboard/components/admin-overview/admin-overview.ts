@@ -43,6 +43,17 @@ export class AdminOverview {
   readonly tenantAuditEvents = this.dashboardService.tenantAuditEvents;
   readonly showGlobalKillswitchModal = this.dashboardService.showGlobalKillswitchModal;
   readonly globalKillswitchSuccess = this.dashboardService.globalKillswitchSuccess;
+  readonly isCompanyAdmin = this.dashboardService.isCompanyAdmin;
+  readonly currentPlanDisplayName = this.dashboardService.currentPlanDisplayName;
+  readonly isFreeTier = this.dashboardService.isFreeTier;
+  readonly auditRetentionDays = this.dashboardService.auditRetentionDays;
+  readonly canExportAuditCsv = this.dashboardService.canExportAuditCsv;
+
+  openCompanyBillingModal(): void {
+    this.dashboardService.openPaywallModal(
+      'Manage your organization subscription plan via PayMongo Sandbox to unlock unlimited apps, 2FA accounts, and CSV audit exports for your entire company.',
+    );
+  }
 
   copyUserId() { this.dashboardService.copyUserId(); }
   revokeAllSessions() { this.dashboardService.revokeAllSessions(); }

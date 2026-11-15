@@ -728,8 +728,15 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.showPaywallModal()).toBe(true);
       expect(component.addAppError()).toContain('Free tier is limited to 1 integrated application');
 
-      // Upgrade to Personal Pro ($5/mo Sandbox) unlocks unlimited apps
+      // Triggering upgrade initiates PayMongo Sandbox redirect and keeps Free tier locked until payment succeeds
       component.upgradePlan('personal_pro');
+      expect(dashboardService.subscriptionPlanId()).toBe('free');
+      const checkoutUrl = dashboardService.lastPaymongoCheckoutUrl() || '';
+      expect(checkoutUrl).toContain('/paymongo-sandbox');
+      const sid = new URLSearchParams(checkoutUrl.split('?')[1]).get('session')!;
+
+      // Simulating PayMongo checkout return with status=success unlocks Personal Pro & unlimited apps
+      dashboardService.finalizePaymongoReturn(sid, 'success');
       expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
       expect(component.showPaywallModal()).toBe(false);
 
@@ -940,6 +947,32 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       expect(component.myExtensionAccessRequests().some((r) => r.appName.includes('Dummy'))).toBe(false);
       expect(component.myExtensionAccessRequests().some((r) => r.appName === 'Figma Autofill')).toBe(true);
       expect(elTextContains(fixture.nativeElement, 'Active SSO Integrations')).toBe(false);
+    });
+  });
+
+  describe('Migrated Password Generator & Vault Unlock (SCRUM-183)', () => {
+    it('generates high-entropy passwords and populates newAppPassword when applying from the generator modal', () => {
+      component.openAddPersonalAppModal();
+      component.openGeneratorModal();
+      expect(component.showGeneratorModal()).toBe(true);
+      expect(component.generatedPassword().length).toBe(20);
+
+      component.genLength = 28;
+      component.regeneratePassword();
+      const generated = component.generatedPassword();
+      expect(generated.length).toBe(28);
+      expect(component.getGeneratedPasswordStrength().score).toBeGreaterThanOrEqual(70);
+
+      component.useGeneratedPasswordInAppForm();
+      expect(component.showGeneratorModal()).toBe(false);
+      expect(component.newAppPassword).toBe(generated);
+      expect(component.getNewAppPasswordStrength().score).toBeGreaterThanOrEqual(70);
+    });
+
+    it('validates empty password on inline vault unlock without calling backend', async () => {
+      component.vaultUnlockPassword = '';
+      await component.unlockVaultSession();
+      expect(component.vaultUnlockError()).toContain('Enter your Vanguard password');
     });
   });
 });

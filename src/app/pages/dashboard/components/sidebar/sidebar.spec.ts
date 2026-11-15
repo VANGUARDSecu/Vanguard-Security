@@ -60,18 +60,19 @@ describe('DashboardSidebar Component (SCRUM-54 Individual Security Suite)', () =
     expect(sectionLabel.textContent).toContain('PERSONAL SECURITY SUITE');
   });
 
-  it('should render Personal Vault and personal security tools for individual accounts', () => {
+  it('should render My Applications and personal security tools without duplicate Personal Vault tab for individual accounts', () => {
     const navButtons: HTMLButtonElement[] = Array.from(fixture.nativeElement.querySelectorAll('.nav-link-btn'));
     const buttonTexts = navButtons.map((btn) => btn.textContent?.trim() || '');
 
-    // Individual users must have access to personal cybersecurity tools
-    expect(buttonTexts.some((t) => t.includes('Personal Vault'))).toBe(true);
+    // Individual users must have access to My Applications & personal cybersecurity tools
     expect(buttonTexts.some((t) => t.includes('My Applications'))).toBe(true);
+    expect(buttonTexts.some((t) => t.includes('SSO Applications'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('2FA Authenticator'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Security & MFA'))).toBe(true);
     expect(buttonTexts.some((t) => t.includes('Mobile & Devices'))).toBe(true);
 
     // Corporate governance and removed redundant tabs must NOT be present
+    expect(buttonTexts.some((t) => t.includes('Personal Vault'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Directory Users'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud LDAP'))).toBe(false);
     expect(buttonTexts.some((t) => t.includes('Cloud RADIUS'))).toBe(false);

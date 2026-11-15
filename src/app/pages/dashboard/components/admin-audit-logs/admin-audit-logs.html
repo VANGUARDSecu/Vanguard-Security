@@ -4,7 +4,12 @@
               <h2 class="section-title">Tenant-Wide Security Audit Explorer</h2>
               <p class="section-subtitle">Real-time cryptographic forensic trail of authentication events, directory changes, zero-trust policies, and threat anomalies.</p>
             </div>
-            <div class="header-actions" style="display: flex; gap: 10px;">
+            <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
+              <span
+                style="padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.12); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.25);"
+              >
+                🕒 {{ auditRetentionDays() }}-Day Retention
+              </span>
               <button type="button" class="btn-reset-filters" (click)="refreshAuditLogs()" title="Refresh real-time employee movement audit trail">
                 🔄 Refresh Movements
               </button>
@@ -14,7 +19,7 @@
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                <span>Export System Log (CSV)</span>
+                <span>{{ canExportAuditCsv() ? 'Export System Log (CSV)' : '🔒 Export System Log (CSV • Pro)' }}</span>
               </button>
             </div>
           </div>

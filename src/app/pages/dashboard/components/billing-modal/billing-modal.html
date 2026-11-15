@@ -1,0 +1,247 @@
+<div class="modal-backdrop" *ngIf="showPaywallModal()" (click)="closeModal()">
+  <div class="billing-modal-card" (click)="$event.stopPropagation()">
+    <div class="billing-modal-header">
+      <div class="billing-header-left">
+        <div class="billing-icon-badge">💳</div>
+        <div>
+          <h3 class="billing-modal-title">Vanguard Billing &amp; Monthly Subscription Plans</h3>
+          <p class="billing-modal-subtitle">
+            <span *ngIf="isIndividual()">Individual Account Plans</span>
+            <span *ngIf="isCompanyAdmin()">Company / Organization Plans ({{ organizationName() }})</span>
+            <span *ngIf="isTenantMember()">Organization Plan Status ({{ organizationName() }} • Admin-Managed)</span>
+            • Current: <strong>{{ currentPlanDisplayName() }}</strong>
+          </p>
+        </div>
+      </div>
+      <button type="button" class="billing-close-btn" (click)="closeModal()" aria-label="Close billing modal">✕</button>
+    </div>
+
+    <div class="billing-modal-body">
+      <!-- Paywall Restriction Notice -->
+      <div class="billing-notice-banner" *ngIf="paywallFeatureMessage()">
+        🔒 <strong>Subscription Entitlement Notice:</strong> {{ paywallFeatureMessage() }}
+      </div>
+
+      <!-- Checkout Error Banner -->
+      <div class="billing-error-banner" *ngIf="billingCheckoutError()">
+        ⚠️ {{ billingCheckoutError() }}
+      </div>
+
+      <!-- Current Unlocked Capabilities Summary -->
+      <div class="entitlement-summary-strip">
+        <span class="ent-pill" [class.ent-unlocked]="!isFreeTier()">
+          Apps: {{ isFreeTier() ? '1 Max (Free)' : 'Unlimited' }}
+        </span>
+        <span class="ent-pill" [class.ent-unlocked]="!isFreeTier()">
+          2FA Authenticator: {{ isFreeTier() ? '3 Tokens Max' : 'Unlimited' }}
+        </span>
+        <span class="ent-pill" [class.ent-unlocked]="canExportAuditCsv()">
+          CSV Audit Export: {{ canExportAuditCsv() ? 'Unlocked' : 'Locked' }}
+        </span>
+        <span class="ent-pill ent-retention">
+          Audit Retention: {{ auditRetentionDays() }} Days
+        </span>
+      </div>
+
+      <!-- 1. INDIVIDUAL ACCOUNT PLANS (STRICTLY ISOLATED) -->
+      <div class="plans-section" *ngIf="isIndividual()" data-testid="individual-plans-section">
+        <div class="plans-section-label label-individual">
+          Individual Account Plans — Powered by PayMongo Sandbox
+        </div>
+        <div class="plans-grid">
+          <div
+            *ngFor="let plan of dashboardService.individualBillingPlans"
+            class="plan-card"
+            [class.plan-card-active-ind]="subscriptionPlanId() === plan.id"
+          >
+            <div>
+              <div class="plan-card-top">
+                <span class="plan-name">{{ plan.name }}</span>
+                <span class="plan-limit-badge badge-ind">{{ plan.limitLabel }}</span>
+              </div>
+              <div class="plan-price price-ind">
+                ${{ plan.priceMonthlyUsd }}<span class="plan-period">/month</span>
+                <span class="plan-php-equiv" *ngIf="plan.priceMonthlyPhp > 0">
+                  (₱{{ plan.priceMonthlyPhp | number }} PHP via PayMongo)
+                </span>
+              </div>
+              <ul class="plan-feature-list">
+                <li *ngFor="let feat of plan.features">{{ feat }}</li>
+              </ul>
+            </div>
+            <div>
+              <button
+                *ngIf="plan.id === 'personal_pro' && subscriptionPlanId() !== 'personal_pro'"
+                type="button"
+                class="btn-paymongo-subscribe"
+                [disabled]="isRedirectingToPaymongo()"
+                (click)="subscribeWithPaymongo('personal_pro')"
+              >
+                {{ isRedirectingToPaymongo() ? 'Redirecting to PayMongo Sandbox...' : '💳 Subscribe with PayMongo (Sandbox)' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'free' && subscriptionPlanId() !== 'free'"
+                type="button"
+                class="btn-downgrade"
+                (click)="cancelPlan()"
+              >
+                Downgrade to Free Starter
+              </button>
+              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-pill pill-ind">
+                ✓ Active Plan
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. COMPANY / ORGANIZATION PLANS (STRICTLY ISOLATED FOR COMPANY ADMINS) -->
+      <div class="plans-section" *ngIf="isCompanyAdmin()" data-testid="company-plans-section">
+        <div class="plans-section-label label-company">
+          Company / Organization Plans — Powered by PayMongo Sandbox
+        </div>
+        <div class="plans-grid">
+          <div
+            *ngFor="let plan of dashboardService.companyBillingPlans"
+            class="plan-card"
+            [class.plan-card-active-co]="subscriptionPlanId() === plan.id"
+          >
+            <div>
+              <div class="plan-card-top">
+                <span class="plan-name">{{ plan.name }}</span>
+                <span class="plan-limit-badge badge-co">{{ plan.limitLabel }}</span>
+              </div>
+              <div class="plan-price price-co">
+                ${{ plan.priceMonthlyUsd }}<span class="plan-period">/month</span>
+                <span class="plan-php-equiv" *ngIf="plan.priceMonthlyPhp > 0">
+                  (₱{{ plan.priceMonthlyPhp | number }} PHP via PayMongo)
+                </span>
+              </div>
+              <ul class="plan-feature-list">
+                <li *ngFor="let feat of plan.features">{{ feat }}</li>
+              </ul>
+            </div>
+            <div>
+              <button
+                *ngIf="plan.id === 'business_pro' && subscriptionPlanId() !== 'business_pro'"
+                type="button"
+                class="btn-paymongo-subscribe"
+                [disabled]="isRedirectingToPaymongo()"
+                (click)="subscribeWithPaymongo('business_pro')"
+              >
+                {{ isRedirectingToPaymongo() ? 'Redirecting to PayMongo Sandbox...' : '💳 Subscribe Business Pro (PayMongo)' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'enterprise' && subscriptionPlanId() !== 'enterprise'"
+                type="button"
+                class="btn-paymongo-enterprise"
+                [disabled]="isRedirectingToPaymongo()"
+                (click)="subscribeWithPaymongo('enterprise')"
+              >
+                {{ isRedirectingToPaymongo() ? 'Redirecting to PayMongo Sandbox...' : '🚀 Subscribe Enterprise (PayMongo)' }}
+              </button>
+              <button
+                *ngIf="plan.id === 'free' && subscriptionPlanId() !== 'free'"
+                type="button"
+                class="btn-downgrade"
+                (click)="cancelPlan()"
+              >
+                Downgrade to Company Free Trial
+              </button>
+              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-pill pill-co">
+                ✓ Active Organization Plan
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. TENANT EMPLOYEE / MEMBER VIEW (READ-ONLY — MUST RELY ON COMPANY ADMIN) -->
+      <div class="tenant-member-lock-box" *ngIf="isTenantMember()" data-testid="tenant-member-billing-notice">
+        <div class="tenant-lock-header">
+          <span class="tenant-lock-icon">🏢</span>
+          <div>
+            <h4>Organization Subscription Managed by Company Administrator</h4>
+            <p>
+              Your account belongs to <strong>{{ organizationName() }}</strong>. Only your Company Administrator can upgrade or modify the organization's PayMongo subscription.
+            </p>
+          </div>
+        </div>
+        <div class="tenant-lock-status">
+          <div>
+            <span class="status-k">Current Organization Tier:</span>
+            <strong class="status-v">{{ currentPlanDisplayName() }}</strong>
+          </div>
+          <p class="tenant-wait-copy" *ngIf="isFreeTier()">
+            ⏳ Because your company is currently on the <strong>Company Free Trial</strong>, your account inherits Free Trial limits (max 1 app integration, max 3 2FA Authenticator accounts, and CSV audit export disabled). Once your Company Admin completes the upgrade via PayMongo, click refresh below to unlock all features automatically.
+          </p>
+          <p class="tenant-wait-copy unlocked-copy" *ngIf="!isFreeTier()">
+            ✅ Your Company Administrator has upgraded your organization plan. Unlimited applications, unlimited 2FA accounts, and CSV audit export are unlocked for your account.
+          </p>
+          <button
+            type="button"
+            class="btn-refresh-plan"
+            [disabled]="isLoadingBillingState()"
+            (click)="refreshTenantPlan()"
+          >
+            {{ isLoadingBillingState() ? 'Checking Organization Plan...' : '↻ Refresh Organization Plan Status' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- PayMongo / Sandbox Gateway API Config (Company Admin or Individual only) -->
+      <div class="gateway-config-box" *ngIf="isCompanyAdmin()">
+        <div class="gateway-config-row">
+          <div>
+            <div class="gateway-title">🔌 PayMongo Sandbox Gateway Configuration</div>
+            <div class="gateway-sub">
+              Endpoint: <code>{{ dashboardService.sandboxGatewayUrl() }}</code>
+            </div>
+          </div>
+          <button type="button" class="btn-config-toggle" (click)="toggleGatewayConfig()">
+            {{ showGatewayConfigForm() ? 'Hide API Settings' : 'Configure Gateway' }}
+          </button>
+        </div>
+
+        <div *ngIf="showGatewayConfigForm()" class="gateway-form">
+          <div class="gateway-form-row">
+            <div class="gateway-field">
+              <label>Provider Name</label>
+              <input type="text" [(ngModel)]="gatewayProviderInput" placeholder="PayMongo Sandbox" />
+            </div>
+            <div class="gateway-field">
+              <label>Gateway API URL</label>
+              <input type="text" [(ngModel)]="gatewayUrlInput" placeholder="https://api.paymongo.com/v1" />
+            </div>
+          </div>
+          <div class="gateway-field">
+            <label>PayMongo Test Secret Key (optional)</label>
+            <input type="password" [(ngModel)]="gatewayApiKeyInput" placeholder="sk_test_..." />
+          </div>
+          <button type="button" class="btn-paymongo-subscribe" style="width: auto; margin-top: 8px;" (click)="saveGatewaySettings()">
+            Save Gateway Settings
+          </button>
+        </div>
+      </div>
+
+      <!-- Recent PayMongo Sandbox Invoices -->
+      <div *ngIf="canManageBilling() && billingInvoices().length > 0" class="invoices-section">
+        <div class="invoices-heading">Recent PayMongo Sandbox Invoices</div>
+        <div *ngFor="let inv of billingInvoices()" class="invoice-row">
+          <span>
+            {{ inv.date }} • <strong>{{ inv.planName }}</strong>
+            <span *ngIf="inv.paymentMethod"> ({{ inv.paymentMethod }})</span>
+            (<code>{{ inv.transactionId }}</code>)
+          </span>
+          <span class="invoice-paid">
+            ${{ inv.amountUsd }}.00 <span *ngIf="inv.amountPhp">/ ₱{{ inv.amountPhp | number }}</span> PAID
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="billing-modal-footer">
+      <button type="button" class="btn-close-footer" (click)="closeModal()">Close</button>
+    </div>
+  </div>
+</div>

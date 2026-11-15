@@ -32,24 +32,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly provider = signal<string>('');
   readonly returnUrl = signal<string>('');
 
-  // SSO Consent Confirmation state (SCRUM-184): require explicit user Approve / Deny after MFA challenge
-  readonly ssoConsentPending = signal<boolean>(false);
-  readonly pendingSsoRedirectResult = signal<{ code?: string; redirectUrl?: string; message?: string } | null>(null);
-  readonly pendingSsoUser = signal<UserProfile | undefined>(undefined);
-  readonly ssoScopeList = computed<string[]>(() => {
-    const scopeStr = this.ssoParams()?.['scope'] || 'openid profile email';
-    return scopeStr.split(/\s+/).filter(Boolean);
-  });
-  readonly ssoRedirectOrigin = computed<string>(() => {
-    const uri = this.ssoParams()?.['redirect_uri'] || '';
-    try {
-      return new URL(uri).origin;
-    } catch {
-      return uri;
-    }
-  });
-
-  // Zero-Trust SSO Access Governance Signals (SCRUM-160 & SCRUM-184)
+  // Zero-Trust SSO Access Governance Signals (SCRUM-160 & SCRUM-198)
   readonly ssoApprovalRequired = signal<boolean>(false);
   readonly ssoApprovalMessage = signal<string>('');
   readonly isCheckingApproval = signal<boolean>(false);
@@ -73,8 +56,6 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     this.isLoading.set(false);
     this.isCheckingApproval.set(false);
     this.isRetryingPostApproval = false;
-    this.ssoConsentPending.set(false);
-    this.pendingSsoRedirectResult.set(null);
     if (sourceMethod) {
       this.pendingApprovalChallengeMethod.set(sourceMethod);
     } else {
@@ -93,10 +74,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   startApprovalPolling(): void {
     this.stopApprovalPolling();
     this.approvalPollTimer = setInterval(() => {
-      if (this.ssoApprovalRequired() && this.ssoParams() && !this.ssoConsentPending()) {
+      if (this.ssoApprovalRequired() && this.ssoParams()) {
         this.checkApprovalAndProceed(true);
       }
-    }, 3000);
+    }, 3500);
   }
 
   stopApprovalPolling(): void {
@@ -111,12 +92,56 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     if (!sso) return;
     if (this.isRetryingPostApproval) return;
 
-    // Only use direct frontend approval when an existing challenge was already created.
-    if (this.challengeId()) {
+    const chId = this.challengeId();
+    if (chId) {
+      this.isRetryingPostApproval = true;
       if (!silent) {
         this.isCheckingApproval.set(true);
       }
-      this.approveDirectlyInFrontend(silent);
+      this.authService.completeSsoMfa(chId).subscribe({
+        next: (res) => {
+          this.isRetryingPostApproval = false;
+          this.isCheckingApproval.set(false);
+          if (res.clientName) {
+            this.serverClientName.set(res.clientName);
+          }
+          if (res.approved && (res.redirectUrl || res.code)) {
+            this.stopApprovalPolling();
+            this.ssoApprovalRequired.set(false);
+            this.handleSsoRedirect({ code: res.code, redirectUrl: res.redirectUrl });
+            return;
+          }
+          if (res.message) {
+            this.ssoApprovalMessage.set(res.message);
+          }
+          if (!silent) {
+            this.showNotification(
+              'error',
+              'Administrator approval is still pending. Please wait for your administrator to approve access in Vanguard Dashboard.',
+              4000,
+            );
+          }
+        },
+        error: (err: any) => {
+          this.isRetryingPostApproval = false;
+          this.isCheckingApproval.set(false);
+          if (err?.status === 401) {
+            this.stopApprovalPolling();
+            this.ssoApprovalRequired.set(false);
+            this.challengeId.set(null);
+            this.showNotification(
+              'error',
+              err?.message || 'Verification session expired. Restarting MFA challenge...',
+              4000,
+            );
+            this.switchToPushApproval();
+            return;
+          }
+          if (!silent) {
+            this.showNotification('error', err?.message || 'Unable to verify administrator approval status.');
+          }
+        },
+      });
       return;
     }
 
@@ -129,8 +154,6 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Re-attempt MFA challenge initiation so backend governance gates the transition;
-    // never skip straight to the consent prompt while approval is still pending.
     this.reinitiateSsoChallengeAfterApproval(sso, targetEmail, silent);
   }
 
@@ -391,12 +414,6 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           return;
         }
 
-        // If ?consent=required was passed after admin approval check, open explicit SSO Consent prompt
-        if (params['consent'] === 'required') {
-          this.presentSsoConsentPrompt({});
-          return;
-        }
-
         // If SSO params are present but challengeId is missing, auto-initiate challenge
         if (!this.challengeId() && emailParam) {
           if (methodParam === 'push_approval') {
@@ -538,8 +555,17 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           if (res.status === 'approved') {
             clearInterval(this.pushPollInterval);
             clearInterval(this.pushCountdownInterval);
-            this.pushStatusText.set('Challenge verified — waiting for your sign-in approval...');
-            this.presentSsoConsentPrompt({ redirectRes: { code: res.code, redirectUrl: res.redirectUrl } });
+            this.handlePostSsoChallengeResult(
+              {
+                challengeId,
+                clientName: res.clientName,
+                awaitingAdminApproval: res.awaitingAdminApproval,
+                code: res.code,
+                redirectUrl: res.redirectUrl,
+                message: res.message,
+              },
+              'push_approval',
+            );
           } else if (res.status === 'denied') {
             clearInterval(this.pushPollInterval);
             clearInterval(this.pushCountdownInterval);
@@ -650,10 +676,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         method: 'frontend_approval',
       }).subscribe({
         next: (res) => {
-          this.stopApprovalPolling();
-          this.isCheckingApproval.set(false);
-          this.ssoApprovalRequired.set(false);
-          this.handleSsoRedirect(res);
+          this.handlePostSsoChallengeResult(res, 'push_approval');
         },
         error: (err: any) => {
           this.isLoading.set(false);
@@ -937,7 +960,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           method: 'recovery_code',
         }).subscribe({
           next: (res) => {
-            this.presentSsoConsentPrompt({ redirectRes: res });
+            this.handlePostSsoChallengeResult(res, 'email_otp');
           },
           error: (err: Error) => {
             this.isLoading.set(false);
@@ -990,7 +1013,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
     this.isLoading.set(true);
 
-    // 1. SSO MFA Verification Mode (SCRUM-61)
+    // 1. SSO MFA Verification Mode (SCRUM-61 / SCRUM-198)
     if (this.isSsoVerification() && this.challengeId()) {
       this.authService.verifySsoMfa({
         challengeId: this.challengeId()!,
@@ -998,7 +1021,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         method: currentMethod,
       }).subscribe({
         next: (res) => {
-          this.presentSsoConsentPrompt({ redirectRes: res });
+          this.handlePostSsoChallengeResult(res, 'email_otp');
         },
         error: (err: Error) => {
           this.isLoading.set(false);
@@ -1105,48 +1128,48 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * SCRUM-184: Pause after MFA verification and prompt the user to explicitly
-   * Approve or Deny authorizing sign-in to the target SSO application.
+   * SCRUM-198: Unified post-challenge handler. Immediately redirects individual or
+   * already-approved tenant users to the client app dashboard, or holds the verified
+   * challenge while waiting for Company Admin approval for unapproved tenant members.
    */
-  presentSsoConsentPrompt(options: {
-    redirectRes?: { code?: string; redirectUrl?: string; message?: string };
-    user?: UserProfile;
-  }): void {
-    this.clearTimers();
-    this.isRetryingPostApproval = false;
+  handlePostSsoChallengeResult(
+    res: {
+      awaitingAdminApproval?: boolean;
+      challengeId?: string;
+      clientName?: string;
+      code?: string;
+      redirectUrl?: string;
+      message?: string;
+    },
+    sourceMethod: 'push_approval' | 'email_otp' = 'push_approval',
+  ): void {
     this.isLoading.set(false);
     this.isCheckingApproval.set(false);
-    this.ssoApprovalRequired.set(false);
-    this.pendingSsoRedirectResult.set(options.redirectRes || null);
-    this.pendingSsoUser.set(options.user);
-    this.ssoConsentPending.set(true);
-    this.showNotification(
-      'success',
-      `Verification succeeded. Review and approve sign-in to ${this.clientDisplayName()}.`,
-      5000,
-    );
-  }
+    this.isRetryingPostApproval = false;
 
-  confirmSsoLoginApproval(): void {
-    const preApproved = this.pendingSsoRedirectResult();
-    if (preApproved && (preApproved.code || preApproved.redirectUrl)) {
-      this.ssoConsentPending.set(false);
-      this.pendingSsoRedirectResult.set(null);
-      this.handleSsoRedirect(preApproved);
+    if (res.clientName) {
+      this.serverClientName.set(res.clientName);
+    }
+    if (res.challengeId) {
+      this.challengeId.set(res.challengeId);
+    }
+
+    if (res.awaitingAdminApproval) {
+      this.clearTimers();
+      this.pushStatusText.set('Identity verified — awaiting administrator approval...');
+      this.handleApprovalRequired(
+        new Error(
+          res.message ||
+            `Zero-Trust Access Governance: Administrative approval is required before corporate account "${this.email()}" can access "${this.clientDisplayName()}".`,
+        ),
+        sourceMethod,
+      );
       return;
     }
 
-    this.ssoConsentPending.set(false);
-    const targetUser = this.pendingSsoUser() || this.authService.currentUser() || undefined;
-    this.pendingSsoUser.set(undefined);
-    this.executeSsoAuthorizationApproval(targetUser);
-  }
-
-  denySsoLoginApproval(): void {
-    this.ssoConsentPending.set(false);
-    this.pendingSsoRedirectResult.set(null);
-    this.pendingSsoUser.set(undefined);
-    this.onCancelSso('User denied SSO login authorization request');
+    this.stopApprovalPolling();
+    this.ssoApprovalRequired.set(false);
+    this.handleSsoRedirect({ code: res.code, redirectUrl: res.redirectUrl });
   }
 
   private handleVerificationSuccess(user?: UserProfile): void {
@@ -1162,7 +1185,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         );
         return;
       }
-      this.presentSsoConsentPrompt({ user: currentUser || undefined });
+      this.executeSsoAuthorizationApproval(currentUser || undefined);
       return;
     }
 

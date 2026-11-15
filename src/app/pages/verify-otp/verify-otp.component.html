@@ -114,67 +114,8 @@
         </div>
       }
 
-      <!-- Explicit SSO Login Approval / Consent Prompt (SCRUM-184) -->
-      @if (ssoConsentPending()) {
-        <div class="sso-consent-notice" data-testid="sso-consent-prompt">
-          <div class="sso-consent-badge">
-            <span class="pulse-dot-emerald"></span>
-            <span>SSO Sign-In Authorization Request</span>
-          </div>
-
-          <h3 class="sso-consent-title">Approve sign-in to {{ clientDisplayName() }}?</h3>
-
-          <p class="sso-consent-text">
-            Review the application details below and confirm whether to approve this Single Sign-On login request for <strong class="highlight-email">{{ email() }}</strong>.
-          </p>
-
-          <div class="sso-approval-status-card">
-            <div class="status-row">
-              <span class="status-label">Application:</span>
-              <span class="status-val">{{ clientDisplayName() }}</span>
-            </div>
-            <div class="status-row">
-              <span class="status-label">Account:</span>
-              <span class="status-val">{{ email() }}</span>
-            </div>
-            <div class="status-row" *ngIf="ssoRedirectOrigin()">
-              <span class="status-label">Destination:</span>
-              <span class="status-val">{{ ssoRedirectOrigin() }}</span>
-            </div>
-            <div class="status-row">
-              <span class="status-label">Requested Scopes:</span>
-              <span class="status-val">{{ ssoScopeList().join(', ') }}</span>
-            </div>
-          </div>
-
-          <div class="sso-consent-actions">
-            <button
-              type="button"
-              class="verify-btn sso-approve-btn"
-              (click)="confirmSsoLoginApproval()"
-              [disabled]="isLoading()"
-              data-testid="approve-sso-login-btn"
-            >
-              @if (isLoading()) {
-                <span class="spinner"></span>
-                <span>Authorizing...</span>
-              } @else {
-                <span>✓ Approve &amp; Sign In to {{ clientDisplayName() }}</span>
-              }
-            </button>
-            <button
-              type="button"
-              class="sso-deny-btn"
-              (click)="denySsoLoginApproval()"
-              [disabled]="isLoading()"
-              data-testid="deny-sso-login-btn"
-            >
-              ✕ Deny Sign-In &amp; Return
-            </button>
-          </div>
-        </div>
-      } @else if (ssoApprovalRequired()) {
-        <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160 / SCRUM-184) -->
+      <!-- Zero-Trust Access Governance: Administrative Approval Required Notice (SCRUM-160 / SCRUM-198) -->
+      @if (ssoApprovalRequired()) {
         <div class="sso-approval-notice">
           <div class="sso-approval-badge">
             <span class="pulse-dot-amber"></span>
@@ -190,7 +131,7 @@
           <p class="sso-approval-text">
             {{
               ssoApprovalMessage() ||
-                'Your corporate organization requires administrative approval before this application can access your account.'
+                'Your identity challenge passed. Waiting for a company administrator to approve your access to this application.'
             }}
           </p>
 
@@ -200,12 +141,16 @@
               <span class="status-val">{{ clientDisplayName() }}</span>
             </div>
             <div class="status-row">
+              <span class="status-label">MFA Challenge:</span>
+              <span class="status-val">Verified</span>
+            </div>
+            <div class="status-row">
               <span class="status-label">Access Status:</span>
-              <span class="sso-approval-pill">Pending Approval</span>
+              <span class="sso-approval-pill">Pending Admin Approval</span>
             </div>
             <div class="status-desc" style="display: flex; align-items: center; gap: 8px;">
               <span class="pulse-dot-amber"></span>
-              <span>An access request has been automatically submitted to your administrator. Once approved, this screen will automatically proceed, or click below to check now.</span>
+              <span>An access request has been submitted to your administrator. Once approved in Vanguard Dashboard, you will be redirected straight into {{ clientDisplayName() }}.</span>
             </div>
           </div>
 

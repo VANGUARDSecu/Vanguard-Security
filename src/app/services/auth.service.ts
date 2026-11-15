@@ -109,9 +109,24 @@ export interface VerifySsoMfaPayload {
 
 export interface VerifySsoMfaResponse {
   success: boolean;
+  verified?: boolean;
+  awaitingAdminApproval?: boolean;
+  challengeId?: string;
+  clientName?: string;
   message: string;
-  code: string;
-  redirectUrl: string;
+  code?: string;
+  redirectUrl?: string;
+}
+
+export interface CompleteSsoMfaResponse {
+  success: boolean;
+  approved: boolean;
+  awaitingAdminApproval: boolean;
+  challengeId?: string;
+  clientName?: string;
+  code?: string;
+  redirectUrl?: string;
+  message?: string;
 }
 
 export interface ResendSsoOtpPayload {
@@ -148,6 +163,9 @@ export interface PushStatusResponse {
   challengeId: string;
   status: 'pending' | 'approved' | 'denied' | 'fraud_reported' | 'expired' | 'not_found';
   verified?: boolean;
+  awaitingAdminApproval?: boolean;
+  clientName?: string;
+  message?: string;
   code?: string;
   redirectUrl?: string;
   resolutionReason?: string;
@@ -1429,6 +1447,23 @@ export class AuthService {
             : error.error.message;
         }
         return throwError(() => new Error(errorMessage));
+      })
+    );
+  }
+
+  completeSsoMfa(challengeId: string): Observable<CompleteSsoMfaResponse> {
+    const url = `${this.API_URL.replace(/\/auth\/?$/, '')}/oauth/mfa/complete`;
+    return this.http.post<CompleteSsoMfaResponse>(url, { challengeId }).pipe(
+      catchError((error: HttpErrorResponse) => {
+        let errorMessage = 'Failed to check administrator approval status.';
+        if (error.error && error.error.message) {
+          errorMessage = Array.isArray(error.error.message)
+            ? error.error.message.join(', ')
+            : error.error.message;
+        }
+        const err = new Error(errorMessage) as Error & { status?: number };
+        err.status = error.status;
+        return throwError(() => err);
       })
     );
   }

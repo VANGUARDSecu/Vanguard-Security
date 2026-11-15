@@ -85,10 +85,12 @@ describe('VerifyOtpComponent', () => {
       expect(component.separatorIndex()).toBe(2);
     });
 
-    it('should submit SSO MFA verification to authService.verifySsoMfa and handle redirect', () => {
+    it('should submit SSO MFA verification to authService.verifySsoMfa and redirect directly when approved', () => {
       const verifySpy = vi.spyOn(authService, 'verifySsoMfa').mockReturnValue(
         of({
           success: true,
+          verified: true,
+          awaitingAdminApproval: false,
           message: 'SSO MFA verified.',
           code: 'vg_code_sso_test',
           redirectUrl: 'http://localhost:4201/auth/callback?code=vg_code_sso_test',
@@ -109,10 +111,7 @@ describe('VerifyOtpComponent', () => {
         code: '654321',
         method: 'email_otp',
       });
-      expect(component.ssoConsentPending()).toBe(true);
-      expect(window.location.href).toBe('');
-
-      component.confirmSsoLoginApproval();
+      expect(component.ssoApprovalRequired()).toBe(false);
       expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_code_sso_test');
 
       (window as any).location = originalLocation;
@@ -295,41 +294,42 @@ describe('VerifyOtpComponent', () => {
       expect(el.textContent).not.toContain('Approve with your Vanguard Account');
     });
 
-    it('SCRUM-184: pauses at explicit Approve / Deny SSO consent prompt after verification before redirecting', () => {
+    it('SCRUM-198: transitions to Administrative Approval Required after Email OTP when tenant awaitingAdminApproval is true, keeping challengeId', () => {
       const originalLocation = window.location;
       delete (window as any).location;
       (window as any).location = { href: '' };
 
+      vi.spyOn(authService, 'verifySsoMfa').mockReturnValue(
+        of({
+          success: true,
+          verified: true,
+          awaitingAdminApproval: true,
+          challengeId: 'sso_mfa_pending_198',
+          clientName: 'Acme Dummy Portal (Angular SPA)',
+          message: 'Administrative approval is required before corporate account can access Acme Dummy Portal.',
+        }),
+      );
+
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
-        scope: 'openid profile email',
-        state: 'st-184',
+        state: 'st-198-otp',
       });
-      component.serverClientName.set('Acme Dummy Portal (Angular SPA)');
       component.email.set('employee@acme.corp');
+      component.challengeId.set('sso_mfa_pending_198');
+      component.method.set('email_otp');
+      component.digits.set(['1', '2', '3', '4', '5', '6']);
 
-      component.presentSsoConsentPrompt({
-        redirectRes: {
-          code: 'vg_consent_code_184',
-          redirectUrl: 'http://localhost:4201/auth/callback?code=vg_consent_code_184&state=st-184',
-        },
-      });
-      fixture.detectChanges();
+      component.onSubmit();
 
-      expect(component.ssoConsentPending()).toBe(true);
+      expect(component.ssoApprovalRequired()).toBe(true);
+      expect(component.challengeId()).toBe('sso_mfa_pending_198');
       expect(window.location.href).toBe('');
-
-      const el: HTMLElement = fixture.nativeElement;
-      expect(el.querySelector('[data-testid="sso-consent-prompt"]')).toBeTruthy();
-
-      component.confirmSsoLoginApproval();
-      expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_consent_code_184&state=st-184');
 
       (window as any).location = originalLocation;
     });
 
-    it('SCRUM-184: redirects with access_denied when user clicks Deny on SSO consent prompt', () => {
+    it('SCRUM-198: redirects with access_denied when user cancels SSO', () => {
       const originalLocation = window.location;
       delete (window as any).location;
       (window as any).location = { href: '' };
@@ -337,14 +337,13 @@ describe('VerifyOtpComponent', () => {
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
-        state: 'st-deny-184',
+        state: 'st-deny-198',
       });
-      component.presentSsoConsentPrompt({});
-      component.denySsoLoginApproval();
+      component.onCancelSso('User denied SSO login authorization request');
 
-      expect(component.ssoConsentPending()).toBe(false);
+      expect(component.ssoApprovalRequired()).toBe(false);
       expect(window.location.href).toContain('error=access_denied');
-      expect(window.location.href).toContain('state=st-deny-184');
+      expect(window.location.href).toContain('state=st-deny-198');
 
       (window as any).location = originalLocation;
     });
@@ -413,16 +412,19 @@ describe('VerifyOtpComponent', () => {
     });
   });
 
-  describe('SCRUM-196: SSO Approval & Consent Loop Prevention', () => {
-    it('does not flip to ssoConsentPending when challengeId is null and checkApprovalAndProceed runs while admin approval is still pending', () => {
-      const pushSpy = vi.spyOn(authService, 'initiatePushMfa').mockReturnValue(
-        throwError(
-          () =>
-            new Error(
-              'Zero-Trust Access Governance: Administrative approval is required before corporate account "employee@acme.corp" can access "Acme Dummy Portal (Angular SPA)".',
-            ),
-        ),
+  describe('SCRUM-198: Challenge-First then Post-Challenge Admin Approval (No Loop)', () => {
+    it('stays in ssoApprovalRequired when challengeId is verified and completeSsoMfa still returns awaitingAdminApproval=true', () => {
+      const completeSpy = vi.spyOn(authService, 'completeSsoMfa').mockReturnValue(
+        of({
+          success: true,
+          approved: false,
+          awaitingAdminApproval: true,
+          challengeId: 'push_mfa_pending_198',
+          clientName: 'Acme Dummy Portal (Angular SPA)',
+          message: 'Administrative approval is still pending.',
+        }),
       );
+      const pushSpy = vi.spyOn(authService, 'initiatePushMfa');
 
       component.ssoParams.set({
         client_id: 'vanguard-dummy-portal',
@@ -430,33 +432,28 @@ describe('VerifyOtpComponent', () => {
         state: 'st-loop-1',
       });
       component.email.set('employee@acme.corp');
-      component.challengeId.set(null);
+      component.challengeId.set('push_mfa_pending_198');
       component.ssoApprovalRequired.set(true);
 
       component.checkApprovalAndProceed(true);
 
-      expect(pushSpy).toHaveBeenCalled();
+      expect(completeSpy).toHaveBeenCalledWith('push_mfa_pending_198');
+      expect(pushSpy).not.toHaveBeenCalled();
       expect(component.ssoApprovalRequired()).toBe(true);
-      expect(component.ssoConsentPending()).toBe(false);
     });
 
-    it('transitions from Administrative Approval Required into Push MFA once admin approves, then completes consent once', () => {
+    it('redirects directly to client dashboard once admin approves without re-running MFA or stopping at consent', () => {
       const originalLocation = window.location;
       delete (window as any).location;
       (window as any).location = { href: '' };
 
-      const pushSpy = vi.spyOn(authService, 'initiatePushMfa').mockReturnValue(
+      const completeSpy = vi.spyOn(authService, 'completeSsoMfa').mockReturnValue(
         of({
           success: true,
-          challengeId: 'push_mfa_approved_196',
-          email: 'employee@acme.corp',
-          clientId: 'vanguard-dummy-portal',
-          clientName: 'Acme Dummy Portal (Angular SPA)',
-          clientType: 'web',
-          appIcon: '🛡️',
-          numberMatching: { enabled: true, code: 42 },
-          expiresInSeconds: 60,
-          message: 'Push dispatched',
+          approved: true,
+          awaitingAdminApproval: false,
+          code: 'vg_code_198',
+          redirectUrl: 'http://localhost:4201/auth/callback?code=vg_code_198&state=st-loop-2',
         }),
       );
 
@@ -466,32 +463,19 @@ describe('VerifyOtpComponent', () => {
         state: 'st-loop-2',
       });
       component.email.set('employee@acme.corp');
-      component.challengeId.set(null);
+      component.challengeId.set('push_mfa_verified_198');
       component.ssoApprovalRequired.set(true);
 
       component.checkApprovalAndProceed(false);
 
-      expect(pushSpy).toHaveBeenCalled();
+      expect(completeSpy).toHaveBeenCalledWith('push_mfa_verified_198');
       expect(component.ssoApprovalRequired()).toBe(false);
-      expect(component.ssoConsentPending()).toBe(false);
-      expect(component.challengeId()).toBe('push_mfa_approved_196');
-      expect(component.numberCode()).toBe('42');
-
-      component.presentSsoConsentPrompt({
-        redirectRes: {
-          code: 'vg_code_196',
-          redirectUrl: 'http://localhost:4201/auth/callback?code=vg_code_196&state=st-loop-2',
-        },
-      });
-      expect(component.ssoConsentPending()).toBe(true);
-
-      component.confirmSsoLoginApproval();
-      expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_code_196&state=st-loop-2');
+      expect(window.location.href).toBe('http://localhost:4201/auth/callback?code=vg_code_198&state=st-loop-2');
 
       (window as any).location = originalLocation;
     });
 
-    it('does not open ssoConsentPending when approveDirectlyInFrontend fails with non-approval error or has no challengeId', () => {
+    it('shows error notification when handlePostSsoChallengeResult or verifySsoMfa fails with non-approval error', () => {
       vi.spyOn(authService, 'verifySsoMfa').mockReturnValue(
         throwError(() => new Error('A valid Vanguard Bearer token is required.')),
       );
@@ -500,30 +484,11 @@ describe('VerifyOtpComponent', () => {
         client_id: 'vanguard-dummy-portal',
         redirect_uri: 'http://localhost:4201/auth/callback',
       });
-      component.challengeId.set('push_mfa_err_196');
+      component.challengeId.set('push_mfa_err_198');
       component.approveDirectlyInFrontend(false);
 
-      expect(component.ssoConsentPending()).toBe(false);
-      expect(component.notification()?.type).toBe('error');
-    });
-
-    it('redirects cleanly to /login instead of calling /oauth/approve when Bearer token is missing', () => {
-      const router = TestBed.inject(Router);
-      const navSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
-      vi.spyOn(authService, 'token').mockReturnValue(null);
-      const approveSpy = vi.spyOn(authService, 'approveSsoAuthorization');
-
-      component.ssoParams.set({
-        client_id: 'vanguard-dummy-portal',
-        redirect_uri: 'http://localhost:4201/auth/callback',
-      });
-      component.presentSsoConsentPrompt({});
-      component.confirmSsoLoginApproval();
-
-      expect(approveSpy).not.toHaveBeenCalled();
-      expect(navSpy).toHaveBeenCalledWith(['/login'], expect.anything());
-      expect(component.ssoConsentPending()).toBe(false);
       expect(component.ssoApprovalRequired()).toBe(false);
+      expect(component.notification()?.type).toBe('error');
     });
   });
 });

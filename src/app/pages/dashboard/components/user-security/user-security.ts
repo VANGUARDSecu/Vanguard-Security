@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
@@ -11,13 +11,31 @@ import { AuthService } from '../../../../services/auth.service';
   templateUrl: './user-security.html',
   styleUrl: './user-security.css'
 })
-export class UserSecurity {
+export class UserSecurity implements OnInit {
   readonly dashboardService = inject(DashboardService);
   readonly authService = inject(AuthService);
 
   // SCRUM-85 / SCRUM-143: Mobile Push & Biometric MFA Preference
   readonly pushMfaEnabled = signal<boolean>(true);
   readonly pushMfaUpdating = signal<boolean>(false);
+
+  ngOnInit(): void {
+    const currentSecondary = this.securityAlertPreferences().secondaryEmail || '';
+    if (!this.secondaryEmailInput && currentSecondary) {
+      this.secondaryEmailInput = currentSecondary;
+    }
+    const email = this.user()?.email;
+    if (this.authService.token() && email) {
+      this.authService.getPushMfaPreference(email).subscribe({
+        next: (res) => {
+          if (typeof res?.enabled === 'boolean') {
+            this.pushMfaEnabled.set(res.enabled);
+          }
+        },
+        error: () => {},
+      });
+    }
+  }
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly user = this.dashboardService.user;
@@ -33,6 +51,11 @@ export class UserSecurity {
   readonly isConfirmingTotp = this.dashboardService.isConfirmingTotp;
   readonly isDeEnrollingTotp = this.dashboardService.isDeEnrollingTotp;
   readonly recoveryCodes = this.dashboardService.recoveryCodes;
+  readonly recoveryCodesRemaining = this.dashboardService.recoveryCodesRemaining;
+  readonly recoveryCodesGeneratedAt = this.dashboardService.recoveryCodesGeneratedAt;
+  readonly effectiveRecoveryCodesCount = computed(() =>
+    Math.max(this.recoveryCodes().length, this.recoveryCodesRemaining())
+  );
   readonly copiedCodes = this.dashboardService.copiedCodes;
 
   readonly copiedSecret = signal<boolean>(false);
@@ -41,6 +64,12 @@ export class UserSecurity {
   // SCRUM-57: Connected & Integrated Applications
   readonly connectedApps = this.dashboardService.connectedApps;
   readonly activeConnectedApps = this.dashboardService.activeConnectedApps;
+  readonly connectedAppsError = this.dashboardService.connectedAppsError;
+  readonly isLoadingConnectedApps = this.dashboardService.isLoadingConnectedApps;
+
+  refreshConnectedApps(): void {
+    this.dashboardService.fetchConnectedApps();
+  }
 
   launchConnectedApp(app: any): void {
     this.dashboardService.launchConnectedApp(app);
@@ -143,14 +172,29 @@ export class UserSecurity {
   redeemRecoveryCode(): void {
     const code = this.testRecoveryCodeInput.trim();
     if (!code) return;
-    const ok = this.useRecoveryCode(code);
-    if (ok) {
-      this.recoveryCodeRedeemResult.set(`✓ Code ${code} successfully redeemed. Single-use token invalidated.`);
-      this.testRecoveryCodeInput = '';
-    } else {
-      this.recoveryCodeRedeemResult.set(`✕ Invalid or already consumed recovery code.`);
+    if (!this.authService.token()) {
+      const ok = this.useRecoveryCode(code);
+      if (ok) {
+        this.recoveryCodeRedeemResult.set(`✓ Code ${code} successfully redeemed. Single-use token invalidated.`);
+        this.testRecoveryCodeInput = '';
+      } else {
+        this.recoveryCodeRedeemResult.set(`✕ Invalid or already consumed recovery code.`);
+      }
+      setTimeout(() => this.recoveryCodeRedeemResult.set(null), 4500);
+      return;
     }
-    setTimeout(() => this.recoveryCodeRedeemResult.set(null), 4500);
+
+    this.dashboardService.redeemRecoveryCodeBackend(code, (ok, message) => {
+      if (ok) {
+        this.recoveryCodeRedeemResult.set(
+          `✓ ${message || `Code ${code} successfully redeemed. Single-use token invalidated.`}`
+        );
+        this.testRecoveryCodeInput = '';
+      } else {
+        this.recoveryCodeRedeemResult.set(`✕ ${message || 'Invalid or already consumed recovery code.'}`);
+      }
+      setTimeout(() => this.recoveryCodeRedeemResult.set(null), 4500);
+    });
   }
 
   // Password Update Modal Actions
@@ -212,10 +256,16 @@ export class UserSecurity {
   readonly securityAlertPreferences = this.dashboardService.securityAlertPreferences;
   readonly userSignInEvents = this.dashboardService.userSignInEvents;
   readonly secondaryEmailSaved = signal<boolean>(false);
+  readonly secondaryEmailError = signal<string | null>(null);
   secondaryEmailInput = '';
 
   saveSecondaryEmail(): void {
     const email = this.secondaryEmailInput.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      this.secondaryEmailError.set('Enter a valid secondary alert email address.');
+      return;
+    }
+    this.secondaryEmailError.set(null);
     this.dashboardService.updateSecurityAlertPreferences({ secondaryEmail: email });
     this.secondaryEmailSaved.set(true);
     setTimeout(() => this.secondaryEmailSaved.set(false), 3000);

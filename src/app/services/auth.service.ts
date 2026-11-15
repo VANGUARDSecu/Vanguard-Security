@@ -103,7 +103,7 @@ export interface InitiateSsoMfaResponse {
 export interface VerifySsoMfaPayload {
   challengeId: string;
   code: string;
-  method?: 'email_otp' | 'totp' | 'push_approval' | 'frontend_approval';
+  method?: 'email_otp' | 'totp' | 'push_approval' | 'frontend_approval' | 'recovery_code';
 }
 
 export interface VerifySsoMfaResponse {
@@ -726,7 +726,11 @@ export class AuthService {
     );
   }
 
-  verifyOtp(email: string, token: string, type: 'signup' | 'email' | 'recovery' = 'signup'): Observable<AuthResponse> {
+  verifyOtp(
+    email: string,
+    token: string,
+    type: 'signup' | 'email' | 'recovery' | 'signin_recovery' = 'signup',
+  ): Observable<AuthResponse> {
     const cleanedToken = token.trim();
 
     // Check if we have a pending directory employee verification (used only to
@@ -1508,6 +1512,122 @@ export class AuthService {
       ? `${baseUrl}/oauth/connected-apps/${encodeURIComponent(clientId)}?email=${encodeURIComponent(email)}`
       : `${baseUrl}/oauth/connected-apps/${encodeURIComponent(clientId)}`;
     return this.http.delete<{ success: boolean; disconnected: boolean }>(url);
+  }
+
+  /**
+   * Persist per-user optimistic connected-app metadata after SSO authorization so
+   * DashboardService.initConnectedApps() picks it up immediately on load (SCRUM-182).
+   */
+  recordLocalConnectedApp(params: {
+    clientId: string;
+    clientName: string;
+    redirectUri: string;
+    scope?: string;
+    userEmail?: string;
+  }): void {
+    if (!this.isBrowser) return;
+    const normEmail = (params.userEmail || this.currentUser()?.email || '').toLowerCase().trim();
+    if (!normEmail || !params.redirectUri) return;
+    try {
+      const originUrl = new URL(params.redirectUri).origin;
+      const key = `vanguard_connected_apps_${normEmail}`;
+      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      const nowIso = new Date().toISOString();
+      const newConn = {
+        id: `conn_${params.clientId}_${normEmail}`,
+        clientId: params.clientId,
+        clientName: params.clientName,
+        userEmail: normEmail,
+        protocol: 'OpenID Connect 1.0 (PKCE)',
+        scopes: (params.scope || 'openid profile email roles').split(' '),
+        redirectUri: params.redirectUri,
+        originUrl,
+        status: 'Connected' as const,
+        connectedAt: nowIso,
+        lastActiveAt: nowIso,
+        icon: '🌐',
+        description: `${params.clientName} integrated via Vanguard SSO with account ${normEmail}.`,
+      };
+      const normOrigin = originUrl.toLowerCase().trim().replace(/\/$/, '');
+      const filtered = (Array.isArray(stored) ? stored : []).filter((c: any) => {
+        const cOrigin = (c.originUrl || '').toLowerCase().trim().replace(/\/$/, '');
+        return c.clientId !== params.clientId && (!normOrigin || cOrigin !== normOrigin);
+      });
+      localStorage.setItem(key, JSON.stringify([newConn, ...filtered]));
+    } catch {}
+  }
+
+  generateRecoveryCodes(): Observable<{
+    success: boolean;
+    codes: string[];
+    remainingCount: number;
+    generatedAt: string;
+  }> {
+    return this.http.post<{
+      success: boolean;
+      codes: string[];
+      remainingCount: number;
+      generatedAt: string;
+    }>(`${this.API_URL}/recovery-codes/generate`, {});
+  }
+
+  getRecoveryCodesStatus(): Observable<{ remainingCount: number; generatedAt: string | null }> {
+    return this.http.get<{ remainingCount: number; generatedAt: string | null }>(
+      `${this.API_URL}/recovery-codes/status`,
+    );
+  }
+
+  redeemRecoveryCode(code: string): Observable<{
+    success: boolean;
+    verified: boolean;
+    remainingCount: number;
+    message: string;
+  }> {
+    return this.http.post<{
+      success: boolean;
+      verified: boolean;
+      remainingCount: number;
+      message: string;
+    }>(`${this.API_URL}/recovery-codes/redeem`, { code }).pipe(
+      catchError((error: HttpErrorResponse) => {
+        const msg = error?.error?.message || 'Invalid or already consumed recovery code.';
+        return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
+      }),
+    );
+  }
+
+  verifyForgotPasswordRecoveryCode(email: string, code: string): Observable<AuthResponse> {
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/verify-recovery-code`, { email, code: code.trim() })
+      .pipe(
+        tap((response) => {
+          if (response.success && response.user && response.session) {
+            this.setSession(response.user, response.session);
+            this.isPasswordResetRequired.set(true);
+            if (this.isBrowser) localStorage.setItem('vanguard_reset_required', 'true');
+          }
+        }),
+        catchError((error: HttpErrorResponse) => {
+          const msg = error?.error?.message || 'Invalid or already consumed recovery code.';
+          return throwError(() => new Error(Array.isArray(msg) ? msg.join(', ') : msg));
+        }),
+      );
+  }
+
+  getSecurityPreferences(): Observable<{
+    email: string;
+    secondaryEmail?: string;
+    alertThreshold: 'all' | 'new_device';
+    emailAlertsEnabled: boolean;
+    updatedAt: string;
+  }> {
+    return this.http.get<{
+      email: string;
+      secondaryEmail?: string;
+      alertThreshold: 'all' | 'new_device';
+      emailAlertsEnabled: boolean;
+      updatedAt: string;
+    }>(`${this.API_URL}/security-preferences`);
   }
 
 

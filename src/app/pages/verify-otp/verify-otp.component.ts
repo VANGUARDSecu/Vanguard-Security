@@ -5,7 +5,7 @@ import { Router, RouterLink, ActivatedRoute } from '@angular/router';
 import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
 
-export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval';
+export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval' | 'recovery_code';
 
 @Component({
   selector: 'app-verify-otp',
@@ -179,6 +179,10 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly codeLength = computed<number>(() => (this.isSsoVerification() || this.method() === 'totp' ? 6 : 8));
   readonly separatorIndex = computed<number>(() => (this.codeLength() === 6 ? 2 : 3));
   readonly digits = signal<string[]>(new Array(6).fill(''));
+  readonly recoveryCodeInput = signal<string>('');
+  readonly isRecoveryCodeValidFormat = computed<boolean>(() =>
+    /^VANG-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(this.recoveryCodeInput().trim()),
+  );
   
   readonly isLoading = signal<boolean>(false);
   readonly submitted = signal<boolean>(false);
@@ -590,6 +594,12 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
   setMethod(newMethod: VerificationMethod): void {
     this.method.set(newMethod);
+    if (newMethod === 'recovery_code') {
+      this.clearTimers();
+      this.recoveryCodeInput.set('');
+      this.showNotification('success', 'Switched to Emergency Recovery Code mode. Enter a single-use VANG-XXXX-XXXX code.', 4000);
+      return;
+    }
     this.clearOtpInputs();
     if (newMethod === 'totp') {
       this.showNotification('success', 'Switched to Authenticator App mode. Enter the 6-digit code from your app.', 4000);
@@ -766,7 +776,73 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     this.notification.set(null);
   }
 
+  onRecoveryCodeFieldInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).value.toUpperCase();
+    this.recoveryCodeInput.set(val);
+  }
+
   onSubmit(): void {
+    const currentMethod = this.method();
+    const email = this.email();
+
+    if (currentMethod === 'recovery_code') {
+      const recCode = this.recoveryCodeInput().trim().toUpperCase();
+      if (!recCode) {
+        this.showNotification('error', 'Please enter your emergency recovery code (VANG-XXXX-XXXX).');
+        return;
+      }
+      this.isLoading.set(true);
+
+      if (this.isSsoVerification() && this.challengeId()) {
+        this.authService.verifySsoMfa({
+          challengeId: this.challengeId()!,
+          code: recCode,
+          method: 'recovery_code',
+        }).subscribe({
+          next: (res) => {
+            this.presentSsoConsentPrompt({ redirectRes: res });
+          },
+          error: (err: Error) => {
+            this.isLoading.set(false);
+            if (this.isApprovalRequiredError(err)) {
+              this.handleApprovalRequired(err);
+              return;
+            }
+            this.showNotification('error', err.message || 'Invalid or already consumed recovery code.');
+          },
+        });
+        return;
+      }
+
+      if (this.mode() === 'recovery') {
+        this.authService.verifyForgotPasswordRecoveryCode(email, recCode).subscribe({
+          next: () => {
+            this.isLoading.set(false);
+            this.showNotification('success', 'Recovery code verified! Redirecting to reset password...', 3000);
+            setTimeout(() => {
+              this.router.navigate(['/reset-password']);
+            }, 800);
+          },
+          error: (err: Error) => {
+            this.isLoading.set(false);
+            this.showNotification('error', err.message || 'Invalid or already consumed recovery code.');
+          },
+        });
+        return;
+      }
+
+      this.authService.verifyOtp(email, recCode, 'signin_recovery').subscribe({
+        next: (res) => {
+          this.handleVerificationSuccess(res?.user);
+        },
+        error: (err: Error) => {
+          this.isLoading.set(false);
+          this.showNotification('error', err.message || 'Invalid or already consumed recovery code.');
+        },
+      });
+      return;
+    }
+
     const code = this.digits().join('');
     const len = this.codeLength();
 
@@ -776,8 +852,6 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     }
 
     this.isLoading.set(true);
-    const email = this.email();
-    const currentMethod = this.method();
 
     // 1. SSO MFA Verification Mode (SCRUM-61)
     if (this.isSsoVerification() && this.challengeId()) {
@@ -849,29 +923,13 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
     try {
       if (sso) {
-        const originUrl = new URL(sso['redirect_uri']).origin;
-        const stored = JSON.parse(localStorage.getItem('vanguard_connected_apps') || '[]');
-        const appName = this.clientDisplayName();
-        const newConn = {
-          id: `conn_${sso['client_id']}`,
+        this.authService.recordLocalConnectedApp({
           clientId: sso['client_id'],
-          clientName: appName,
-          protocol: 'OpenID Connect 1.0 (PKCE)',
-          scopes: (sso['scope'] || 'openid profile email roles').split(' '),
+          clientName: this.clientDisplayName(),
           redirectUri: sso['redirect_uri'],
-          originUrl,
-          status: 'Connected' as const,
-          connectedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          lastActiveAt: 'Active Session',
-          icon: '🌐',
-          description: `${appName} integrated via Vanguard SSO with account ${this.email()}.`,
-        };
-        const normOrigin = originUrl.toLowerCase().trim().replace(/\/$/, '');
-        const filtered = stored.filter((c: any) => {
-          const cOrigin = (c.originUrl || '').toLowerCase().trim().replace(/\/$/, '');
-          return c.clientId !== sso['client_id'] && (!normOrigin || cOrigin !== normOrigin) && c.clientName !== appName;
+          scope: sso['scope'],
+          userEmail: this.authService.currentUser()?.email || this.email(),
         });
-        localStorage.setItem('vanguard_connected_apps', JSON.stringify([newConn, ...filtered]));
       }
     } catch {}
 

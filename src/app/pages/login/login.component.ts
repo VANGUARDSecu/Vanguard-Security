@@ -81,11 +81,12 @@ export class LoginComponent implements OnInit, OnDestroy {
     this.startApprovalPolling();
   }
 
+  private isApprovalPollInFlight = false;
+
   startApprovalPolling(): void {
     this.stopApprovalPolling();
     this.approvalPollTimer = setInterval(() => {
-      if (this.ssoApprovalRequired() && this.ssoParams()) {
-        const u = this.currentUser();
+      if (this.ssoApprovalRequired() && this.ssoParams() && !this.isApprovalPollInFlight) {
         this.checkApprovalAndProceed(true);
       }
     }, 3000);
@@ -99,60 +100,78 @@ export class LoginComponent implements OnInit, OnDestroy {
   }
 
   checkApprovalAndProceed(silent = false): void {
-    if (!this.ssoParams()) return;
+    const sso = this.ssoParams();
+    if (!sso || this.isApprovalPollInFlight) return;
+
+    const user = this.currentUser();
+    const email = (user?.email || this.loginForm.get('email')?.value || '').trim();
+    if (!email) {
+      this.isCheckingApproval.set(false);
+      if (!silent) {
+        this.showNotification('error', 'Missing account email. Please sign in again.');
+      }
+      return;
+    }
+
+    this.isApprovalPollInFlight = true;
     if (!silent) {
       this.isCheckingApproval.set(true);
     }
-    const user = this.currentUser();
-    const sso = this.ssoParams()!;
-    if (user) {
-      this.authService.approveSsoAuthorization({
-        client_id: sso['client_id'],
-        redirect_uri: sso['redirect_uri'],
-        response_type: sso['response_type'] || 'code',
-        scope: sso['scope'] || 'openid profile email roles',
-        state: sso['state'] || '',
-        nonce: sso['nonce'] || '',
-        code_challenge: sso['code_challenge'] || '',
-        code_challenge_method: sso['code_challenge_method'] || 'S256',
-        email: user.email,
-        name: this.resolveUserFullName(user, user.email),
-        role: user.role || 'user',
-        roles: [user.role || 'user', 'Vanguard Authenticated'],
-        department: user.user_metadata?.['department'] || 'Corporate Security',
-        userId: user.id,
-      }).subscribe({
-        next: () => {
-          this.stopApprovalPolling();
-          this.isCheckingApproval.set(false);
-          this.ssoApprovalRequired.set(false);
-          // Require explicit Approve / Deny login confirmation on /verify-otp (SCRUM-184)
-          this.router.navigate(['/verify-otp'], {
-            queryParams: {
-              email: user.email,
-              mode: 'signin',
-              method: 'push_approval',
-              consent: 'required',
-              ...sso,
-            },
-          });
-        },
-        error: (err: Error) => {
-          this.isCheckingApproval.set(false);
-          if (this.isApprovalRequiredError(err)) {
-            if (!silent) {
-              this.handleApprovalRequired(err);
-            }
-            return;
-          }
+
+    const fullName = this.resolveUserFullName(user, email);
+    const role = user?.role || 'user';
+    const dept = user?.user_metadata?.['department'] || 'Corporate Security';
+
+    // Re-attempt Push MFA initiation instead of pre-minting & discarding an auth code on /oauth/approve.
+    this.authService.initiatePushMfa({
+      client_id: sso['client_id'],
+      redirect_uri: sso['redirect_uri'],
+      email,
+      userId: user?.id,
+      name: fullName,
+      role,
+      department: dept,
+      response_type: sso['response_type'] || 'code',
+      scope: sso['scope'] || 'openid profile email roles',
+      state: sso['state'] || '',
+      nonce: sso['nonce'] || '',
+      code_challenge: sso['code_challenge'] || '',
+      code_challenge_method: sso['code_challenge_method'] || 'S256',
+    }).subscribe({
+      next: (pushRes) => {
+        this.isApprovalPollInFlight = false;
+        this.stopApprovalPolling();
+        this.isCheckingApproval.set(false);
+        this.ssoApprovalRequired.set(false);
+        this.router.navigate(['/verify-otp'], {
+          queryParams: {
+            challengeId: pushRes.challengeId,
+            email: pushRes.email,
+            mode: 'signin',
+            method: 'push_approval',
+            numberCode: pushRes.numberMatching?.code?.toString() || '',
+            clientName: pushRes.clientName,
+            clientType: pushRes.clientType,
+            appIcon: pushRes.appIcon || '🛡️',
+            hasTotp: 'false',
+            ...sso,
+          },
+        });
+      },
+      error: (err: Error) => {
+        this.isApprovalPollInFlight = false;
+        this.isCheckingApproval.set(false);
+        if (this.isApprovalRequiredError(err)) {
           if (!silent) {
-            this.showNotification('error', err.message || 'Unable to verify admin approval.');
+            this.handleApprovalRequired(err);
           }
-        },
-      });
-      return;
-    }
-    this.isCheckingApproval.set(false);
+          return;
+        }
+        if (!silent) {
+          this.showNotification('error', err.message || 'Unable to verify admin approval.');
+        }
+      },
+    });
   }
 
   ngOnDestroy(): void {

@@ -53,7 +53,9 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly ssoApprovalRequired = signal<boolean>(false);
   readonly ssoApprovalMessage = signal<string>('');
   readonly isCheckingApproval = signal<boolean>(false);
+  readonly pendingApprovalChallengeMethod = signal<'push_approval' | 'email_otp'>('push_approval');
   private approvalPollTimer: any = null;
+  private isRetryingPostApproval = false;
 
   private isApprovalRequiredError(err: any): boolean {
     const msg = (err?.message || (typeof err === 'string' ? err : '')).toLowerCase();
@@ -64,9 +66,22 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     );
   }
 
-  private handleApprovalRequired(err: any): void {
+  private handleApprovalRequired(
+    err: any,
+    sourceMethod?: 'push_approval' | 'email_otp',
+  ): void {
     this.isLoading.set(false);
     this.isCheckingApproval.set(false);
+    this.isRetryingPostApproval = false;
+    this.ssoConsentPending.set(false);
+    this.pendingSsoRedirectResult.set(null);
+    if (sourceMethod) {
+      this.pendingApprovalChallengeMethod.set(sourceMethod);
+    } else {
+      this.pendingApprovalChallengeMethod.set(
+        this.method() === 'email_otp' ? 'email_otp' : 'push_approval',
+      );
+    }
     this.ssoApprovalRequired.set(true);
     const msg =
       err?.message ||
@@ -78,7 +93,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   startApprovalPolling(): void {
     this.stopApprovalPolling();
     this.approvalPollTimer = setInterval(() => {
-      if (this.ssoApprovalRequired() && this.ssoParams()) {
+      if (this.ssoApprovalRequired() && this.ssoParams() && !this.ssoConsentPending()) {
         this.checkApprovalAndProceed(true);
       }
     }, 3000);
@@ -92,11 +107,129 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   }
 
   checkApprovalAndProceed(silent = false): void {
-    if (!this.ssoParams()) return;
+    const sso = this.ssoParams();
+    if (!sso) return;
+    if (this.isRetryingPostApproval) return;
+
+    // Only use direct frontend approval when an existing challenge was already created.
+    if (this.challengeId()) {
+      if (!silent) {
+        this.isCheckingApproval.set(true);
+      }
+      this.approveDirectlyInFrontend(silent);
+      return;
+    }
+
+    const targetEmail = (this.email() || this.authService.currentUser()?.email || '').trim();
+    if (!targetEmail) {
+      this.isCheckingApproval.set(false);
+      if (!silent) {
+        this.showNotification('error', 'Missing account email for SSO verification. Please sign in again.');
+      }
+      return;
+    }
+
+    // Re-attempt MFA challenge initiation so backend governance gates the transition;
+    // never skip straight to the consent prompt while approval is still pending.
+    this.reinitiateSsoChallengeAfterApproval(sso, targetEmail, silent);
+  }
+
+  private buildSsoChallengePayload(ssoData: Record<string, string>, email: string) {
+    const currentUser = this.authService.currentUser();
+    return {
+      client_id: ssoData['client_id'],
+      redirect_uri: ssoData['redirect_uri'],
+      email,
+      userId: currentUser?.id,
+      name: currentUser?.firstName
+        ? `${currentUser.firstName} ${currentUser.lastName || ''}`.trim()
+        : currentUser?.email,
+      role: currentUser?.role || 'user',
+      department: (currentUser?.user_metadata as any)?.['department'],
+      response_type: ssoData['response_type'] || 'code',
+      scope: ssoData['scope'] || 'openid profile email roles',
+      state: ssoData['state'] || '',
+      nonce: ssoData['nonce'] || '',
+      code_challenge: ssoData['code_challenge'] || '',
+      code_challenge_method: ssoData['code_challenge_method'] || 'S256',
+    };
+  }
+
+  private reinitiateSsoChallengeAfterApproval(
+    ssoData: Record<string, string>,
+    email: string,
+    silent: boolean,
+  ): void {
+    this.isRetryingPostApproval = true;
     if (!silent) {
       this.isCheckingApproval.set(true);
     }
-    this.approveDirectlyInFrontend(silent);
+
+    const payload = this.buildSsoChallengePayload(ssoData, email);
+    const onStillPendingOrError = (err: Error) => {
+      this.isRetryingPostApproval = false;
+      this.isCheckingApproval.set(false);
+      if (this.isApprovalRequiredError(err)) {
+        if (!silent) {
+          this.ssoApprovalMessage.set(err.message);
+          this.showNotification(
+            'error',
+            'Still awaiting administrator approval. Please approve the request in the Admin Console first.',
+            4000,
+          );
+        }
+        return;
+      }
+      if (!silent) {
+        this.showNotification('error', err.message || 'Unable to verify administrator approval.');
+      }
+    };
+
+    if (this.pendingApprovalChallengeMethod() === 'email_otp') {
+      this.authService.initiateSsoMfa(payload).subscribe({
+        next: (res) => {
+          this.isRetryingPostApproval = false;
+          this.isCheckingApproval.set(false);
+          this.stopApprovalPolling();
+          this.ssoApprovalRequired.set(false);
+          this.challengeId.set(res.challengeId);
+          this.serverClientName.set(res.clientName || null);
+          this.method.set('email_otp');
+          this.clearOtpInputs();
+          this.startResendTimer(res.resendCooldownSeconds || 60);
+          this.showNotification(
+            'success',
+            'Administrator approval confirmed! Enter the 6-digit verification code sent to your email.',
+            5000,
+          );
+        },
+        error: onStillPendingOrError,
+      });
+      return;
+    }
+
+    this.authService.initiatePushMfa(payload).subscribe({
+      next: (res) => {
+        this.isRetryingPostApproval = false;
+        this.isCheckingApproval.set(false);
+        this.stopApprovalPolling();
+        this.ssoApprovalRequired.set(false);
+        this.challengeId.set(res.challengeId);
+        this.serverClientName.set(res.clientName || null);
+        this.numberCode.set(String(res.numberMatching?.code || ''));
+        this.clientAppIcon.set(res.appIcon || '🛡️');
+        this.pushRetryCount.set(0);
+        this.pushRetriesRemaining.set(3);
+        this.method.set('push_approval');
+        this.startPushPolling(res.challengeId);
+        this.showNotification(
+          'success',
+          'Administrator approval confirmed! Complete Push MFA verification to continue.',
+          5000,
+        );
+      },
+      error: onStillPendingOrError,
+    });
   }
 
   // Push MFA state signals (SCRUM-85)
@@ -132,17 +265,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     if (options.showLoading) {
       this.isLoading.set(true);
     }
-    this.authService.initiatePushMfa({
-      client_id: ssoData['client_id'],
-      redirect_uri: ssoData['redirect_uri'],
-      email,
-      response_type: ssoData['response_type'] || 'code',
-      scope: ssoData['scope'] || 'openid profile email roles',
-      state: ssoData['state'] || '',
-      nonce: ssoData['nonce'] || '',
-      code_challenge: ssoData['code_challenge'] || '',
-      code_challenge_method: ssoData['code_challenge_method'] || 'S256',
-    }).subscribe({
+    this.authService.initiatePushMfa(this.buildSsoChallengePayload(ssoData, email)).subscribe({
       next: (res) => {
         if (options.showLoading) {
           this.isLoading.set(false);
@@ -163,7 +286,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           this.isLoading.set(false);
         }
         if (this.isApprovalRequiredError(err)) {
-          this.handleApprovalRequired(err);
+          this.handleApprovalRequired(err, 'push_approval');
           return;
         }
         if (options.fallbackToEmailOtp) {
@@ -297,7 +420,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
               },
               error: (err: Error) => {
                 if (this.isApprovalRequiredError(err)) {
-                  this.handleApprovalRequired(err);
+                  this.handleApprovalRequired(err, 'email_otp');
                   return;
                 }
                 this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
@@ -345,7 +468,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
                     },
                     error: (err: Error) => {
                       if (this.isApprovalRequiredError(err)) {
-                        this.handleApprovalRequired(err);
+                        this.handleApprovalRequired(err, 'email_otp');
                         return;
                       }
                       this.showNotification('error', err.message || 'Failed to initiate SSO MFA challenge.');
@@ -478,7 +601,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       error: (err: Error) => {
         this.isLoading.set(false);
         if (this.isApprovalRequiredError(err)) {
-          this.handleApprovalRequired(err);
+          this.handleApprovalRequired(err, 'email_otp');
           return;
         }
         this.showNotification('error', err.message || 'Failed to dispatch Email OTP.');
@@ -515,12 +638,12 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     const sso = this.ssoParams();
     const chId = this.challengeId();
 
-    if (!silent) {
-      this.isLoading.set(true);
-      this.showNotification('success', 'Approving SSO directly from Vanguard browser session...', 3000);
-    }
-
     if (chId) {
+      if (!silent) {
+        this.isLoading.set(true);
+        this.showNotification('success', 'Approving SSO directly from Vanguard browser session...', 3000);
+      }
+
       this.authService.verifySsoMfa({
         challengeId: chId,
         code: 'FRONTEND_DIRECT_APPROVAL',
@@ -533,26 +656,31 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
           this.handleSsoRedirect(res);
         },
         error: (err: any) => {
+          this.isLoading.set(false);
+          this.isCheckingApproval.set(false);
           if (this.isApprovalRequiredError(err)) {
             if (!silent) {
               this.handleApprovalRequired(err);
             }
             return;
           }
-          // Fallback to direct session approval
-          this.handleVerificationSuccess(this.authService.currentUser() || undefined);
+          if (!silent) {
+            this.showNotification(
+              'error',
+              err?.message || 'Unable to verify SSO session directly. Please complete MFA verification.',
+            );
+          }
         },
       });
       return;
     }
 
-    if (sso && sso['client_id'] && sso['redirect_uri']) {
-      this.handleVerificationSuccess(this.authService.currentUser() || undefined);
-      return;
-    }
-
     this.isLoading.set(false);
     this.isCheckingApproval.set(false);
+    if (sso && sso['client_id'] && sso['redirect_uri']) {
+      // Never skip straight to the consent prompt when no challenge exists; re-run governance/challenge check.
+      this.checkApprovalAndProceed(silent);
+    }
   }
 
   openAuthenticatorApp(): void {
@@ -985,6 +1113,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
     user?: UserProfile;
   }): void {
     this.clearTimers();
+    this.isRetryingPostApproval = false;
     this.isLoading.set(false);
     this.isCheckingApproval.set(false);
     this.ssoApprovalRequired.set(false);
@@ -1054,6 +1183,25 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
         );
         return;
       }
+
+      const activeToken = this.authService.token();
+      if (!activeToken) {
+        this.isLoading.set(false);
+        const msg = 'Your Vanguard session is missing or expired. Please sign in again to authorize SSO.';
+        this.showNotification('error', msg, 5000);
+        this.router.navigate(['/login'], { queryParams: { error: msg, ...sso } });
+        return;
+      }
+
+      const targetEmail = (this.email() || '').toLowerCase().trim();
+      const activeEmail = (currentUser?.email || '').toLowerCase().trim();
+      if (activeEmail && targetEmail && targetEmail !== 'user@vanguard.security' && activeEmail !== targetEmail) {
+        this.isLoading.set(false);
+        const msg = `Session mismatch: currently signed in as ${currentUser?.email}, while authorizing ${this.email()}. Please switch accounts to continue.`;
+        this.showNotification('error', msg, 6000);
+        return;
+      }
+
       this.isLoading.set(true);
       this.showNotification('success', 'Authorizing access to client application...', 4000);
 

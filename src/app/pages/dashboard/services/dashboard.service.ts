@@ -6887,6 +6887,19 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
 
   /** SCRUM-114: true when the vault key is loaded in memory. */
   readonly isVaultUnlocked = this.vaultCrypto.isUnlocked;
+  /** True when backend /vault has newer encrypted writes (e.g. from browser extension). */
+  readonly remoteVaultUpdateAvailable = this.vaultCrypto.remoteUpdateAvailable;
+
+  /** SCRUM-192: Check /vault on backend for newer encrypted items written by extension. */
+  async refreshVaultFromBackend(): Promise<void> {
+    if (!this.hasLiveAuthToken()) return;
+    const userId = this.authService.currentUser()?.id;
+    if (!userId) return;
+    await this.vaultCrypto.syncFromBackend(userId);
+    if (!this.vaultCrypto.isUnlocked()) {
+      this.vaultItems.set([]);
+    }
+  }
 
   /** SCRUM-98: lock the vault and clear decrypted items from memory. */
   lockVault(): void {
@@ -6924,6 +6937,20 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   addVaultItem(item: Omit<PersonalVaultItem, 'id' | 'updatedAt'>): void {
+    const normTitle = (item.title || '').trim().toLowerCase();
+    const normUser = (item.username || '').trim().toLowerCase();
+    const normDom = this.extractDomain(item.url || '');
+    const existing = this.vaultItems().find(
+      (i) =>
+        (i.title || '').trim().toLowerCase() === normTitle &&
+        (i.username || '').trim().toLowerCase() === normUser &&
+        this.extractDomain(i.url || '') === normDom,
+    );
+    if (existing) {
+      this.updateVaultItem(existing.id, item);
+      return;
+    }
+
     const newItem: PersonalVaultItem = {
       ...item,
       id: 'vault-item-' + Date.now(),
@@ -6932,6 +6959,29 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     this.vaultItems.update((items) => [newItem, ...items]);
     this.persistVaultItems();
     this.logAuditEvent(`Added vault credential: ${newItem.title}`, 'Personal Vault', newItem.category, 'success', 'Low');
+  }
+
+  /**
+   * SCRUM-192: Pin a browser-extension / vault credential card onto the My Applications
+   * launcher grid, respecting plan entitlements.
+   */
+  pinVaultItemToApps(item: PersonalVaultItem): { ok: boolean; reason?: string } {
+    const entitlement = this.canIntegrateAnotherApp(this.activeAppsList().length);
+    if (!entitlement.allowed) {
+      this.openPaywallModal(entitlement.reason);
+      return { ok: false, reason: entitlement.reason };
+    }
+    const targetUrl = this.normalizeLoginUrl(item.url || item.title || '');
+    this.addApplication({
+      name: item.title || 'Application',
+      category: 'collaboration',
+      launchUrl: targetUrl || 'https://vanguard.security',
+      description: `Pinned from Zero-Knowledge Vault (${item.username})`,
+      icon: '🔑',
+      username: item.username,
+      password: item.password || '',
+    });
+    return { ok: true };
   }
 
   updateVaultItem(id: string, updates: Partial<PersonalVaultItem>): void {

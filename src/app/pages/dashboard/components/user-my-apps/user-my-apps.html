@@ -83,11 +83,19 @@
 
           <!-- Federated SSO Integrations moved to dedicated SSO Applications tab (SCRUM-184) -->
 
-          <!-- SCRUM-183: Inline Zero-Knowledge Vault Sync Unlock (shown after browser reload when key is cleared from memory) -->
-          <div class="vault-unlock-strip" *ngIf="isPersonalWorkspace() && !isVaultUnlocked()">
+          <!-- SCRUM-183 / SCRUM-192: Inline Zero-Knowledge Vault Sync Unlock -->
+          <div class="vault-unlock-strip" *ngIf="!isVaultUnlocked()">
             <div class="vault-unlock-copy">
-              <strong>🔒 Encrypted Vault Sync Locked</strong>
-              <span>Enter your Vanguard password to re-enable client-side zero-knowledge credential sync with the browser extension.</span>
+              <strong>
+                {{ remoteVaultUpdateAvailable() ? '🔄 New Extension Credentials Detected' : '🔒 Encrypted Vault Sync Locked' }}
+              </strong>
+              <span>
+                {{
+                  remoteVaultUpdateAvailable()
+                    ? 'New or updated credentials were saved in your browser extension. Enter your Vanguard password to decrypt the latest vault.'
+                    : 'Enter your Vanguard password to unlock and view zero-knowledge credentials synced with the browser extension.'
+                }}
+              </span>
             </div>
             <div class="vault-unlock-controls">
               <input
@@ -401,6 +409,153 @@
                     title="Withdraw and clear this access request"
                   >
                     ✕ Withdraw
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================================================================
+               SCRUM-192: Synced Browser Extension & Zero-Knowledge Vault Credentials
+               ================================================================ -->
+          <div class="synced-vault-section">
+            <div class="sub-section-header">
+              <div class="sub-section-title-wrap">
+                <h3 class="sub-section-title">
+                  <span>🔐 Synced Extension &amp; Zero-Knowledge Vault Credentials</span>
+                  <span class="vault-count-pill" *ngIf="isVaultUnlocked()">
+                    {{ vaultItems().length }} Saved
+                  </span>
+                  <span class="vault-status-pill locked" *ngIf="!isVaultUnlocked()">
+                    🔒 Locked
+                  </span>
+                </h3>
+                <p class="sub-section-desc">
+                  Credentials saved via the <strong>Vanguard Autofill</strong> browser extension or <strong>My Applications</strong> are encrypted end-to-end with your Vanguard master password.
+                </p>
+              </div>
+              <div class="vault-section-actions">
+                <input
+                  *ngIf="isVaultUnlocked()"
+                  type="text"
+                  [ngModel]="vaultSearchTerm()"
+                  (ngModelChange)="vaultSearchTerm.set($event)"
+                  placeholder="Search saved logins…"
+                  class="form-input vault-search-input"
+                />
+                <button
+                  type="button"
+                  class="cat-pill"
+                  (click)="refreshVaultSync()"
+                  [disabled]="isSyncingVault()"
+                  title="Check backend /vault for latest credentials saved in browser extension"
+                >
+                  {{ isSyncingVault() ? 'Syncing…' : '🔄 Sync Extension Vault' }}
+                </button>
+                <button
+                  type="button"
+                  class="cat-pill"
+                  *ngIf="isVaultUnlocked()"
+                  (click)="lockVaultSession()"
+                >
+                  🔒 Lock
+                </button>
+              </div>
+            </div>
+
+            <div class="vault-empty-state" *ngIf="!isVaultUnlocked()">
+              <p>
+                Your zero-knowledge vault is locked in memory. Enter your Vanguard password in the unlock banner above to decrypt and view credentials saved from the browser extension.
+              </p>
+            </div>
+
+            <div class="vault-empty-state" *ngIf="isVaultUnlocked() && filteredVaultItems().length === 0">
+              <p>
+                {{
+                  vaultItems().length === 0
+                    ? 'No credentials found in your encrypted vault yet. Save a site login in the Vanguard Autofill browser extension or add an application above.'
+                    : 'No saved vault credentials match your search.'
+                }}
+              </p>
+            </div>
+
+            <div class="apps-grid vault-cards-grid" *ngIf="isVaultUnlocked() && filteredVaultItems().length > 0">
+              <div class="app-card vault-item-card" *ngFor="let item of filteredVaultItems()">
+                <div class="app-card-top">
+                  <div class="app-icon-box">🔐</div>
+                  <div class="app-card-badges">
+                    <span class="proto-tag">{{ item.category || 'Login' }}</span>
+                    <span class="vault-matched-tag" *ngIf="item.totpSecret" title="2FA TOTP secret stored with this credential">
+                      🔑 2FA Linked
+                    </span>
+                    <button
+                      type="button"
+                      class="btn-card-del"
+                      (click)="deleteVaultCredential(item.id)"
+                      title="Delete credential from zero-knowledge vault"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <h3 class="app-name">{{ item.title }}</h3>
+                <p class="vault-host-label" *ngIf="extractVaultHost(item.url)">
+                  🌐 {{ extractVaultHost(item.url) }}
+                </p>
+
+                <div class="vault-cred-fields">
+                  <div class="vault-field-row">
+                    <span class="vault-field-label">Username</span>
+                    <span class="vault-field-val" [title]="item.username">{{ item.username || '—' }}</span>
+                    <button
+                      type="button"
+                      class="btn-mini-action"
+                      *ngIf="item.username"
+                      (click)="copyVaultField(item.username, item.id + ':user')"
+                    >
+                      {{ vaultCopiedKey() === item.id + ':user' ? '✓ Copied' : 'Copy' }}
+                    </button>
+                  </div>
+
+                  <div class="vault-field-row" *ngIf="item.password">
+                    <span class="vault-field-label">Password</span>
+                    <span class="vault-field-val mono">
+                      {{ isVaultPasswordRevealed(item.id) ? item.password : '••••••••••••' }}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn-mini-action"
+                      (click)="toggleRevealVaultPassword(item.id)"
+                    >
+                      {{ isVaultPasswordRevealed(item.id) ? 'Hide' : 'Show' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-mini-action"
+                      (click)="copyVaultField(item.password, item.id + ':pass')"
+                    >
+                      {{ vaultCopiedKey() === item.id + ':pass' ? '✓ Copied' : 'Copy' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="vault-card-footer">
+                  <button
+                    type="button"
+                    class="cat-pill"
+                    *ngIf="item.url"
+                    (click)="openVaultItemUrl(item.url)"
+                  >
+                    Open Site ↗
+                  </button>
+                  <button
+                    type="button"
+                    class="cat-pill"
+                    *ngIf="!isAlreadyPinnedToApps(item)"
+                    (click)="pinVaultItemToApps(item)"
+                  >
+                    + Pin to Apps
                   </button>
                 </div>
               </div>

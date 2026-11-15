@@ -974,6 +974,89 @@ describe('UserMyApps Component (SCRUM-52 Multi-Workspace & Personal App Launcher
       await component.unlockVaultSession();
       expect(component.vaultUnlockError()).toContain('Enter your Vanguard password');
     });
+
+    it('renders synced browser extension /vault credentials once unlocked, supports reveal/delete, and pins to apps without duplicating vault entries', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      const unlockPromise = dashboardService.unlockVault('MasterPass#123');
+      // syncFromBackend issues GET /vault; flush null envelope then initial persist PUT /vault if emitted
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ envelope: null, revision: 0 }));
+      await unlockPromise;
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 1 }));
+
+      dashboardService.addVaultItem({
+        title: 'github.com',
+        category: 'Login',
+        username: 'dev@vanguard.io',
+        password: 'S3cureExtPassword!',
+        url: 'https://github.com/login',
+        totpSecret: 'JBSWY3DPEHPK3PXP',
+      });
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 2 }));
+      fixture.detectChanges();
+
+      const text = fixture.nativeElement.textContent || '';
+      expect(text).toContain('Synced Extension');
+      expect(text).toContain('github.com');
+      expect(text).toContain('dev@vanguard.io');
+      expect(text).toContain('2FA Linked');
+
+      const item = dashboardService.vaultItems()[0];
+      expect(component.isVaultPasswordRevealed(item.id)).toBe(false);
+      component.toggleRevealVaultPassword(item.id);
+      expect(component.isVaultPasswordRevealed(item.id)).toBe(true);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('S3cureExtPassword!');
+
+      expect(component.isAlreadyPinnedToApps(item)).toBe(false);
+      component.pinVaultItemToApps(item);
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match(() => true).forEach((r) => r.flush({ success: true }));
+      fixture.detectChanges();
+      expect(component.isAlreadyPinnedToApps(item)).toBe(true);
+      expect(dashboardService.vaultItems().length).toBe(1);
+
+      component.deleteVaultCredential(item.id);
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true }));
+      expect(dashboardService.vaultItems().length).toBe(0);
+    }, 25_000);
+
+    it('detects remote extension writes during refreshVaultFromBackend and prompts re-unlock', async () => {
+      const httpMock = TestBed.inject(HttpTestingController);
+      authService.token.set('test-jwt-token');
+      const unlockPromise = dashboardService.unlockVault('MasterPass#123');
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ envelope: null, revision: 0 }));
+      await unlockPromise;
+      await new Promise((r) => setTimeout(r, 30));
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) => r.flush({ success: true, revision: 1 }));
+      expect(dashboardService.isVaultUnlocked()).toBe(true);
+
+      const refreshPromise = dashboardService.refreshVaultFromBackend();
+      await Promise.resolve();
+      httpMock.match((r) => r.url.includes('/vault')).forEach((r) =>
+        r.flush({
+          envelope: {
+            version: 'v1',
+            cipher: 'AES-GCM-256',
+            kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 600_000 },
+            salt: 'NEW_EXT_SALT',
+            iv: 'NEW_IV',
+            ciphertext: 'NEW_CIPHERTEXT_FROM_EXTENSION',
+            updatedAt: '2026-11-15T13:05:00Z',
+          },
+          revision: 2,
+        }),
+      );
+      await refreshPromise;
+      fixture.detectChanges();
+
+      expect(dashboardService.isVaultUnlocked()).toBe(false);
+      expect(dashboardService.remoteVaultUpdateAvailable()).toBe(true);
+      expect(fixture.nativeElement.textContent).toContain('New Extension Credentials Detected');
+    }, 25_000);
   });
 });
 

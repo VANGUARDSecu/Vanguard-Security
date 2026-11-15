@@ -588,5 +588,26 @@ describe('UserSecurity Component (SCRUM-32 Self-Service Security & MFA Vault)', 
       expect(redeemSpy).toHaveBeenCalledWith('VANG-1111-AAAA');
       expect(component.recoveryCodesRemaining()).toBe(1);
     });
+
+    it('SCRUM-190: calls POST /auth/revoke-sessions via AuthService when a live token is set', () => {
+      authService.token.set('live-jwt-revoke-test');
+      const revokeSpy = vi.spyOn(authService, 'revokeSelfSessions').mockReturnValue(
+        of({
+          success: true,
+          refreshRevoked: true,
+          oidcGrantsRevoked: 3,
+          maxResidualAccessSeconds: 3600,
+          message: 'All active Vanguard sessions revoked.',
+        })
+      );
+
+      component.dashboardService.securityRevokePrompt.set(true);
+      component.revokeAllActiveSessions();
+
+      expect(revokeSpy).toHaveBeenCalled();
+      expect(component.sessionRevoked()).toBe(true);
+      expect(component.securityRevokePrompt()).toBe(false);
+      expect(component.sessionRevocationResult()?.oidcGrantsRevoked).toBe(3);
+    });
   });
 });

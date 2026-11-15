@@ -404,5 +404,12 @@ describe('VerifyOtpComponent', () => {
       component.onSubmit();
       expect(recSpy).toHaveBeenCalledWith('employee@acme.corp', 'VANG-9999-AAAA');
     });
+
+    it('SCRUM-190: initializes safe returnUrl signal from sessionStorage or queryParams', () => {
+      sessionStorage.setItem('vanguard_return_url', '/dashboard?tab=security&action=revoke');
+      component.ngOnInit();
+      expect(component.returnUrl()).toBe('/dashboard?tab=security&action=revoke');
+      sessionStorage.removeItem('vanguard_return_url');
+    });
   });
 });

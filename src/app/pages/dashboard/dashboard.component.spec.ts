@@ -1613,9 +1613,31 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
       component.ngOnInit();
       expect(setTabSpy).toHaveBeenCalledWith('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
       expect(noticeSpy).toHaveBeenCalledWith(
         expect.stringContaining('revoke untrusted access')
       );
+    });
+
+    it('renders <app-user-security> on ?tab=security&action=revoke even when Company Admin is in admin viewMode (SCRUM-190)', () => {
+      authService.currentUser.set({
+        id: 'adm-190',
+        email: 'admin@acme.com',
+        role: 'admin',
+        accountType: 'company',
+      });
+      component.dashboardService.viewMode.set('admin');
+      (component as any).route = {
+        queryParams: of({ tab: 'security', action: 'revoke' }),
+      };
+
+      component.ngOnInit();
+      fixture.detectChanges();
+
+      expect(component.dashboardService.activeTab()).toBe('user-security');
+      expect(component.dashboardService.securityRevokePrompt()).toBe(true);
+      const secEl = fixture.nativeElement.querySelector('app-user-security');
+      expect(secEl).toBeTruthy();
     });
   });
 

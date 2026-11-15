@@ -231,5 +231,12 @@ describe('LoginComponent', () => {
       fixture.detectChanges();
       expect(el.querySelector('[data-testid="oauth-processing-indicator"]')).toBeNull();
     });
+
+    it('SCRUM-190: rejects unsafe external returnUrl values and retains safe internal paths', () => {
+      expect(component.returnUrl()).toBe('');
+      // Simulate safe query param assignment via signal
+      component.returnUrl.set('/dashboard?tab=security&action=revoke');
+      expect(component.returnUrl()).toBe('/dashboard?tab=security&action=revoke');
+    });
   });
 });

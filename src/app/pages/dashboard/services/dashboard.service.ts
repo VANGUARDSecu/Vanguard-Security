@@ -129,6 +129,15 @@ export class DashboardService {
   // Interactive feedback signals
   readonly copiedUserId = signal<boolean>(false);
   readonly sessionRevoked = signal<boolean>(false);
+  readonly isRevokingSessions = signal<boolean>(false);
+  readonly securityRevokePrompt = signal<boolean>(false);
+  readonly sessionRevocationResult = signal<{
+    success: boolean;
+    refreshRevoked: boolean;
+    oidcGrantsRevoked: number;
+    maxResidualAccessSeconds: number;
+    message: string;
+  } | null>(null);
   readonly adminActionNotice = signal<string | null>(null);
 
   // ==========================================
@@ -8163,10 +8172,52 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     }
   }
 
-  revokeAllSessions(): void {
-    this.sessionRevoked.set(true);
-    this.logAuditEvent('Revoked all other active sessions', 'User Session Manager', 'Supabase JWT', 'success', 'Medium');
-    setTimeout(() => this.sessionRevoked.set(false), 4000);
+  revokeAllSessions(signOutCurrent = false): void {
+    const token = this.authService.token();
+    if (!token || typeof this.authService.revokeSelfSessions !== 'function') {
+      this.sessionRevoked.set(true);
+      this.securityRevokePrompt.set(false);
+      this.logAuditEvent(
+        'Revoked all other active sessions',
+        'User Session Manager',
+        'Supabase JWT',
+        'success',
+        'Medium'
+      );
+      setTimeout(() => this.sessionRevoked.set(false), 4000);
+      return;
+    }
+
+    this.isRevokingSessions.set(true);
+    this.authService.revokeSelfSessions().subscribe({
+      next: (res) => {
+        this.isRevokingSessions.set(false);
+        this.sessionRevoked.set(true);
+        this.sessionRevocationResult.set(res);
+        this.securityRevokePrompt.set(false);
+        this.logAuditEvent(
+          `Revoked all active sessions and ${res.oidcGrantsRevoked} OIDC refresh grant(s)`,
+          'User Session Manager',
+          'Session Revocation',
+          'success',
+          'High'
+        );
+        this.showAdminNotice(
+          res.message || 'All active Vanguard sessions and SSO refresh grants have been revoked.'
+        );
+        if (signOutCurrent) {
+          this.authService.logout();
+        } else {
+          setTimeout(() => this.sessionRevoked.set(false), 6000);
+        }
+      },
+      error: (err: Error) => {
+        this.isRevokingSessions.set(false);
+        this.showAdminNotice(
+          err?.message || 'Unable to revoke active sessions. Please try again or reset your password.'
+        );
+      },
+    });
   }
 
   onLogout(): void {

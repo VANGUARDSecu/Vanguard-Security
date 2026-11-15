@@ -103,6 +103,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         }
         if (params['action'] === 'revoke') {
           this.dashboardService.setActiveTab('user-security');
+          this.dashboardService.securityRevokePrompt.set(true);
           this.dashboardService.showAdminNotice(
             'Review connected external apps, active devices, or change your password below to revoke untrusted access.'
           );

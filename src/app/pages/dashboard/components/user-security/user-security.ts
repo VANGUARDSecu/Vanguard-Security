@@ -64,6 +64,10 @@ export class UserSecurity implements OnInit {
   // SCRUM-57: Connected & Integrated Applications
   readonly connectedApps = this.dashboardService.connectedApps;
   readonly activeConnectedApps = this.dashboardService.activeConnectedApps;
+  readonly securityRevokePrompt = this.dashboardService.securityRevokePrompt;
+  readonly isRevokingSessions = this.dashboardService.isRevokingSessions;
+  readonly sessionRevoked = this.dashboardService.sessionRevoked;
+  readonly sessionRevocationResult = this.dashboardService.sessionRevocationResult;
   readonly connectedAppsError = this.dashboardService.connectedAppsError;
   readonly isLoadingConnectedApps = this.dashboardService.isLoadingConnectedApps;
 
@@ -281,6 +285,18 @@ export class UserSecurity implements OnInit {
   }
 
   // SCRUM-85 / SCRUM-143: Mobile Push MFA Toggle
+  revokeAllActiveSessions(): void {
+    this.dashboardService.revokeAllSessions(false);
+  }
+
+  dismissRevokePrompt(): void {
+    this.dashboardService.securityRevokePrompt.set(false);
+  }
+
+  signOutAfterRevoke(): void {
+    this.dashboardService.onLogout();
+  }
+
   togglePushMfa(): void {
     const email = this.user()?.email;
     if (!email) return;

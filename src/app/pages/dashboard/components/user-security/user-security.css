@@ -1094,3 +1094,40 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* SCRUM-190: Security Alert & Session Revocation Banners */
+.security-alert-banner,
+.security-revoked-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+}
+
+.security-alert-banner {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fecaca;
+}
+
+.security-revoked-banner {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #bbf7d0;
+}
+
+.alert-banner-body {
+  flex: 1 1 300px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.alert-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

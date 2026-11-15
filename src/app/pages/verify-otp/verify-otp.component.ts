@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChildren, Q
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterLink, ActivatedRoute } from '@angular/router';
-import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse } from '../../services/auth.service';
+import { AuthService, ApproveSsoPayload, UserProfile, VerifySsoMfaResponse, sanitizeReturnUrl, consumeSavedReturnUrl } from '../../services/auth.service';
 import { DashboardService } from '../dashboard/services/dashboard.service';
 
 export type VerificationMethod = 'email_otp' | 'totp' | 'push_approval' | 'recovery_code';
@@ -30,6 +30,7 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
   readonly method = signal<VerificationMethod>('email_otp');
   readonly hasTotp = signal<boolean>(false);
   readonly provider = signal<string>('');
+  readonly returnUrl = signal<string>('');
 
   // SSO Consent Confirmation state (SCRUM-184): require explicit user Approve / Deny after MFA challenge
   readonly ssoConsentPending = signal<boolean>(false);
@@ -215,6 +216,14 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
       this.hasTotp.set(hasTotpParam);
       this.method.set(methodParam);
       this.provider.set(params['provider'] || '');
+      const safeReturnUrl =
+        sanitizeReturnUrl(params['returnUrl']) ||
+        (typeof sessionStorage !== 'undefined'
+          ? sanitizeReturnUrl(sessionStorage.getItem('vanguard_return_url'))
+          : null);
+      if (safeReturnUrl) {
+        this.returnUrl.set(safeReturnUrl);
+      }
 
       if (params['numberCode']) {
         this.numberCode.set(params['numberCode']);
@@ -1110,7 +1119,17 @@ export class VerifyOtpComponent implements OnInit, OnDestroy {
 
     this.showNotification('success', 'Verification successful! Redirecting...', 3000);
     setTimeout(() => {
-      this.router.navigate(['/dashboard']);
+      const target = this.returnUrl() || consumeSavedReturnUrl();
+      if (typeof sessionStorage !== 'undefined') {
+        try {
+          sessionStorage.removeItem('vanguard_return_url');
+        } catch {}
+      }
+      if (target && target !== '/dashboard' && typeof this.router.navigateByUrl === 'function') {
+        this.router.navigateByUrl(target);
+      } else {
+        this.router.navigate(['/dashboard']);
+      }
     }, 800);
   }
 

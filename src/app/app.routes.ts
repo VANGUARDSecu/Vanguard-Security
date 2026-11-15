@@ -6,6 +6,7 @@ import { RegisterComponent } from './pages/register/register.component';
 import { VerifyOtpComponent } from './pages/verify-otp/verify-otp.component';
 import { ResetPasswordComponent } from './pages/reset-password/reset-password.component';
 import { PaymongoSandboxComponent } from './pages/paymongo-sandbox/paymongo-sandbox.component';
+import { RevokeSessionComponent } from './pages/revoke-session/revoke-session.component';
 import { authGuard } from './guards/auth.guard';
 
 import { Landing } from './pages/landing';
@@ -18,6 +19,7 @@ export const routes: Routes = [
   { path: 'forgot-password', component: ForgotPasswordComponent, title: 'Vanguard - Forgot Password' },
   { path: 'reset-password', component: ResetPasswordComponent, title: 'Vanguard - Reset Password' },
   { path: 'setup-account', component: ResetPasswordComponent, title: 'Vanguard - One-Time Account Setup' },
+  { path: 'revoke-session', component: RevokeSessionComponent, title: 'Vanguard - Emergency Session Revocation' },
   { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard], title: 'Vanguard - Security Dashboard' },
   { path: 'paymongo-sandbox', component: PaymongoSandboxComponent, canActivate: [authGuard], title: 'PayMongo Checkout (Sandbox)' },
   { path: '**', redirectTo: '' },

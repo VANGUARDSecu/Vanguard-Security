@@ -19,8 +19,8 @@
  * The server only ever stores the opaque envelope. It cannot decrypt it.
  */
 
-/** Current envelope format version. Bump when the on-disk shape changes. */
-export const VAULT_ENVELOPE_VERSION = '1.0.0';
+/** Current envelope format version. Matches backend SUPPORTED_VERSIONS ('v1'). */
+export const VAULT_ENVELOPE_VERSION = 'v1';
 
 /**
  * OWASP-recommended minimum for PBKDF2-HMAC-SHA256 (as of 2023). Kept as a

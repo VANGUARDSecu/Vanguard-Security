@@ -1,5 +1,5 @@
-import { Component, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnDestroy, PLATFORM_ID, inject, signal, computed } from '@angular/core';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
 import {
@@ -43,8 +43,13 @@ export interface RequestPreset {
   templateUrl: './user-my-apps.html',
   styleUrl: './user-my-apps.css'
 })
-export class UserMyApps {
+export class UserMyApps implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
+  private readonly platformId = inject(PLATFORM_ID);
+  private readonly isBrowser = isPlatformBrowser(this.platformId);
+  private lastVaultSyncAt = 0;
+  private onFocusSyncHandler: (() => void) | null = null;
+  private onVisibilitySyncHandler: (() => void) | null = null;
 
   readonly activeTab = this.dashboardService.activeTab;
   readonly selectedCategory = this.dashboardService.selectedCategory;
@@ -82,8 +87,26 @@ export class UserMyApps {
   newAppUsername = '';
   newAppPassword = '';
 
-  // SCRUM-183: Migrated Zero-Knowledge Unlock & High-Entropy Password Generator from removed Personal Vault UI
+  // SCRUM-183 / SCRUM-192: Migrated Zero-Knowledge Unlock, Password Generator & Synced Extension Vault Credentials
   readonly isVaultUnlocked = this.dashboardService.isVaultUnlocked;
+  readonly vaultItems = this.dashboardService.vaultItems;
+  readonly remoteVaultUpdateAvailable = this.dashboardService.remoteVaultUpdateAvailable;
+  readonly vaultSearchTerm = signal<string>('');
+  readonly revealedVaultIds = signal<Set<string>>(new Set());
+  readonly isSyncingVault = signal<boolean>(false);
+  readonly vaultCopiedKey = signal<string | null>(null);
+  readonly filteredVaultItems = computed(() => {
+    const query = this.vaultSearchTerm().trim().toLowerCase();
+    const list = this.vaultItems();
+    if (!query) return list;
+    return list.filter(
+      (item) =>
+        (item.title || '').toLowerCase().includes(query) ||
+        (item.username || '').toLowerCase().includes(query) ||
+        (item.url || '').toLowerCase().includes(query) ||
+        (item.category || '').toLowerCase().includes(query),
+    );
+  });
   vaultUnlockPassword = '';
   readonly vaultUnlockError = signal<string | null>(null);
   readonly isUnlockingVault = signal<boolean>(false);
@@ -128,6 +151,37 @@ export class UserMyApps {
     // SCRUM-180: Ensure My Applications catalog is broadcast and synchronized to the browser extension on page load
     this.dashboardService.broadcastAppsSync();
     this.regeneratePassword();
+  }
+
+  ngOnInit(): void {
+    if (!this.isBrowser || typeof window === 'undefined') return;
+    const throttledSync = () => {
+      const now = Date.now();
+      if (now - this.lastVaultSyncAt < 4000) return;
+      this.lastVaultSyncAt = now;
+      void this.dashboardService.refreshVaultFromBackend();
+    };
+    this.onFocusSyncHandler = throttledSync;
+    this.onVisibilitySyncHandler = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        throttledSync();
+      }
+    };
+    window.addEventListener('focus', this.onFocusSyncHandler);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilitySyncHandler);
+    }
+    void this.dashboardService.refreshVaultFromBackend();
+  }
+
+  ngOnDestroy(): void {
+    if (!this.isBrowser || typeof window === 'undefined') return;
+    if (this.onFocusSyncHandler) {
+      window.removeEventListener('focus', this.onFocusSyncHandler);
+    }
+    if (this.onVisibilitySyncHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilitySyncHandler);
+    }
   }
 
   // Request Application Form Signals
@@ -699,6 +753,79 @@ export class UserMyApps {
     } finally {
       this.isUnlockingVault.set(false);
     }
+  }
+
+  async refreshVaultSync(): Promise<void> {
+    if (this.isSyncingVault()) return;
+    this.isSyncingVault.set(true);
+    try {
+      await this.dashboardService.refreshVaultFromBackend();
+    } finally {
+      this.isSyncingVault.set(false);
+    }
+  }
+
+  lockVaultSession(): void {
+    this.dashboardService.lockVault();
+    this.revealedVaultIds.set(new Set());
+  }
+
+  toggleRevealVaultPassword(id: string): void {
+    this.revealedVaultIds.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  isVaultPasswordRevealed(id: string): boolean {
+    return this.revealedVaultIds().has(id);
+  }
+
+  copyVaultField(value: string | undefined, key: string): void {
+    if (!value || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(value).then(() => {
+      this.vaultCopiedKey.set(key);
+      setTimeout(() => {
+        if (this.vaultCopiedKey() === key) this.vaultCopiedKey.set(null);
+      }, 2000);
+    }).catch(() => {});
+  }
+
+  openVaultItemUrl(rawUrl: string | undefined): void {
+    if (!this.isBrowser || typeof window === 'undefined' || !rawUrl) return;
+    const normalized = this.dashboardService.normalizeLoginUrl(rawUrl.trim());
+    if (!/^https?:\/\//i.test(normalized)) return;
+    window.open(normalized, '_blank', 'noopener,noreferrer');
+  }
+
+  extractVaultHost(url: string | undefined): string {
+    return this.dashboardService.extractDomain(url || '');
+  }
+
+  isAlreadyPinnedToApps(item: PersonalVaultItem): boolean {
+    const itemDom = this.extractVaultHost(item.url);
+    const itemTitle = (item.title || '').trim().toLowerCase();
+    return this.activeAppsList().some((app) => {
+      const appDom = this.dashboardService.extractDomain(app.launchUrl);
+      if (itemDom && appDom && itemDom === appDom) return true;
+      return itemTitle.length > 0 && app.name.trim().toLowerCase() === itemTitle;
+    });
+  }
+
+  pinVaultItemToApps(item: PersonalVaultItem): void {
+    this.dashboardService.pinVaultItemToApps(item);
+  }
+
+  deleteVaultCredential(id: string): void {
+    this.dashboardService.deleteVaultItem(id);
+    this.revealedVaultIds.update((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
   getNewAppPasswordStrength(): { score: number; label: string; color: string } {

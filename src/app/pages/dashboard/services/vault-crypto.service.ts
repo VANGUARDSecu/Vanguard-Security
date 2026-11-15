@@ -36,8 +36,17 @@ export class VaultCryptoService {
   private sessionKey: CryptoKey | null = null;
   private sessionSalt: Uint8Array | null = null;
   private sessionIterations = 0;
+  private lastEnvelopeSignature = '';
 
   readonly isUnlocked = signal<boolean>(false);
+  /** True when backend /vault has a newer envelope written by another client (e.g. browser extension). */
+  readonly remoteUpdateAvailable = signal<boolean>(false);
+
+  private computeSignature(env: EncryptedVaultEnvelope | null | undefined): string {
+    if (!env) return '';
+    const ct = env.ciphertext || '';
+    return `${env.updatedAt || ''}|${env.salt || ''}|${env.iv || ''}|${ct.length}:${ct.slice(0, 24)}`;
+  }
 
   /** True if a plaintext legacy vault exists and should be migrated. */
   hasLegacyPlaintext(): boolean {
@@ -72,6 +81,8 @@ export class VaultCryptoService {
       this.sessionSalt = base64ToBytes(envelope.salt);
       this.sessionIterations = envelope.kdf?.iterations ?? 600_000;
       this.sessionKey = await deriveKey(masterPassword, this.sessionSalt, this.sessionIterations);
+      this.lastEnvelopeSignature = this.computeSignature(envelope);
+      this.remoteUpdateAvailable.set(false);
       this.isUnlocked.set(true);
       return items;
     }
@@ -117,6 +128,8 @@ export class VaultCryptoService {
     this.sessionKey = null;
     this.sessionSalt = null;
     this.sessionIterations = 0;
+    this.lastEnvelopeSignature = '';
+    this.remoteUpdateAvailable.set(false);
     this.isUnlocked.set(false);
   }
 
@@ -179,6 +192,8 @@ export class VaultCryptoService {
     if (this.isBrowser) {
       localStorage.setItem(ENVELOPE_KEY, JSON.stringify(envelope));
     }
+    this.lastEnvelopeSignature = this.computeSignature(envelope);
+    this.remoteUpdateAvailable.set(false);
 
     if (userId) {
       try {
@@ -201,6 +216,20 @@ export class VaultCryptoService {
         }),
       );
       if (res?.envelope) {
+        const incomingSig = this.computeSignature(res.envelope);
+        if (
+          this.isUnlocked() &&
+          this.lastEnvelopeSignature &&
+          incomingSig !== this.lastEnvelopeSignature
+        ) {
+          // Another client (e.g. browser extension) saved a re-salted envelope.
+          // Drop stale in-memory key so the user is cleanly prompted to refresh.
+          this.sessionKey = null;
+          this.sessionSalt = null;
+          this.sessionIterations = 0;
+          this.isUnlocked.set(false);
+          this.remoteUpdateAvailable.set(true);
+        }
         localStorage.setItem(ENVELOPE_KEY, JSON.stringify(res.envelope));
       }
     } catch {

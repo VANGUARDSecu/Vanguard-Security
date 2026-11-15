@@ -1363,3 +1363,127 @@
   width: 16px;
   height: 16px;
 }
+
+/* SCRUM-192: Synced Browser Extension & Zero-Knowledge Vault Credentials */
+.synced-vault-section {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(59, 130, 246, 0.22);
+}
+
+.vault-count-pill {
+  font-size: 11px;
+  font-weight: 700;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+}
+
+.vault-status-pill.locked {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+}
+
+.vault-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vault-search-input {
+  min-width: 190px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+}
+
+.vault-empty-state {
+  margin-top: 12px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: rgba(14, 19, 56, 0.65);
+  border: 1px dashed rgba(59, 130, 246, 0.3);
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.vault-cards-grid {
+  margin-top: 14px;
+}
+
+.vault-host-label {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: #7dd3fc;
+  word-break: break-all;
+}
+
+.vault-cred-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 14px 0;
+}
+
+.vault-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(6, 11, 38, 0.72);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.vault-field-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  min-width: 58px;
+}
+
+.vault-field-val {
+  flex: 1;
+  font-size: 12px;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-field-val.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.btn-mini-action {
+  background: rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-mini-action:hover {
+  background: rgba(59, 130, 246, 0.3);
+  color: #ffffff;
+}
+
+.vault-card-footer {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}

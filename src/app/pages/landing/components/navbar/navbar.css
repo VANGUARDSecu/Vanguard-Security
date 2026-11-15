@@ -125,3 +125,37 @@ nav.scrolled {
   background: #2563EB;
   box-shadow: 0 0 16px rgba(59,130,246,0.4);
 }
+
+.btn-guide-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.36);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-guide-sm:hover {
+  color: #ffffff;
+  background: rgba(16, 185, 129, 0.24);
+  border-color: rgba(52, 211, 153, 0.72);
+}
+
+.guide-q-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.22);
+  font-size: 11px;
+  font-weight: 700;
+}

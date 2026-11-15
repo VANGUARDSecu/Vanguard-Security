@@ -5,6 +5,7 @@ import { provideRouter } from '@angular/router';
 import { DashboardHeader } from './header';
 import { DashboardService } from '../../services/dashboard.service';
 import { AuthService } from '../../../../services/auth.service';
+import { NewUserGuideService } from '../../../../shared/new-user-guide/new-user-guide.service';
 import { vi } from 'vitest';
 
 describe('DashboardHeader Component (SCRUM-28 Header Org Switcher)', () => {
@@ -227,5 +228,16 @@ describe('DashboardHeader Component (SCRUM-28 Header Org Switcher)', () => {
 
     expect(component.isMobileSidebarOpen()).toBe(false);
     expect(toggleBtn.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens New User Guide modal from Header ? Guide button scoped to active role (SCRUM-194)', () => {
+    const guideService = TestBed.inject(NewUserGuideService);
+    const guideBtn: HTMLButtonElement | null = fixture.nativeElement.querySelector('[data-testid="dashboard-guide-btn"]');
+    expect(guideBtn).not.toBeNull();
+
+    guideBtn?.click();
+    expect(guideService.isOpen()).toBe(true);
+    expect(guideService.context()).toBe('dashboard');
+    expect(guideService.activeRole()).toBe('company-admin');
   });
 });

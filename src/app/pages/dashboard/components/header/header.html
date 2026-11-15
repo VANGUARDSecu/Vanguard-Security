@@ -151,6 +151,18 @@
 
     <!-- Right: Scoped Access Badge & Profile -->
     <div class="header-right">
+      <button
+        type="button"
+        class="guide-btn-header"
+        data-testid="dashboard-guide-btn"
+        aria-label="Open Quick Start Guide"
+        title="Open Quick Start Guide"
+        (click)="openQuickGuide()"
+      >
+        <span class="guide-btn-mark" aria-hidden="true">?</span>
+        <span class="guide-btn-label">Guide</span>
+      </button>
+
       <!-- SCRUM-150: Scoped Access Badge (Strict role and account-scoped UI) -->
       <!-- 1. Company Account: Admin Console Only -->
       <div class="account-scope-badge badge-company" *ngIf="!isIndividual() && isAdmin()" title="Company Account: Admin Console Access Only">

@@ -18,6 +18,16 @@
   </ul>
 
   <div class="nav-right">
+    <button
+      type="button"
+      class="btn-guide-sm"
+      data-testid="landing-guide-btn"
+      aria-label="Open Quick Guide"
+      (click)="openQuickGuide()"
+    >
+      <span class="guide-q-mark" aria-hidden="true">?</span>
+      <span>Guide</span>
+    </button>
     <button class="btn-ghost-sm" (click)="navigateTo('/login')">Sign in</button>
     <button class="btn-blue-sm" (click)="navigateTo('/register')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"

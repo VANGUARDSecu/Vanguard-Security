@@ -1,9 +1,10 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { AuthService } from './services/auth.service';
+import { NewUserGuideModalComponent } from './shared/new-user-guide/new-user-guide-modal.component';
 
 @Component({
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, NewUserGuideModalComponent],
   selector: 'app-root',
   styleUrl: './app.css',
   templateUrl: './app.html',

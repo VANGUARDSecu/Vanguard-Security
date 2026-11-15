@@ -1,0 +1,115 @@
+@if (isOpen()) {
+  <div
+    class="guide-backdrop"
+    role="presentation"
+    (click)="onBackdropClick($event)"
+  >
+    <div
+      class="guide-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-user-guide-title"
+    >
+      <header class="guide-header">
+        <div class="guide-title-group">
+          <span class="guide-eyebrow">Quick Start Guide</span>
+          <h2 id="new-user-guide-title" class="guide-title">
+            {{ activeProfile().headline }}
+          </h2>
+          <p class="guide-summary">{{ activeProfile().summary }}</p>
+        </div>
+        <button
+          type="button"
+          class="guide-close-btn"
+          (click)="close()"
+          aria-label="Close Quick Start Guide"
+        >
+          ✕
+        </button>
+      </header>
+
+      <div class="guide-role-tabs" role="tablist" aria-label="Account role guides">
+        @for (tab of roleTabs; track tab.role) {
+          <button
+            type="button"
+            role="tab"
+            class="guide-role-tab"
+            [class.active]="activeRole() === tab.role"
+            [attr.aria-selected]="activeRole() === tab.role"
+            [attr.data-role-tab]="tab.role"
+            (click)="guideService.selectRole(tab.role)"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </div>
+
+      <div class="guide-steps-list">
+        @for (step of activeSteps(); track step.stepNumber; let idx = $index) {
+          <article class="guide-step-card">
+            <div class="guide-step-badge" aria-hidden="true">
+              <span class="step-icon">{{ step.icon }}</span>
+              <span class="step-num">Step {{ step.stepNumber }}</span>
+            </div>
+
+            <div class="guide-step-content">
+              <h3 class="guide-step-title">{{ step.title }}</h3>
+              <p class="guide-step-desc">{{ step.description }}</p>
+            </div>
+
+            <button
+              type="button"
+              class="guide-step-cta"
+              [attr.data-testid]="'guide-step-action-' + idx"
+              (click)="onStepAction(step)"
+            >
+              {{ context() === 'dashboard' ? step.actionLabel : step.landingActionLabel }}
+              <span aria-hidden="true">→</span>
+            </button>
+          </article>
+        }
+      </div>
+
+      <footer class="guide-footer">
+        @if (context() === 'dashboard') {
+          <label class="guide-checkbox-label">
+            <input
+              type="checkbox"
+              class="guide-checkbox"
+              data-testid="guide-dont-show-checkbox"
+              [checked]="dontShowAgain()"
+              (change)="onDontShowChange($event)"
+            />
+            <span>Don't show automatically next time</span>
+          </label>
+          <div class="guide-footer-actions">
+            <button
+              type="button"
+              class="guide-btn-primary"
+              data-testid="guide-done-btn"
+              (click)="close()"
+            >
+              Got it
+            </button>
+          </div>
+        } @else {
+          <span class="guide-landing-note">
+            You can reopen this guide anytime using the ? Guide button.
+          </span>
+          <div class="guide-footer-actions">
+            <button type="button" class="guide-btn-secondary" (click)="close()">
+              Close
+            </button>
+            <button
+              type="button"
+              class="guide-btn-primary"
+              (click)="onPrimaryLandingAction()"
+            >
+              {{ activeProfile().landingActionLabel }}
+            </button>
+          </div>
+        }
+      </footer>
+    </div>
+  </div>
+}

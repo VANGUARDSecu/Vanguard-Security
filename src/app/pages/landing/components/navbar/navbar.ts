@@ -1,6 +1,7 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, OnInit, HostListener, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
+import { NewUserGuideService } from '../../../../shared/new-user-guide/new-user-guide.service';
 
 @Component({
   selector: 'app-navbar',
@@ -10,6 +11,7 @@ import { CommonModule } from '@angular/common';
   styleUrls: ['./navbar.css']
 })
 export class Navbar implements OnInit {
+  private readonly guideService = inject(NewUserGuideService);
   isScrolled = false;
   activeSection = 'home';
 
@@ -48,5 +50,9 @@ export class Navbar implements OnInit {
 
   navigateTo(path: string): void {
     this.router.navigate([path]);
+  }
+
+  openQuickGuide(): void {
+    this.guideService.openFromLanding('company-admin');
   }
 }

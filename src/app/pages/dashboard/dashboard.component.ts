@@ -5,6 +5,10 @@ import { ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { DashboardService } from './services/dashboard.service';
 import { DashboardHeader } from './components/header/header';
+import {
+  NewUserGuideService,
+  resolveGuideRole,
+} from '../../shared/new-user-guide/new-user-guide.service';
 import { DashboardSidebar } from './components/sidebar/sidebar';
 import { AdminOverview } from './components/admin-overview/admin-overview';
 import { AdminDirectory } from './components/admin-directory/admin-directory';
@@ -86,6 +90,7 @@ export type {
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly dashboardService = inject(DashboardService);
+  private readonly guideService = inject(NewUserGuideService);
   private readonly route = inject(ActivatedRoute, { optional: true });
   private queryParamsSub: Subscription | null = null;
 
@@ -93,6 +98,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.dashboardService.initDashboardForCurrentUser();
     // SCRUM-94: source company apps from the backend for company accounts.
     this.dashboardService.loadCompanyApps();
+    this.guideService.registerDashboardNavigator((tab) =>
+      this.dashboardService.setActiveTab(tab)
+    );
+    const currentUser = this.dashboardService.user();
+    if (currentUser) {
+      const userKey = currentUser.id || currentUser.email;
+      const guideRole = resolveGuideRole({
+        isIndividual: this.dashboardService.isIndividual(),
+        isAdmin: this.dashboardService.isAdmin(),
+      });
+      this.guideService.autoOpenIfFirstDashboardVisit(userKey, guideRole);
+    }
 
     if (this.route?.queryParams) {
       this.queryParamsSub = this.route.queryParams.subscribe((params) => {
@@ -112,6 +129,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.queryParamsSub?.unsubscribe();
+    this.guideService.registerDashboardNavigator(null);
     this.dashboardService.stopLiveSsoChallengePolling();
   }
 

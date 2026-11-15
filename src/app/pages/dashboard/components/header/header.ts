@@ -3,6 +3,10 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../services/dashboard.service';
 import { TenantOrganization } from '../../models/dashboard.models';
+import {
+  NewUserGuideService,
+  resolveGuideRole,
+} from '../../../../shared/new-user-guide/new-user-guide.service';
 
 @Component({
   selector: 'app-dashboard-header',
@@ -13,6 +17,7 @@ import { TenantOrganization } from '../../models/dashboard.models';
 })
 export class DashboardHeader {
   readonly dashboardService = inject(DashboardService);
+  private readonly guideService = inject(NewUserGuideService);
 
   readonly user = this.dashboardService.user;
   readonly userRole = this.dashboardService.userRole;
@@ -102,6 +107,19 @@ export class DashboardHeader {
   }
 
   onLogout() { this.dashboardService.onLogout(); }
+
+  /**
+   * Reopens the role-scoped Quick Start Guide modal on demand from the dashboard header.
+   */
+  openQuickGuide(): void {
+    const currentUser = this.user();
+    const userKey = currentUser?.id || currentUser?.email || null;
+    const role = resolveGuideRole({
+      isIndividual: this.isIndividual(),
+      isAdmin: this.isAdmin(),
+    });
+    this.guideService.openFromDashboard(userKey, role);
+  }
 
 }
 

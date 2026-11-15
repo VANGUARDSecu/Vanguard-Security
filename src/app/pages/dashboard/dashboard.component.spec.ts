@@ -7,6 +7,7 @@ import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
 import { AuthService } from '../../services/auth.service';
+import { NewUserGuideService } from '../../shared/new-user-guide/new-user-guide.service';
 
 @Component({ standalone: true, template: '' })
 class DummyLoginComponent {}
@@ -1601,6 +1602,58 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       expect(noticeSpy).toHaveBeenCalledWith(
         expect.stringContaining('revoke untrusted access')
       );
+    });
+  });
+
+  describe('SCRUM-194: First-Login New User Guide Modal Integration', () => {
+    it('auto-opens role-tailored guide once on first dashboard login and navigates tabs from step CTA', () => {
+      const guideService = TestBed.inject(NewUserGuideService);
+      guideService.close(false);
+
+      authService.currentUser.set({
+        id: 'usr-guide-admin-1',
+        email: 'owner@acme.corp',
+        firstName: 'Marcus',
+        lastName: 'Vance',
+        role: 'admin',
+        accountType: 'company',
+        companyName: 'Acme Corp',
+      });
+
+      component.ngOnInit();
+      expect(guideService.isOpen()).toBe(true);
+      expect(guideService.context()).toBe('dashboard');
+      expect(guideService.activeRole()).toBe('company-admin');
+
+      const tabSpy = vi.spyOn(component.dashboardService, 'setActiveTab');
+      const directoryStep = guideService.activeSteps()[1];
+      guideService.executeStepAction(directoryStep);
+
+      expect(tabSpy).toHaveBeenCalledWith('directory');
+      expect(guideService.isOpen()).toBe(false);
+      expect(guideService.isDismissedForUser('usr-guide-admin-1')).toBe(true);
+
+      // Re-initializing the same user after dismissal does NOT reopen automatically
+      component.ngOnInit();
+      expect(guideService.isOpen()).toBe(false);
+    });
+
+    it('resolves personal vault guide for individual accounts', () => {
+      const guideService = TestBed.inject(NewUserGuideService);
+      guideService.close(false);
+
+      authService.currentUser.set({
+        id: 'usr-guide-indiv-1',
+        email: 'solo@personal.dev',
+        firstName: 'Solo',
+        lastName: 'User',
+        role: 'user',
+        accountType: 'individual',
+      });
+
+      component.ngOnInit();
+      expect(guideService.isOpen()).toBe(true);
+      expect(guideService.activeRole()).toBe('individual');
     });
   });
 });

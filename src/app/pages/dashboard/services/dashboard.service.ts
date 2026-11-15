@@ -3561,23 +3561,44 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
   }
 
   reactivateUser(user: DirectoryUser): void {
+    const previousStatus = user.accountStatus || 'Suspended';
     this.directoryUsers.update((users) =>
       users.map((u) => (u.id === user.id ? { ...u, accountStatus: 'Active' } : u))
     );
     this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
     this.logAuditEvent(`Reactivate account: ${user.name}`, 'Directory Vault', 'RBAC Guard', 'success', 'Low');
 
-    if (this.isBrowser && this.authService.token() && user.id && !user.id.startsWith('dir-')) {
+    if (this.isBrowser && this.authService.token() && ((user.id && !user.id.startsWith('dir-')) || user.email)) {
+      const params = new URLSearchParams();
+      if (user.id && !user.id.startsWith('dir-')) {
+        params.set('targetUserId', user.id);
+      }
+      if (user.email) {
+        params.set('targetEmail', user.email);
+      }
       this.http
-        .post<{ success?: boolean }>(`${this.apiBase}/apps/reactivate-member?targetUserId=${encodeURIComponent(user.id)}`, {})
+        .post<{ success?: boolean }>(`${this.apiBase}/apps/reactivate-member?${params.toString()}`, {})
         .subscribe({
-          next: () => {
+          next: (res) => {
+            if (res && res.success === false) {
+              this.directoryUsers.update((users) =>
+                users.map((u) => (u.id === user.id ? { ...u, accountStatus: previousStatus } : u))
+              );
+              this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
+              this.showAdminNotice(`Failed to reactivate ${user.name} in backend directory.`);
+              return;
+            }
             this.showAdminNotice(`Account for ${user.name} has been reactivated.`);
+            this.loadDirectoryUsers();
             this.loadServerAuditLogs();
           },
           error: (err) => {
+            this.directoryUsers.update((users) =>
+              users.map((u) => (u.id === user.id ? { ...u, accountStatus: previousStatus } : u))
+            );
+            this.saveStored(this.getDirectoryUsersStorageKey(), this.directoryUsers());
             this.showAdminNotice(
-              `Account reactivated locally; backend sync warning: ${err?.error?.message || 'request failed'}.`,
+              `Reactivation failed: ${err?.error?.message || 'request failed'}.`,
             );
           },
         });
@@ -4587,6 +4608,8 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
           if (signOutAdmin) {
             this.showGlobalKillswitchModal.set(false);
             this.revokeAllSessions(true);
+          } else {
+            this.loadDirectoryUsers();
           }
         },
         error: (err) => {

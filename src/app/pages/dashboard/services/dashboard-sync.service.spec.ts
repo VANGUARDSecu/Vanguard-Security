@@ -306,4 +306,32 @@ describe('DashboardService Cross-Device Sync (SCRUM-178)', () => {
     expect(logoutSpy).toHaveBeenCalledTimes(1);
     logoutSpy.mockRestore();
   });
+
+  it('SCRUM-204: reactivateUser sends targetUserId and targetEmail and rolls back status on HTTP error', () => {
+    const target = {
+      id: 'usr-suspended-204',
+      name: 'Suspended User',
+      email: 'suspended@acme.com',
+      department: 'Engineering',
+      role: 'Directory Member' as const,
+      mfaStatus: 'Email OTP Only' as const,
+      accountStatus: 'Suspended' as const,
+      lastLogin: 'Active',
+      initials: 'SU',
+    };
+    dashboardService.directoryUsers.set([target]);
+
+    dashboardService.reactivateUser(target);
+    const req = httpMock.expectOne(
+      (r) =>
+        r.url.startsWith(`${apiBase}/apps/reactivate-member`) &&
+        r.url.includes('targetUserId=usr-suspended-204') &&
+        r.url.includes('targetEmail=suspended%40acme.com'),
+    );
+    expect(req.request.method).toBe('POST');
+    req.flush({ message: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+
+    const rolledBack = dashboardService.directoryUsers().find((u) => u.id === target.id);
+    expect(rolledBack?.accountStatus).toBe('Suspended');
+  });
 });

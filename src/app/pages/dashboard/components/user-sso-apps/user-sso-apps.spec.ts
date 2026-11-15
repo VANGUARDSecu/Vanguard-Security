@@ -111,4 +111,35 @@ describe('UserSsoApps (SCRUM-184 Dedicated SSO Applications Separation)', () => 
     component.disconnectApp('vanguard-dummy-portal');
     expect(component.activeConnectedApps().length).toBe(0);
   });
+
+  it('SCRUM-181: strips /auth/callback from SSO launchUrl and initiates OIDC login via ?sso=vanguard', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null as any);
+    const appWithCallback: any = {
+      id: 'app-dummy-cb',
+      name: 'Acme Dummy Web',
+      category: 'cloud',
+      description: 'Dummy Web SSO',
+      icon: '🌐',
+      protocol: 'OpenID Connect 1.0 (PKCE)',
+      launchUrl: 'http://localhost:4201/auth/callback',
+      assigned: true,
+      status: 'Approved',
+    };
+
+    dashboardService.apps.set([appWithCallback]);
+    fixture.detectChanges();
+
+    const listed = component.ssoApplicationsList().find((a) => a.id === 'app-dummy-cb');
+    expect(listed?.launchUrl).toBe('http://localhost:4201');
+
+    component.launchSsoApp(appWithCallback);
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    const openedUrl = openSpy.mock.calls[0][0] as string;
+    expect(openedUrl).not.toContain('/auth/callback');
+    expect(openedUrl).toContain('http://localhost:4201/');
+    expect(openedUrl).toContain('sso=vanguard');
+    expect(openedUrl).toContain('login_hint=employee%40acme.corp');
+
+    openSpy.mockRestore();
+  });
 });

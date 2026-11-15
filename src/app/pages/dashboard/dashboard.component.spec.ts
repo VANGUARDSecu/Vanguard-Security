@@ -6,6 +6,7 @@ import { Component } from '@angular/core';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
+import { DashboardService } from './services/dashboard.service';
 import { AuthService } from '../../services/auth.service';
 
 @Component({ standalone: true, template: '' })
@@ -588,6 +589,20 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
   });
 
   it('should trigger audit log CSV export with enhanced columns without error (SCRUM-26)', () => {
+    authService.currentUser.set({
+      id: 'adm-1',
+      email: 'admin@vanguard.io',
+      firstName: 'Super',
+      lastName: 'Admin',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Vanguard',
+    });
+    const dashboardService = TestBed.inject(DashboardService);
+    dashboardService.startPaymongoCheckout('business_pro');
+    const sid = new URLSearchParams((dashboardService.lastPaymongoCheckoutUrl() || '').split('?')[1]).get('session')!;
+    dashboardService.finalizePaymongoReturn(sid, 'success');
+
     expect(() => component.exportAuditLogs()).not.toThrow();
     expect(component.adminActionNotice()).toContain('exported successfully');
   });
@@ -1601,6 +1616,45 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
       expect(noticeSpy).toHaveBeenCalledWith(
         expect.stringContaining('revoke untrusted access')
       );
+    });
+  });
+
+  describe('SCRUM-185: Bidirectional Web-Mobile Billing Sync', () => {
+    it('reloads subscription when /sync/state reports a new billingUpdatedAt timestamp (e.g. paid on Mobile)', async () => {
+      const ds = component.dashboardService as any;
+      const httpMock = TestBed.inject(HttpTestingController);
+      const loadBillingSpy = vi.spyOn(ds, 'loadBillingSubscription').mockImplementation(() => {});
+
+      authService.token.set('live-jwt-sync-test');
+      ds.user.set({
+        id: 'usr-sync-1',
+        name: 'Sync User',
+        email: 'sync@vanguard.io',
+        role: 'user',
+        accountType: 'individual',
+      });
+      ds.lastSyncState = {
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:00:00.000Z',
+      };
+
+      const checkPromise = ds.checkSyncState(false);
+      const req = httpMock.match((r) => r.url.endsWith('/sync/state')).at(-1)!;
+      req.flush({
+        totpUpdatedAt: '2026-11-15T06:00:00.000Z',
+        personalAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        enterpriseAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        connectedAppsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        accessRequestsUpdatedAt: '2026-11-15T06:00:00.000Z',
+        billingUpdatedAt: '2026-11-15T06:05:00.000Z',
+      });
+
+      await checkPromise;
+      expect(loadBillingSpy).toHaveBeenCalled();
     });
   });
 });

@@ -4,9 +4,17 @@
               <h2 class="section-title">My Sign-in &amp; Account Movement Audit</h2>
               <p class="section-subtitle">Chronological audit trail of your account movements: sign-ins, sign-outs, verified application launches, and security actions.</p>
             </div>
-            <div class="header-actions">
+            <div class="header-actions" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <span
+                style="padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.12); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.25);"
+              >
+                🕒 {{ auditRetentionDays() }}-Day Retention
+              </span>
               <button type="button" class="cat-pill" (click)="refreshMyActivity()">
                 🔄 Refresh Movements
+              </button>
+              <button type="button" class="cat-pill" (click)="exportPersonalActivityCsv()">
+                {{ canExportAuditCsv() ? '⬇️ Export CSV' : '🔒 Export CSV (Pro)' }}
               </button>
             </div>
           </div>

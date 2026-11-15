@@ -139,4 +139,31 @@ describe('AdminAuditLogs Component (SCRUM-26)', () => {
   it('should delegate exportAuditLogs without error', () => {
     expect(() => component.exportAuditLogs()).not.toThrow();
   });
+
+  it('SCRUM-184: locks CSV audit export on Free tier and unlocks after Company Admin upgrades via PayMongo', () => {
+    dashboardService.user.set({
+      id: 'usr-company-admin-1',
+      name: 'Ada Lovelace',
+      email: 'ada@acme.com',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Acme Security',
+    });
+    dashboardService.cancelSubscriptionPlan();
+    fixture.detectChanges();
+
+    expect(component.canExportAuditCsv()).toBe(false);
+    component.exportAuditLogs();
+    expect(dashboardService.showPaywallModal()).toBe(true);
+    expect(dashboardService.paywallFeatureMessage()).toContain('CSV audit log export');
+
+    // Simulate Company Admin PayMongo upgrade
+    dashboardService.startPaymongoCheckout('business_pro');
+    const sid = new URLSearchParams((dashboardService.lastPaymongoCheckoutUrl() || '').split('?')[1]).get('session')!;
+    dashboardService.finalizePaymongoReturn(sid, 'success');
+    fixture.detectChanges();
+
+    expect(component.canExportAuditCsv()).toBe(true);
+    expect(component.auditRetentionDays()).toBe(30);
+  });
 });

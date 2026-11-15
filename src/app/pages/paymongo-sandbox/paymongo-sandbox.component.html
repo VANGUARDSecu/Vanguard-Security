@@ -1,0 +1,153 @@
+<div class="pm-shell">
+  <header class="pm-topbar">
+    <div class="pm-brand">
+      <div class="pm-logo-mark">P</div>
+      <div>
+        <span class="pm-brand-name">PayMongo Checkout</span>
+        <span class="pm-test-pill">SANDBOX TEST MODE</span>
+      </div>
+    </div>
+    <div class="pm-merchant-meta">
+      <span>Merchant: <strong>Vanguard Security Platform</strong></span>
+      <span class="pm-session-code">Session: <code>{{ sessionId() }}</code></span>
+    </div>
+  </header>
+
+  <main class="pm-main-grid">
+    <!-- Left Summary Panel -->
+    <section class="pm-summary-card">
+      <div class="pm-scope-tag">
+        {{ accountType() === 'company' ? '🏢 COMPANY / ORGANIZATION SUBSCRIPTION' : '👤 INDIVIDUAL ACCOUNT SUBSCRIPTION' }}
+      </div>
+      <h1 class="pm-amount">
+        ₱{{ amountPhp() | number:'1.2-2' }}
+        <span class="pm-currency">PHP</span>
+      </h1>
+      <p class="pm-usd-sub">Equivalent to ${{ amountUsd() }}/month • Recurring Sandbox Test Charge</p>
+
+      <div class="pm-line-item">
+        <div>
+          <div class="pm-item-title">Vanguard {{ planName() }}</div>
+          <div class="pm-item-desc">Monthly Subscription • Unlocks Unlimited Apps, Unlimited 2FA &amp; CSV Audit Export</div>
+        </div>
+        <div class="pm-item-price">₱{{ amountPhp() | number }}</div>
+      </div>
+
+      <div class="pm-customer-box">
+        <div><span>Billed To:</span> <strong>{{ customerEmail() }}</strong></div>
+        <div><span>Scope:</span> <strong>{{ accountType() === 'company' ? 'Company Tenant Admin' : 'Individual Vault' }}</strong></div>
+      </div>
+
+      <div class="pm-sandbox-note">
+        🔒 <strong>Sandbox Notice:</strong> No real money is charged. Authorize test payment below to return to Vanguard and unlock paid features.
+      </div>
+    </section>
+
+    <!-- Right Payment Form Panel -->
+    <section class="pm-payment-card">
+      <h2 class="pm-form-heading">Select PayMongo Sandbox Payment Method</h2>
+
+      <div class="pm-method-tabs">
+        <button
+          type="button"
+          class="pm-tab-btn"
+          [class.active]="selectedMethod() === 'card'"
+          (click)="selectedMethod.set('card')"
+        >
+          💳 Card
+        </button>
+        <button
+          type="button"
+          class="pm-tab-btn"
+          [class.active]="selectedMethod() === 'gcash'"
+          (click)="selectedMethod.set('gcash')"
+        >
+          📱 GCash
+        </button>
+        <button
+          type="button"
+          class="pm-tab-btn"
+          [class.active]="selectedMethod() === 'maya'"
+          (click)="selectedMethod.set('maya')"
+        >
+          💚 Maya
+        </button>
+        <button
+          type="button"
+          class="pm-tab-btn"
+          [class.active]="selectedMethod() === 'grab_pay'"
+          (click)="selectedMethod.set('grab_pay')"
+        >
+          🚕 GrabPay
+        </button>
+      </div>
+
+      <div class="pm-error-alert" *ngIf="errorMessage()">
+        ❌ {{ errorMessage() }}
+      </div>
+
+      <!-- Test Card Inputs -->
+      <div *ngIf="selectedMethod() === 'card'" class="pm-fields-wrap">
+        <div class="pm-field">
+          <label>PayMongo Test Card Number</label>
+          <input type="text" [(ngModel)]="cardNumber" />
+        </div>
+        <div class="pm-fields-row">
+          <div class="pm-field">
+            <label>Expiry Date</label>
+            <input type="text" [(ngModel)]="cardExpiry" />
+          </div>
+          <div class="pm-field">
+            <label>CVC</label>
+            <input type="text" [(ngModel)]="cardCvc" />
+          </div>
+        </div>
+        <div class="pm-field">
+          <label>Cardholder Name</label>
+          <input type="text" [(ngModel)]="cardHolderName" />
+        </div>
+      </div>
+
+      <!-- E-Wallet Sandbox Inputs -->
+      <div *ngIf="selectedMethod() !== 'card'" class="pm-fields-wrap">
+        <div class="pm-ewallet-banner">
+          Simulated <strong>{{ selectedMethod() | uppercase }}</strong> Sandbox Authorization — Test phone number pre-filled below.
+        </div>
+        <div class="pm-field">
+          <label>Registered Mobile Number</label>
+          <input type="text" [(ngModel)]="mobileNumber" />
+        </div>
+      </div>
+
+      <div class="pm-actions">
+        <button
+          type="button"
+          class="pm-btn-pay"
+          [disabled]="isProcessing()"
+          (click)="authorizeTestPayment()"
+        >
+          {{ isProcessing() ? 'Authorizing PayMongo Sandbox...' : 'Authorize Test Payment (₱' + amountPhp() + ')' }}
+        </button>
+
+        <div class="pm-secondary-actions">
+          <button
+            type="button"
+            class="pm-btn-fail"
+            [disabled]="isProcessing()"
+            (click)="simulateFailedPayment()"
+          >
+            Simulate Failed Payment
+          </button>
+          <button
+            type="button"
+            class="pm-btn-cancel"
+            [disabled]="isProcessing()"
+            (click)="cancelCheckout()"
+          >
+            Cancel &amp; Return to Vanguard
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>

@@ -1,0 +1,271 @@
+.pm-shell {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #06281e 0%, #0b1324 55%, #0f172a 100%);
+  color: #f8fafc;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  padding: 24px 16px 48px;
+}
+
+.pm-topbar {
+  max-width: 960px;
+  margin: 0 auto 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pm-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pm-logo-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #25b864, #0d9488);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 20px;
+  color: #ffffff;
+}
+
+.pm-brand-name {
+  font-size: 18px;
+  font-weight: 800;
+  margin-right: 10px;
+}
+
+.pm-test-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+}
+
+.pm-merchant-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.pm-main-grid {
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.pm-summary-card,
+.pm-payment-card {
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.pm-scope-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.36);
+  color: #6ee7b7;
+  margin-bottom: 12px;
+}
+
+.pm-amount {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.pm-currency {
+  font-size: 16px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.pm-usd-sub {
+  margin: 4px 0 20px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.pm-line-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.65);
+  margin-bottom: 16px;
+}
+
+.pm-item-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pm-item-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.pm-item-price {
+  font-weight: 700;
+  color: #34d399;
+}
+
+.pm-customer-box {
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.8;
+  margin-bottom: 16px;
+}
+
+.pm-sandbox-note {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 12px;
+  color: #bae6fd;
+}
+
+.pm-form-heading {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.pm-method-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pm-tab-btn {
+  padding: 9px 6px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pm-tab-btn.active {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+}
+
+.pm-error-alert {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fecaca;
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+
+.pm-fields-wrap {
+  margin-bottom: 18px;
+}
+
+.pm-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pm-field {
+  margin-bottom: 12px;
+}
+
+.pm-field label {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.pm-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 23, 0.7);
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.pm-ewallet-banner {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #a7f3d0;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.pm-btn-pay {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #25b864, #059669);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.pm-secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pm-btn-fail,
+.pm-btn-cancel {
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pm-btn-fail {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+.pm-btn-cancel {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
+}

@@ -67,6 +67,43 @@
                 <span style="font-size: 18px;">📋</span>
                 <span>Audit Logs & Employee Movements</span>
               </button>
+
+              <button
+                *ngIf="isCompanyAdmin()"
+                type="button"
+                (click)="openCompanyBillingModal()"
+                style="background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); border: none; padding: 12px 20px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #fff;"
+              >
+                <span style="font-size: 18px;">💳</span>
+                <span>{{ isFreeTier() ? 'Upgrade Company Plan (PayMongo)' : 'Company Billing (' + currentPlanDisplayName() + ')' }}</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- SCRUM-184: Company Subscription & PayMongo Billing Status Card -->
+          <section
+            *ngIf="isCompanyAdmin()"
+            class="dash-section"
+            style="margin-bottom: 24px; padding: 16px 20px; border-radius: 14px;"
+            [style.background]="isFreeTier() ? 'rgba(245, 158, 11, 0.08)' : 'rgba(16, 185, 129, 0.08)'"
+            [style.border]="isFreeTier() ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(16, 185, 129, 0.35)'"
+          >
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+              <div>
+                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;" [style.color]="isFreeTier() ? '#fbbf24' : '#34d399'">
+                  {{ isFreeTier() ? 'Company Free Trial Active (Restrictions Apply Across All Tenant Members)' : 'Company Paid Plan Active' }}
+                </div>
+                <div style="font-size: 14px; color: #f8fafc; margin-top: 4px;">
+                  <strong>{{ currentPlanDisplayName() }}</strong> • Audit Retention: <strong>{{ auditRetentionDays() }} days</strong> • CSV Audit Export: <strong>{{ canExportAuditCsv() ? 'Unlocked' : 'Locked' }}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="openCompanyBillingModal()"
+                style="padding: 9px 16px; border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.45); background: rgba(139, 92, 246, 0.22); color: #ede9fe; font-size: 13px; font-weight: 700; cursor: pointer;"
+              >
+                {{ isFreeTier() ? '⚡ Upgrade Company Plan via PayMongo' : '⚙️ Manage Company Subscription' }}
+              </button>
             </div>
           </section>
 

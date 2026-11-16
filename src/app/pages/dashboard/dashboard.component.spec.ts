@@ -1567,6 +1567,31 @@ describe('DashboardComponent (Phase 1 & Phase 2)', () => {
 
       expect(reloadSpy).toHaveBeenCalledWith(true);
     });
+
+    it('SCRUM-207: renders 1-tap Approve Sign-In button when number matching is disabled and approves without selectedCode', () => {
+      const respondSpy = vi.spyOn(authService, 'respondPushMfa').mockReturnValue(
+        of({ success: true, message: 'Approved', action: 'approved' })
+      );
+      component.dashboardService.liveSsoChallenge.set({
+        id: 'push_one_tap_207',
+        clientId: 'vanguard-dummy-portal',
+        appName: 'Acme Enterprise Portal',
+        numberMatchingChallenge: { enabled: false, options: [] },
+      });
+      fixture.detectChanges();
+
+      const approveBtn: HTMLButtonElement | null = fixture.nativeElement.querySelector(
+        '[data-testid="sso-approve-one-tap-btn"]'
+      );
+      expect(approveBtn).not.toBeNull();
+
+      approveBtn?.click();
+      expect(respondSpy).toHaveBeenCalledWith({
+        challengeId: 'push_one_tap_207',
+        action: 'approved',
+        selectedCode: undefined,
+      });
+    });
   });
 
   describe('SCRUM-168: One-Time Setup Onboarding Invite', () => {

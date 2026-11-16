@@ -208,6 +208,30 @@
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
+.approve-one-tap-btn {
+  background: #10b981;
+  color: #042f2e;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 12px 24px;
+  border-radius: 10px;
+  border: 2px solid #34d399;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.approve-one-tap-btn:hover:not(:disabled) {
+  background: #34d399;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.approve-one-tap-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .sso-prompt-actions {
   display: flex;
   justify-content: flex-end;

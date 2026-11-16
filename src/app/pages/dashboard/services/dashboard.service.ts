@@ -2967,7 +2967,7 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
     });
   }
 
-  approveLiveSsoChallenge(challengeId: string, selectedCode: number): void {
+  approveLiveSsoChallenge(challengeId: string, selectedCode?: number): void {
     this.isSubmittingSsoApproval.set(true);
     const challenge = this.liveSsoChallenge();
     this.authService.respondPushMfa({
@@ -2981,8 +2981,10 @@ AQUAA4IBDwAwggEKAoIBAQC7V9x6zk10N4+F+qS2V/x8+qY5p9z8N+12908k
         this.ssoApprovalSuccessNotice.set(`✓ Approved sign-in request for ${challenge?.appName || 'application'}!`);
         this.loadAccessRequests(true);
         this.loadCompanyApps();
+        const matchLabel =
+          selectedCode !== undefined ? `(Number match: ${selectedCode})` : '(1-Tap Approval)';
         this.logAuditEvent(
-          `Approved SSO Sign-in Request for ${challenge?.appName || 'application'} (Number match: ${selectedCode})`,
+          `Approved SSO Sign-in Request for ${challenge?.appName || 'application'} ${matchLabel}`,
           'Zero-Trust SSO',
           'Interactive Push Approval',
           'success',

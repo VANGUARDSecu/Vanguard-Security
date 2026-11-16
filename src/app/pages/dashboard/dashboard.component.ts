@@ -169,7 +169,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly isSubmittingSsoApproval = this.dashboardService.isSubmittingSsoApproval;
   readonly ssoApprovalSuccessNotice = this.dashboardService.ssoApprovalSuccessNotice;
 
-  approveLiveSsoChallenge(challengeId: string, selectedCode: number) {
+  approveLiveSsoChallenge(challengeId: string, selectedCode?: number) {
     return this.dashboardService.approveLiveSsoChallenge(challengeId, selectedCode);
   }
 

@@ -69,6 +69,21 @@
                 }
               </div>
             </div>
+          } @else {
+            <div class="sso-number-match-section">
+              <p class="match-instruction">
+                Approve this sign-in request to authorize access to <strong>{{ challenge.appName || 'Client Application' }}</strong>:
+              </p>
+              <button
+                type="button"
+                class="approve-one-tap-btn"
+                data-testid="sso-approve-one-tap-btn"
+                (click)="approveLiveSsoChallenge(challenge.id)"
+                [disabled]="isSubmittingSsoApproval()"
+              >
+                ✓ Approve Sign-In
+              </button>
+            </div>
           }
 
           <div class="sso-prompt-actions">

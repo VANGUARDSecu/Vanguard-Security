@@ -214,4 +214,85 @@ describe('BillingModal Component (SCRUM-184 Isolation)', () => {
     expect(dashboardService.showPaywallModal()).toBe(true);
     expect(dashboardService.totalIntegratedAppsCount()).toBe(1);
   });
+
+  it('SCRUM-209: displays Unsubscribe button inside active paid plans and requires inline confirmation before reverting to Free while preserving $0 Restore', () => {
+    authService.currentUser.set({
+      id: 'usr-indiv-unsub',
+      email: 'pro@personal.me',
+      firstName: 'Pro',
+      lastName: 'User',
+      role: 'user',
+      accountType: 'individual',
+    });
+
+    dashboardService.subscriptionPlanId.set('personal_pro');
+    dashboardService.subscriptionStatus.set('active');
+    dashboardService.currentPeriodEnd.set(
+      new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString(),
+    );
+    dashboardService.openPaywallModal();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    const unsubBtn = compiled.querySelector('[data-testid="btn-unsubscribe-plan"]') as HTMLButtonElement | null;
+    expect(unsubBtn).toBeTruthy();
+    expect(unsubBtn?.textContent).toContain('Unsubscribe');
+    expect(compiled.querySelector('[data-testid="unsubscribe-confirm-panel"]')).toBeNull();
+
+    // Open confirmation panel and test "Keep Plan" abort
+    unsubBtn!.click();
+    fixture.detectChanges();
+    expect(compiled.querySelector('[data-testid="unsubscribe-confirm-panel"]')).toBeTruthy();
+
+    const keepBtn = compiled.querySelector('[data-testid="btn-cancel-unsubscribe"]') as HTMLButtonElement | null;
+    expect(keepBtn).toBeTruthy();
+    keepBtn!.click();
+    fixture.detectChanges();
+    expect(compiled.querySelector('[data-testid="unsubscribe-confirm-panel"]')).toBeNull();
+    expect(dashboardService.subscriptionPlanId()).toBe('personal_pro');
+
+    // Open again and confirm unsubscribe
+    (compiled.querySelector('[data-testid="btn-unsubscribe-plan"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const confirmBtn = compiled.querySelector('[data-testid="btn-confirm-unsubscribe"]') as HTMLButtonElement | null;
+    expect(confirmBtn).toBeTruthy();
+    confirmBtn!.click();
+    fixture.detectChanges();
+
+    expect(dashboardService.subscriptionPlanId()).toBe('free');
+    expect(dashboardService.paidCredit()?.planId).toBe('personal_pro');
+    expect(compiled.textContent).toContain('Restore Personal Pro ($0');
+  });
+
+  it('SCRUM-209: displays Unsubscribe button for Company Admin on active paid organization plan but never for Tenant Employees', () => {
+    authService.currentUser.set({
+      id: 'usr-admin-unsub',
+      email: 'admin@acme.com',
+      firstName: 'Ada',
+      lastName: 'Admin',
+      role: 'admin',
+      accountType: 'company',
+      companyName: 'Acme Corp',
+    });
+    dashboardService.subscriptionPlanId.set('business_pro');
+    dashboardService.subscriptionStatus.set('active');
+    dashboardService.openPaywallModal();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelector('[data-testid="btn-unsubscribe-plan"]')).toBeTruthy();
+
+    // Switch to Tenant Employee -> read-only view, no Unsubscribe CTA
+    authService.currentUser.set({
+      id: 'usr-emp-unsub',
+      email: 'bob@acme.com',
+      firstName: 'Bob',
+      lastName: 'Member',
+      role: 'user',
+      accountType: 'company',
+      companyName: 'Acme Corp',
+    });
+    fixture.detectChanges();
+    expect(compiled.querySelector('[data-testid="btn-unsubscribe-plan"]')).toBeNull();
+  });
 });

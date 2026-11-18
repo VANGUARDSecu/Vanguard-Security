@@ -35,12 +35,14 @@ export class BillingModal {
 
   readonly showGatewayConfigForm = signal<boolean>(false);
   readonly selectedReceiptId = signal<string | null>(null);
+  readonly confirmingUnsubscribePlanId = signal<'personal_pro' | 'business_pro' | 'enterprise' | null>(null);
   gatewayProviderInput = this.dashboardService.sandboxGatewayProvider();
   gatewayUrlInput = this.dashboardService.sandboxGatewayUrl();
   gatewayApiKeyInput = this.dashboardService.sandboxGatewayApiKey();
 
   closeModal(): void {
     this.selectedReceiptId.set(null);
+    this.confirmingUnsubscribePlanId.set(null);
     this.dashboardService.closePaywallModal();
   }
 
@@ -71,7 +73,22 @@ export class BillingModal {
   }
 
   cancelPlan(): void {
+    this.confirmingUnsubscribePlanId.set(null);
     this.dashboardService.cancelSubscriptionPlan();
+  }
+
+  requestUnsubscribe(planId: string): void {
+    if (planId === 'personal_pro' || planId === 'business_pro' || planId === 'enterprise') {
+      this.confirmingUnsubscribePlanId.set(planId);
+    }
+  }
+
+  abortUnsubscribe(): void {
+    this.confirmingUnsubscribePlanId.set(null);
+  }
+
+  confirmUnsubscribe(): void {
+    this.cancelPlan();
   }
 
   refreshTenantPlan(): void {

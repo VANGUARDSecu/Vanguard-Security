@@ -96,8 +96,11 @@
               >
                 Downgrade to Free Starter
               </button>
-              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-pill pill-ind">
-                ✓ Active Plan
+              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-actions">
+                <div class="active-plan-pill pill-ind">
+                  ✓ Active Plan
+                </div>
+                <ng-container *ngTemplateOutlet="unsubscribeControl; context: { plan: plan, revertScope: 'Free tier' }"></ng-container>
               </div>
             </div>
           </div>
@@ -175,8 +178,11 @@
               >
                 Downgrade to Company Free Trial
               </button>
-              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-pill pill-co">
-                ✓ Active Organization Plan
+              <div *ngIf="subscriptionPlanId() === plan.id" class="active-plan-actions">
+                <div class="active-plan-pill pill-co">
+                  ✓ Active Organization Plan
+                </div>
+                <ng-container *ngTemplateOutlet="unsubscribeControl; context: { plan: plan, revertScope: 'Company Free Trial' }"></ng-container>
               </div>
             </div>
           </div>
@@ -313,3 +319,44 @@
     </div>
   </div>
 </div>
+
+<ng-template #unsubscribeControl let-plan="plan" let-revertScope="revertScope">
+  <ng-container *ngIf="plan.id !== 'free'">
+    <button
+      *ngIf="confirmingUnsubscribePlanId() !== plan.id"
+      type="button"
+      class="btn-unsubscribe-plan"
+      data-testid="btn-unsubscribe-plan"
+      (click)="requestUnsubscribe(plan.id)"
+    >
+      Unsubscribe
+    </button>
+    <div
+      *ngIf="confirmingUnsubscribePlanId() === plan.id"
+      class="unsubscribe-confirm-panel"
+      data-testid="unsubscribe-confirm-panel"
+    >
+      <p class="unsubscribe-confirm-copy">
+        Unsubscribe from <strong>{{ plan.name }}</strong>? Limits revert to {{ revertScope }} immediately while $0 Restore stays available until cycle end.
+      </p>
+      <div class="unsubscribe-confirm-actions">
+        <button
+          type="button"
+          class="btn-keep-plan"
+          data-testid="btn-cancel-unsubscribe"
+          (click)="abortUnsubscribe()"
+        >
+          Keep Plan
+        </button>
+        <button
+          type="button"
+          class="btn-confirm-unsubscribe"
+          data-testid="btn-confirm-unsubscribe"
+          (click)="confirmUnsubscribe()"
+        >
+          Confirm Unsubscribe
+        </button>
+      </div>
+    </div>
+  </ng-container>
+</ng-template>
